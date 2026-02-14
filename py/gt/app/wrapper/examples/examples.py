@@ -193,7 +193,7 @@ def example_working_directory():
     print("WORKING DIRECTORY EXAMPLE")
     print("=" * 60)
     
-    temp_dir = Path.cwd() / "temp"
+    temp_dir = Path(__file__).parent.parent / "test_package" / "temp"
     temp_dir.mkdir(exist_ok=True)
     
     config = WrapperConfig(
@@ -220,7 +220,7 @@ def example_env_from_files():
     import json
     
     # Create temporary environment files
-    temp_dir = Path.cwd() / "temp"
+    temp_dir = Path(__file__).parent.parent / "test_package" / "temp"
     temp_dir.mkdir(exist_ok=True)
     
     # Base environment
@@ -281,7 +281,7 @@ def example_list_paths():
     import json
     
     # Create temporary environment file
-    temp_dir = Path.cwd() / "temp"
+    temp_dir = Path(__file__).parent.parent / "test_package" / "temp"
     temp_dir.mkdir(exist_ok=True)
     
     # Define paths as lists using Unix format (/)
@@ -365,7 +365,7 @@ def example_env_append_prepend():
     import json
     
     # Create temporary environment files
-    temp_dir = Path.cwd() / "temp"
+    temp_dir = Path(__file__).parent.parent / "test_package" / "temp"
     temp_dir.mkdir(exist_ok=True)
     
     # Set a base PYTHONPATH for demonstration
@@ -454,6 +454,87 @@ print(f"NEW_VAR: {os.environ.get('NEW_VAR')}")
     prepend_op_file.unlink()
     print()
 
+def example_special_variables():
+    """Example using special wrapper variables like {$__PACKAGE__}."""
+    print("=" * 60)
+    print("SPECIAL WRAPPER VARIABLES EXAMPLE")
+    print("=" * 60)
+    
+    import json
+    
+    # Create a package structure with env directory
+    temp_dir = Path(__file__).parent.parent / "test_package" / "temp"
+    temp_dir.mkdir(exist_ok=True)
+    
+    # Create package directory structure
+    package_dir = temp_dir / "my_package"
+    package_dir.mkdir(exist_ok=True)
+    env_dir = package_dir / "env"
+    env_dir.mkdir(exist_ok=True)
+    
+    # Create environment file using special variables
+    env_config = {
+        "+=PYTHONPATH": [
+            "{$__PACKAGE__}/py",
+            "{$__PACKAGE__}/lib/python"
+        ],
+        "+=PATH": "{$__PACKAGE__}/bin",
+        "APP_ROOT": "{$__PACKAGE__}",
+        "APP_NAME": "{$__PACKAGE_NAME__}",
+        "CONFIG_FILE": "{$__PACKAGE__}/config/app.conf",
+        "ENV_FILE_PATH": "{$__FILE__}"
+    }
+    
+    env_file = env_dir / "config.json"
+    with open(env_file, 'w') as f:
+        json.dump(env_config, f, indent=2)
+    
+    config = WrapperConfig(
+        executable="python",
+        args=["-c", """
+import os
+import sys
+print("Special wrapper variables resolved:")
+print()
+print(f"APP_ROOT: {os.environ.get('APP_ROOT')}")
+print(f"APP_NAME: {os.environ.get('APP_NAME')}")
+print(f"CONFIG_FILE: {os.environ.get('CONFIG_FILE')}")
+print()
+print("PYTHONPATH additions:")
+pythonpath = os.environ.get('PYTHONPATH', '')
+for p in pythonpath.split(';' if sys.platform == 'win32' else ':'):
+    if 'my_package' in p and p:
+        print(f"  - {p}")
+print()
+print(f"ENV_FILE_PATH: {os.environ.get('ENV_FILE_PATH')}")
+"""],
+        env_files=env_file,
+        capture_output=True,
+        stream_output=False,
+        inherit_env=False
+    )
+    
+    wrapper = ApplicationWrapper(config)
+    result = wrapper.run()
+    
+    print("Special variables available:")
+    print("  {$__PACKAGE__}      - Package root (parent of env/)")
+    print("  {$__PACKAGE_ENV__}  - The env/ directory")
+    print("  {$__PACKAGE_NAME__} - Package directory name")
+    print("  {$__FILE__}         - Current env file path")
+    print()
+    print(f"Output:\n{result.stdout}")
+    
+    print("Benefits:")
+    print("  ✓ Portable across different installations")
+    print("  ✓ No hard-coded paths")
+    print("  ✓ Works with version control")
+    print()
+    
+    # Cleanup
+    import shutil
+    shutil.rmtree(package_dir)
+    print()
 
 def example_real_world_scenario():
     """Real-world scenario: Running a build process."""
@@ -533,6 +614,7 @@ if __name__ == "__main__":
         example_env_from_files,
         example_list_paths,
         example_env_append_prepend,
+        example_special_variables,
         example_error_handling,
         example_with_timeout,
         example_real_world_scenario

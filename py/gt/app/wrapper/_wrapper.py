@@ -1,20 +1,17 @@
 """Core application wrapper implementation."""
 
-import os
-import sys
 import subprocess
 import logging
 import signal
 import time
-import shutil
-import json
-import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 from contextlib import contextmanager
 
-from ._exceptions import WrapperError, PreRunError, PostRunError, ExecutionError
+from ._exceptions import PreRunError, PostRunError, ExecutionError
 from ._models import ExecutionResult, WrapperConfig
+from ._environment import EnvironmentManager
+from ._executor import ProcessExecutor
 
 
 log = logging.getLogger(__name__)
@@ -48,6 +45,14 @@ class ApplicationWrapper:
         self._interrupted = False
         self._original_sigint_handler = None
         
+        # Initialize managers
+        self._env_manager = EnvironmentManager(inherit_env=config.inherit_env)
+        self._executor = ProcessExecutor(
+            stream_output=config.stream_output,
+            on_output=config.on_output,
+            on_error=config.on_error
+        )
+        
         # Setup logging
         if config.log_execution:
             self._setup_logging()
@@ -65,244 +70,6 @@ class ApplicationWrapper:
             log.addHandler(handler)
         log.setLevel(self.config.log_level)
     
-    def _resolve_executable(self) -> str:
-        """Resolve executable path, checking PATH if necessary.
-        
-        Returns:
-            Absolute path to executable
-            
-        Raises:
-            WrapperError: If executable cannot be found
-            
-        """
-        exe = str(self.config.executable)
-        
-        # If it's an absolute path or relative path with directory separators
-        if os.path.isabs(exe) or os.path.dirname(exe):
-            if not os.path.exists(exe):
-                raise WrapperError(f"Executable not found: {exe}")
-            return os.path.abspath(exe)
-        
-        # Search in PATH
-        found = shutil.which(exe)
-        if found:
-            return found
-        
-        raise WrapperError(f"Executable '{exe}' not found in PATH")
-    
-    def _expand_env_value(self, value: str, current_env: dict[str, str]) -> str:
-        """Expand environment variable references in a value string.
-        
-        Supports {$VARNAME} syntax to reference existing environment variables.
-        Looks up variables in current_env first, then os.environ.
-        
-        Args:
-            value: String potentially containing {$VARNAME} references
-            current_env: Current environment dictionary being built
-            
-        Returns:
-            Expanded string value
-            
-        """
-        # Pattern to match {$VARNAME}
-        pattern = re.compile(r'\{\$([A-Za-z_][A-Za-z0-9_]*)\}')
-        
-        def replacer(match):
-            var_name = match.group(1)
-            # Check current_env first, then os.environ
-            if var_name in current_env:
-                return current_env[var_name]
-            return os.environ.get(var_name, '')
-        
-        return pattern.sub(replacer, value)
-    
-    def _normalize_path(self, path: str) -> str:
-        """Normalize Unix-style paths to OS-specific format.
-        
-        Converts forward slashes to backslashes on Windows.
-        Leaves paths unchanged on Unix systems.
-        
-        Args:
-            path: Path string (can use Unix-style forward slashes)
-            
-        Returns:
-            Normalized path for the current OS
-            
-        """
-        if os.name == 'nt':
-            # On Windows, convert forward slashes to backslashes
-            return path.replace('/', '\\')
-        return path
-    
-    def _process_env_value(self, value: Any, merged_env: dict[str, str]) -> str:
-        """Process an environment variable value from JSON.
-        
-        Handles:
-        - Lists: joined with OS path separator
-        - Strings: used as-is
-        - Other types: converted to string
-        - {$VARNAME} expansion
-        - Path normalization (Unix to Windows if needed)
-        
-        Args:
-            value: The value from JSON (string, list, or other)
-            merged_env: Current environment dictionary for variable expansion
-            
-        Returns:
-            Processed string value
-            
-        """
-        # Determine path separator based on OS
-        path_sep = ';' if os.name == 'nt' else ':'
-        
-        # Handle list values - join with path separator
-        if isinstance(value, list):
-            # Normalize each path in the list
-            normalized_paths = [self._normalize_path(str(item)) for item in value]
-            str_value = path_sep.join(normalized_paths)
-        else:
-            # Convert to string and normalize
-            str_value = self._normalize_path(str(value))
-        
-        # Expand any {$VARNAME} references
-        expanded_value = self._expand_env_value(str_value, merged_env)
-        
-        return expanded_value
-    
-    def _load_env_from_files(self) -> dict[str, str]:
-        """Load environment variables from JSON file(s).
-        
-        Files are merged in order, with later files overriding earlier ones.
-        Supports variable expansion, append/prepend operators, and path lists.
-        
-        Examples in JSON:
-            List:     "PYTHONPATH": ["R:/path1", "R:/path2", "R:/path3"]
-            Append:   "+=PYTHONPATH": ["R:/new/path"]
-            Prepend:  "^=PYTHONPATH": "R:/new/path"
-            Replace:  "PYTHONPATH": "R:/new/path"
-            Variable: "PYTHONPATH": "{$PYTHONPATH};R:/new/path"
-        
-        Paths can use Unix-style forward slashes, automatically converted on Windows.
-        
-        Returns:
-            Dictionary of environment variables from files
-            
-        Raises:
-            WrapperError: If file cannot be read or parsed
-            
-        """
-        if not self.config.env_files:
-            return {}
-        
-        # Normalize to list
-        env_files = self.config.env_files
-        if isinstance(env_files, (str, Path)):
-            env_files = [env_files]
-        
-        # Determine path separator based on OS
-        path_sep = ';' if os.name == 'nt' else ':'
-        
-        merged_env = {}
-        
-        for file_path in env_files:
-            path = Path(file_path)
-            
-            if not path.exists():
-                raise WrapperError(f"Environment file not found: {path}")
-            
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    file_env = json.load(f)
-                
-                if not isinstance(file_env, dict):
-                    raise WrapperError(
-                        f"Environment file must contain a JSON object: {path}"
-                    )
-                
-                # Process each key-value pair
-                for key, value in file_env.items():
-                    # Check for operators
-                    append_mode = False
-                    prepend_mode = False
-                    var_name = key
-                    
-                    if key.startswith('+='):
-                        append_mode = True
-                        var_name = key[2:]  # Remove += prefix
-                    elif key.startswith('^='):
-                        prepend_mode = True
-                        var_name = key[2:]  # Remove ^= prefix
-                    
-                    # Process the value (handles lists, normalization, expansion)
-                    processed_value = self._process_env_value(value, merged_env)
-                    
-                    # Handle append/prepend operations
-                    if append_mode or prepend_mode:
-                        # Get current value from merged_env or os.environ
-                        current_value = merged_env.get(var_name) or os.environ.get(var_name, '')
-                        
-                        if append_mode:
-                            # Append: current + separator + new
-                            if current_value:
-                                merged_env[var_name] = f"{current_value}{path_sep}{processed_value}"
-                            else:
-                                merged_env[var_name] = processed_value
-                        else:  # prepend_mode
-                            # Prepend: new + separator + current
-                            if current_value:
-                                merged_env[var_name] = f"{processed_value}{path_sep}{current_value}"
-                            else:
-                                merged_env[var_name] = processed_value
-                    else:
-                        # Normal assignment - just set the value
-                        merged_env[var_name] = processed_value
-                
-                log.info(f"Loaded {len(file_env)} environment variables from {path}")
-                
-            except json.JSONDecodeError as e:
-                raise WrapperError(f"Invalid JSON in environment file {path}: {e}") from e
-            except Exception as e:
-                raise WrapperError(f"Error reading environment file {path}: {e}") from e
-        
-        return merged_env
-    
-    def _prepare_environment(self) -> dict[str, str]:
-        """Prepare environment variables for subprocess.
-        
-        Priority (later overrides earlier):
-        1. System environment (if inherit_env=True)
-        2. Environment from JSON files (env_files)
-        3. Explicit environment dict (env)
-        
-        Returns:
-            Dictionary of environment variables
-            
-        """
-        if self.config.inherit_env:
-            env = os.environ.copy()
-        else:
-            env = {}
-        
-        # Load from files (overrides inherited env)
-        file_env = self._load_env_from_files()
-        env.update(file_env)
-        
-        # Explicit env dict overrides everything
-        if self.config.env:
-            env.update(self.config.env)
-        
-        return env
-    
-    def _prepare_command(self) -> list[str]:
-        """Prepare the full command to execute.
-        
-        Returns:
-            List of command components
-            
-        """
-        exe = self._resolve_executable()
-        return [exe] + list(self.config.args)
-    
     def _handle_signal(self, signum, frame):
         """Handle interrupt signals.
         
@@ -310,27 +77,7 @@ class ApplicationWrapper:
         log.warning(f"Received signal {signum}, terminating process...")
         self._interrupted = True
         if self._process:
-            self._terminate_process()
-    
-    def _terminate_process(self):
-        """Terminate the running process gracefully.
-        
-        """
-        if not self._process:
-            return
-        
-        try:
-            # Try graceful termination first
-            self._process.terminate()
-            try:
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                # Force kill if termination takes too long
-                log.warning("Process did not terminate gracefully, forcing kill...")
-                self._process.kill()
-                self._process.wait()
-        except Exception as e:
-            log.error(f"Error terminating process: {e}")
+            self._executor.terminate_process(self._process)
     
     @contextmanager
     def _signal_handler_context(self):
@@ -375,55 +122,6 @@ class ApplicationWrapper:
             if not self.config.continue_on_post_run_error:
                 raise PostRunError(f"Post-run operation failed: {e}") from e
     
-    def _stream_output(self, process: subprocess.Popen) -> tuple[str, str]:
-        """Stream output from process in real-time.
-        
-        Args:
-            process: Running subprocess
-            
-        Returns:
-            Tuple of (stdout, stderr) as strings
-            
-        """
-        stdout_lines = []
-        stderr_lines = []
-        
-        # Read stdout
-        if process.stdout:
-            for line in iter(process.stdout.readline, b''):
-                if not line:
-                    break
-                decoded = line.decode('utf-8', errors='replace').rstrip()
-                stdout_lines.append(decoded)
-                
-                if self.config.stream_output:
-                    print(decoded, file=sys.stdout, flush=True)
-                
-                if self.config.on_output:
-                    try:
-                        self.config.on_output(decoded)
-                    except Exception as e:
-                        log.warning(f"on_output callback error: {e}")
-        
-        # Read stderr
-        if process.stderr:
-            for line in iter(process.stderr.readline, b''):
-                if not line:
-                    break
-                decoded = line.decode('utf-8', errors='replace').rstrip()
-                stderr_lines.append(decoded)
-                
-                if self.config.stream_output:
-                    print(decoded, file=sys.stderr, flush=True)
-                
-                if self.config.on_error:
-                    try:
-                        self.config.on_error(decoded)
-                    except Exception as e:
-                        log.warning(f"on_error callback error: {e}")
-        
-        return '\n'.join(stdout_lines), '\n'.join(stderr_lines)
-    
     def run(self) -> ExecutionResult:
         """Execute the application with configured settings.
         
@@ -445,8 +143,14 @@ class ApplicationWrapper:
             self._execute_pre_run()
             
             # Prepare execution
-            command = self._prepare_command()
-            env = self._prepare_environment()
+            command = self._executor.prepare_command(
+                self.config.executable, 
+                self.config.args
+            )
+            env = self._env_manager.prepare_environment(
+                env_files=self.config.env_files,
+                env=self.config.env
+            )
             cwd = str(self.config.cwd) if self.config.cwd else None
             
             result.command = command
@@ -483,13 +187,13 @@ class ApplicationWrapper:
                 # Handle output
                 if self.config.capture_output or self.config.stream_output:
                     try:
-                        stdout, stderr = self._stream_output(self._process)
+                        stdout, stderr = self._executor.stream_process_output(self._process)
                         result.stdout = stdout if stdout else None
                         result.stderr = stderr if stderr else None
                         return_code = self._process.wait(timeout=self.config.timeout)
                     except subprocess.TimeoutExpired:
                         log.error(f"Process timed out after {self.config.timeout}s")
-                        self._terminate_process()
+                        self._executor.terminate_process(self._process)
                         result.timed_out = True
                         return_code = -1
                 else:
@@ -497,7 +201,7 @@ class ApplicationWrapper:
                         return_code = self._process.wait(timeout=self.config.timeout)
                     except subprocess.TimeoutExpired:
                         log.error(f"Process timed out after {self.config.timeout}s")
-                        self._terminate_process()
+                        self._executor.terminate_process(self._process)
                         result.timed_out = True
                         return_code = -1
                 
@@ -558,7 +262,7 @@ class ApplicationWrapper:
         
         """
         if self._process:
-            self._terminate_process()
+            self._executor.terminate_process(self._process)
 
 
 def create_wrapper(

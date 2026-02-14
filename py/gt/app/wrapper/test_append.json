@@ -1,4 +1,0 @@
-{
-  "TEST_VAR": "{$TEST_VAR};appended_value",
-  "NEW_VAR": "test_value"
-}

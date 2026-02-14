@@ -1,6 +1,0 @@
-{
-  "PYTHONPATH": "R:/repo/gtvfx-contrib/gt/app/wrapper/py;R:/repo/gtvfx-contrib/gt/unreal/wrapper/py;{$PYTHONPATH}",
-  "PATH": "R:/repo/tools/bin;{$PATH}",
-  "APP_NAME": "MyApplication",
-  "DEBUG": "true"
-}

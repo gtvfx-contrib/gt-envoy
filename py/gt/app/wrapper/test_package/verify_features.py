@@ -1,7 +1,12 @@
 """Quick verification of all features."""
+import sys
 import os
 import json
 from pathlib import Path
+
+# Add the module to path for testing
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
+
 from gt.app.wrapper import WrapperConfig, ApplicationWrapper
 
 # Create test file
@@ -16,7 +21,7 @@ test_env = {
     "^=TEST_PREPEND": "D:/priority"
 }
 
-temp_dir = Path.cwd() / "temp"
+temp_dir = Path(__file__).parent / "temp"
 temp_dir.mkdir(exist_ok=True)
 test_file = temp_dir / "verify.json"
 
