@@ -1,326 +1,355 @@
-# Application Wrapper
+# Envoy
 
-A sophisticated Python module for wrapping application execution with pre/post operations, environment management, and comprehensive process control.
+**Environment orchestration for applications** — A CLI-first tool for managing complex application environments with JSON-based configuration and multi-package support.
 
-## Features
+## Overview
 
-### Core Capabilities
-- ✅ **Pre/Post Run Operations** - Execute setup and teardown code
-- ✅ **Environment Management** - Full control over environment variables
-- ✅ **Output Handling** - Capture, stream, or suppress stdout/stderr
-- ✅ **Timeout Support** - Automatic process termination after timeout
-- ✅ **Return Code Handling** - Capture and propagate exit codes
-- ✅ **Signal Handling** - Graceful cleanup on interrupts (Ctrl+C)
-- ✅ **Working Directory** - Set custom working directory for subprocess
-- ✅ **Path Resolution** - Automatic executable lookup in PATH
+Envoy simplifies the execution of applications that require specific environment setups. Define your commands once in JSON, specify environment variables and paths, and run them anywhere with a simple CLI interface.
 
-### Advanced Features
-- ✅ **Context Manager** - Clean resource management with `with` statement
-- ✅ **Event Callbacks** - Multiple hooks (on_start, on_output, on_error)
-- ✅ **Process Information** - Access PID, execution time, command details
-- ✅ **Comprehensive Logging** - Built-in logging with configurable levels
-- ✅ **Error Control** - Fine-grained error handling options
-- ✅ **Platform Support** - Windows and Unix compatibility
+### Key Features
 
-## Installation
-
-The module is part of the `gt.app.wrapper` namespace package.
-
-```python
-from gt.app.wrapper import ApplicationWrapper, WrapperConfig, create_wrapper
-```
+- 🚀 **CLI-First Design** - Simple command-line interface for running applications
+- 📦 **Multi-Package Support** - Aggregate commands from multiple Git repositories
+- 🔧 **Environment Management** - JSON-based environment variable configuration
+- 🔍 **Auto-Discovery** - Automatic package detection via `ENVOY_PKG_ROOTS`
+- 🎯 **Command Aliases** - Map friendly names to complex command invocations
+- 🔗 **Path Normalization** - Automatic Unix-style path handling across platforms
+- 📝 **Special Variables** - Built-in package-relative path variables
+- 🐛 **Debug Mode** - Verbose logging with `--verbose` flag
 
 ## Quick Start
 
+### Installation
+
+1. Clone the repository:
+```bash
+git clone <repo-url> envoy
+```
+
+2. Add the `bin` directory to your PATH, or use the full path to `envoy.bat`:
+```bash
+# Windows
+set PATH=%PATH%;C:\path\to\envoy\bin
+
+# Or use directly
+C:\path\to\envoy\bin\envoy.bat --help
+```
+
 ### Basic Usage
 
-```python
-from gt.app.wrapper import WrapperConfig, ApplicationWrapper
+```bash
+# List all available commands
+envoy --list
 
-config = WrapperConfig(
-    executable="python",
-    args=["script.py", "--verbose"],
-    capture_output=True
-)
+# Show detailed information about a command
+envoy --info python_dev
 
-wrapper = ApplicationWrapper(config)
-result = wrapper.run()
+# Show where a command's executable is located
+envoy --which python_dev
 
-print(f"Return code: {result.return_code}")
-print(f"Output: {result.stdout}")
+# Run a command
+envoy python_dev script.py --arg value
+
+# Enable verbose logging
+envoy --verbose python_dev script.py
 ```
 
-### Using the Convenience Function
+## Core Concepts
 
-```python
-from gt.app.wrapper import create_wrapper
+### 1. Packages
 
-wrapper = create_wrapper(
-    "python",
-    "script.py",
-    "--verbose",
-    timeout=60,
-    capture_output=True
-)
+A **package** is a Git repository containing an `envoy_env/` directory. Each package can define:
+- Commands in `envoy_env/commands.json`
+- Environment files (JSON) in `envoy_env/`
 
-result = wrapper.run()
+Example package structure:
+```
+my-app/
+├── .git/
+├── envoy_env/
+│   ├── commands.json
+│   ├── base_env.json
+│   └── dev_env.json
+└── src/
 ```
 
-### With Pre/Post Operations
+### 2. Commands
 
-```python
-from gt.app.wrapper import WrapperConfig, ApplicationWrapper
+Commands are defined in `envoy_env/commands.json`:
 
-def setup():
-    print("Setting up environment...")
-    # Perform pre-execution tasks
-
-def cleanup(result):
-    print(f"Cleaning up... Exit code: {result.return_code}")
-    # Perform post-execution tasks
-
-config = WrapperConfig(
-    executable="myapp",
-    args=["--input", "data.txt"],
-    pre_run=setup,
-    post_run=cleanup,
-    env={"MY_VAR": "value"}
-)
-
-wrapper = ApplicationWrapper(config)
-result = wrapper.run()
+```json
+{
+  "python_dev": {
+    "environment": ["base_env.json", "dev_env.json"],
+    "alias": ["python", "-X", "dev"]
+  },
+  "build": {
+    "environment": ["build_env.json"]
+  }
+}
 ```
 
-## Configuration
+- **environment**: List of environment JSON files to load (relative to `envoy_env/`)
+- **alias** (optional): Command to execute. If omitted, uses the command name as executable
 
-### WrapperConfig Parameters
+### 3. Environment Files
 
-#### Core Settings
-- **executable** (str | Path) - Path to executable or command name
-- **args** (List[str]) - Command-line arguments
+Environment files define variable modifications using JSON:
 
-#### Environment
-- **env** (Dict[str, str] | None) - Environment variables to add/update
-- **inherit_env** (bool) - Inherit parent process environment (default: True)
-
-#### Working Directory
-- **cwd** (str | Path | None) - Working directory for subprocess
-
-#### Output Handling
-- **capture_output** (bool) - Capture stdout/stderr (default: False)
-- **stream_output** (bool) - Stream output in real-time (default: True)
-
-#### Execution Control
-- **timeout** (float | None) - Timeout in seconds (None = no timeout)
-- **shell** (bool) - Run through shell (default: False)
-
-#### Callbacks
-- **pre_run** (Callable[[], None]) - Called before execution
-- **post_run** (Callable[[ExecutionResult], None]) - Called after execution
-- **on_start** (Callable[[int], None]) - Called when process starts (receives PID)
-- **on_output** (Callable[[str], None]) - Called for each stdout line
-- **on_error** (Callable[[str], None]) - Called for each stderr line
-
-#### Error Handling
-- **raise_on_error** (bool) - Raise exception on non-zero exit (default: True)
-- **continue_on_pre_run_error** (bool) - Continue if pre_run fails (default: False)
-- **continue_on_post_run_error** (bool) - Continue if post_run fails (default: True)
-
-#### Logging
-- **log_execution** (bool) - Enable logging (default: True)
-- **log_level** (int) - Logging level (default: logging.INFO)
-
-## ExecutionResult
-
-The `run()` method returns an `ExecutionResult` object with:
-
-- **return_code** (int) - Process exit code
-- **stdout** (str | None) - Captured stdout (if capture_output=True)
-- **stderr** (str | None) - Captured stderr (if capture_output=True)
-- **execution_time** (float) - Execution duration in seconds
-- **pid** (int | None) - Process ID
-- **command** (List[str]) - Full command that was executed
-- **timed_out** (bool) - Whether process was terminated due to timeout
-- **success** (bool) - Property: True if return_code==0 and not timed_out
-
-## Examples
-
-### Environment Variables
-
-```python
-config = WrapperConfig(
-    executable="python",
-    args=["script.py"],
-    env={
-        "API_KEY": "secret",
-        "DEBUG": "1"
-    }
-)
+```json
+{
+  "PYTHONPATH": "+=PATH:{$__PACKAGE__}/src",
+  "MY_APP_ROOT": "{$__PACKAGE__}",
+  "DEBUG": "1"
+}
 ```
 
-### Timeout Handling
+**Variable Operators:**
+- `"VAR": "value"` — Replace/set variable
+- `"+=PATH:VAR": "value"` — Prepend to path variable (OS-appropriate separator)
+- `"+=PATHLIST:VAR": "value"` — Prepend to path list (semicolon-separated)
+- `"+=VAR": "value"` — Append to variable
 
-```python
-config = WrapperConfig(
-    executable="long_running_task",
-    timeout=30.0,  # Kill after 30 seconds
-    raise_on_error=False  # Don't raise exception on timeout
-)
+**Special Variables:**
+- `{$__PACKAGE__}` — Package root directory (parent of `envoy_env/`)
+- `{$__PACKAGE_ENV__}` — The `envoy_env/` directory
+- `{$__PACKAGE_NAME__}` — Package directory name
+- `{$__FILE__}` — Current environment JSON file path
+- `{$VARNAME}` — Reference existing environment variables
 
-wrapper = ApplicationWrapper(config)
-result = wrapper.run()
+See [ENV_FILES_README.md](py/gt/envoy/examples/envoy_env/ENV_FILES_README.md) for detailed documentation.
 
-if result.timed_out:
-    print("Task exceeded time limit")
-```
+## Package Discovery
 
-### Event Callbacks
+Envoy discovers packages in two ways:
 
-```python
-def on_start(pid):
-    print(f"Process {pid} started")
+### Auto-Discovery (Recommended)
 
-def on_output(line):
-    if "ERROR" in line:
-        # Handle error lines differently
-        log_error(line)
-
-config = WrapperConfig(
-    executable="build.sh",
-    on_start=on_start,
-    on_output=on_output,
-    stream_output=False  # Use callbacks instead
-)
-```
-
-### Context Manager
-
-```python
-config = WrapperConfig(executable="server", args=["--port", "8080"])
-
-with ApplicationWrapper(config) as wrapper:
-    result = wrapper.run()
-    # Automatic cleanup on exit
-```
-
-### Working Directory
-
-```python
-from pathlib import Path
-
-config = WrapperConfig(
-    executable="make",
-    args=["build"],
-    cwd=Path("/path/to/project")
-)
-```
-
-### Custom Error Handling
-
-```python
-def safe_cleanup(result):
-    try:
-        # Cleanup operations that might fail
-        cleanup_temp_files()
-    except Exception as e:
-        print(f"Cleanup warning: {e}")
-
-config = WrapperConfig(
-    executable="risky_app",
-    post_run=safe_cleanup,
-    continue_on_post_run_error=True,  # Don't fail if cleanup fails
-    raise_on_error=False  # Handle errors manually
-)
-
-wrapper = ApplicationWrapper(config)
-result = wrapper.run()
-
-if not result.success:
-    # Custom error handling
-    send_alert(f"App failed: {result.return_code}")
-```
-
-## Exception Handling
-
-The module defines specific exceptions:
-
-- **WrapperError** - Base exception
-- **PreRunError** - Error during pre_run operation
-- **PostRunError** - Error during post_run operation
-- **ExecutionError** - Error during process execution
-
-```python
-from gt.app.wrapper import ExecutionError, PreRunError
-
-try:
-    result = wrapper.run()
-except PreRunError as e:
-    print(f"Setup failed: {e}")
-except ExecutionError as e:
-    print(f"Execution failed: {e}")
-```
-
-## Real-World Example: Build System
-
-```python
-import time
-from gt.app.wrapper import WrapperConfig, ApplicationWrapper
-
-def pre_build():
-    print("🔨 Preparing build environment...")
-    clean_artifacts()
-    validate_dependencies()
-
-def post_build(result):
-    if result.success:
-        print("✅ Build successful!")
-        archive_artifacts()
-        run_tests()
-    else:
-        print(f"❌ Build failed: {result.return_code}")
-        notify_team(result)
-
-def on_output(line):
-    # Highlight errors and warnings
-    if "error" in line.lower():
-        print(f"❌ {line}")
-    elif "warning" in line.lower():
-        print(f"⚠️  {line}")
-
-config = WrapperConfig(
-    executable="cmake",
-    args=["--build", ".", "--config", "Release"],
-    cwd="/path/to/project/build",
-    env={"CMAKE_BUILD_TYPE": "Release"},
-    pre_run=pre_build,
-    post_run=post_build,
-    on_output=on_output,
-    timeout=1800,  # 30 minutes
-    raise_on_error=True
-)
-
-wrapper = ApplicationWrapper(config)
-result = wrapper.run()
-```
-
-## Best Practices
-
-1. **Use pre_run for validation** - Check prerequisites before execution
-2. **Set appropriate timeouts** - Prevent infinite hangs
-3. **Handle cleanup in post_run** - Always clean up resources
-4. **Use callbacks for real-time monitoring** - Process output as it happens
-5. **Enable logging for debugging** - Helps troubleshoot issues
-6. **Set raise_on_error appropriately** - Decide error handling strategy
-7. **Use context managers** - Ensure cleanup even on exceptions
-
-## Testing
-
-Run the included examples:
+Set the `ENVOY_PKG_ROOTS` environment variable to semicolon-separated root directories:
 
 ```bash
-python examples.py
+# Windows
+set ENVOY_PKG_ROOTS=R:/repo/packages;C:/tools
+
+# PowerShell
+$env:ENVOY_PKG_ROOTS="R:/repo/packages;C:/tools"
+
+# Unix/Linux
+export ENVOY_PKG_ROOTS=/repo/packages:/tools
 ```
 
-## License
+Envoy will:
+1. Search for Git repositories under each root
+2. Validate each has an `envoy_env/` directory
+3. Load commands from `envoy_env/commands.json`
 
-Part of the GT Tools collection.
+### Config File (Alternative)
+
+Create a `packages.json` file:
+
+```json
+{
+  "packages": [
+    {
+      "root": "R:/repo/my-app",
+      "name": "my-app"
+    },
+    {
+      "root": "C:/tools/build-tools",
+      "name": "build-tools"
+    }
+  ]
+}
+```
+
+Use with:
+```bash
+envoy --packages-config packages.json --list
+```
+
+See [PACKAGE_DISCOVERY.md](py/gt/envoy/PACKAGE_DISCOVERY.md) for detailed information.
+
+## Real-World Examples
+
+### Example 1: Python Development Environment
+
+**envoy_env/commands.json:**
+```json
+{
+  "python_dev": {
+    "environment": ["python_env.json"],
+    "alias": ["python", "-X", "dev"]
+  }
+}
+```
+
+**envoy_env/python_env.json:**
+```json
+{
+  "PYTHONPATH": "+=PATH:{$__PACKAGE__}/src",
+  "PYTHONDONTWRITEBYTECODE": "1",
+  "PYTHONUTF8": "1"
+}
+```
+
+**Usage:**
+```bash
+envoy python_dev script.py
+```
+
+### Example 2: Unreal Engine Tools
+
+**envoy_env/commands.json:**
+```json
+{
+  "unreal": {
+    "environment": ["unreal_env.json"]
+  }
+}
+```
+
+**envoy_env/unreal_env.json:**
+```json
+{
+  "UE_ROOT": "{$__PACKAGE__}/UnrealEngine",
+  "PATH": "+=PATH:{$UE_ROOT}/Engine/Binaries/Win64"
+}
+```
+
+**Usage:**
+```bash
+envoy unreal -project MyGame.uproject
+```
+
+### Example 3: Multi-Package Build System
+
+With `ENVOY_PKG_ROOTS=R:/repo` containing:
+- `R:/repo/build-tools/envoy_env/commands.json` — Defines `build`, `test`
+- `R:/repo/deploy-tools/envoy_env/commands.json` — Defines `deploy`, `package`
+
+```bash
+# List all commands from both packages
+envoy --list
+
+# Available commands:
+#   build    [build-tools]
+#   test     [build-tools]
+#   deploy   [deploy-tools]
+#   package  [deploy-tools]
+
+# Run command from any package
+envoy build --target Release
+envoy deploy --env production
+```
+
+## CLI Reference
+
+```
+usage: envoy [-h] [--list] [--info COMMAND] [--which COMMAND]
+             [--commands-file COMMANDS_FILE]
+             [--packages-config PACKAGES_CONFIG] [--verbose]
+             [command] [args ...]
+
+Options:
+  -h, --help            Show help message
+  --list                List all available commands
+  --info COMMAND        Show detailed information about a command
+  --which COMMAND       Show the resolved executable path for a command
+  --commands-file PATH  Path to commands.json (auto-detected by default)
+  --packages-config PATH
+                        Path to packages config file
+  --verbose, -v         Enable verbose logging
+
+Arguments:
+  command               Command to execute
+  args                  Arguments to pass to the command
+```
+
+See [CLI_USAGE.md](examples/CLI_USAGE.md) for detailed CLI documentation.
+
+## Advanced Topics
+
+### Command Conflicts
+
+When multiple packages define the same command name, the last discovered package wins. Use `--verbose` to see conflict warnings:
+
+```bash
+envoy --verbose --list
+# WARNING: Command 'build' from package-b overrides existing command from package-a
+```
+
+### Environment File Chaining
+
+Environment files are loaded in order, with later files able to reference earlier variables:
+
+```json
+// base_env.json
+{
+  "APP_ROOT": "{$__PACKAGE__}"
+}
+
+// dev_env.json
+{
+  "APP_CONFIG": "{$APP_ROOT}/config/dev.json",
+  "LOG_LEVEL": "DEBUG"
+}
+```
+
+### Local Fallback
+
+If no packages are discovered, Envoy searches for `envoy_env/commands.json` in the current directory and parent directories, allowing per-project command definitions.
+
+## Project Structure
+
+```
+envoy/
+├── bin/
+│   └── envoy.bat              # CLI entry point
+├── py/
+│   └── gt/
+│       └── envoy/
+│           ├── __main__.py     # Module entry point
+│           ├── _cli.py         # CLI implementation
+│           ├── _commands.py    # Command registry
+│           ├── _discovery.py   # Package discovery
+│           ├── _environment.py # Environment processing
+│           ├── _wrapper.py     # Application wrapper
+│           └── examples/
+│               └── envoy_env/  # Example configurations
+├── examples/
+│   ├── CLI_USAGE.md
+│   ├── packages.json           # Example package config
+│   └── python_dev.bat          # Example wrapper script
+└── README.md                   # This file
+```
+
+## Documentation
+
+- **[CLI_USAGE.md](examples/CLI_USAGE.md)** — Detailed CLI usage guide
+- **[PACKAGE_DISCOVERY.md](py/gt/envoy/PACKAGE_DISCOVERY.md)** — Package discovery system
+- **[ENV_FILES_README.md](py/gt/envoy/examples/envoy_env/ENV_FILES_README.md)** — Environment file format
+- **[CLI_IMPLEMENTATION_SUMMARY.md](py/gt/envoy/CLI_IMPLEMENTATION_SUMMARY.md)** — Implementation details
+
+## Contributing
+
+Envoy is part of the GT Tools collection. See `LICENSE` for details.
+
+## Troubleshooting
+
+**"Error: Could not find commands.json"**
+- Ensure you're in a directory with `envoy_env/commands.json`, or
+- Set `ENVOY_PKG_ROOTS` to point to package root directories, or
+- Use `--packages-config` to specify a package configuration file
+
+**Commands not appearing in --list**
+- Check that packages have `envoy_env/` directories
+- Use `--verbose` to see discovery debug information
+- Verify Git repositories are valid (have `.git/` directory)
+
+**Environment variables not applying**
+- Check JSON syntax in environment files
+- Use `--verbose` to see environment processing
+- Verify paths use forward slashes: `{$__PACKAGE__}/src`
+
+**Need help?**
+Run with `--verbose` to see detailed logging of package discovery, command loading, and environment processing.
