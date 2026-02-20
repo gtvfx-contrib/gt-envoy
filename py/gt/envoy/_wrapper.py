@@ -46,7 +46,10 @@ class ApplicationWrapper:
         self._original_sigint_handler = None
         
         # Initialize managers
-        self._env_manager = EnvironmentManager(inherit_env=config.inherit_env)
+        self._env_manager = EnvironmentManager(
+            inherit_env=config.inherit_env,
+            allowlist=config.env_allowlist
+        )
         self._executor = ProcessExecutor(
             stream_output=config.stream_output,
             on_output=config.on_output,
@@ -142,14 +145,17 @@ class ApplicationWrapper:
             # Pre-run operations
             self._execute_pre_run()
             
-            # Prepare execution
-            command = self._executor.prepare_command(
-                self.config.executable, 
-                self.config.args
-            )
+            # Build the subprocess environment first so that executable
+            # resolution uses the subprocess PATH rather than the envoy
+            # process PATH (critical in closed-environment mode).
             env = self._env_manager.prepare_environment(
                 env_files=self.config.env_files,
                 env=self.config.env
+            )
+            command = self._executor.prepare_command(
+                self.config.executable,
+                self.config.args,
+                search_path=env.get('PATH'),
             )
             cwd = str(self.config.cwd) if self.config.cwd else None
             

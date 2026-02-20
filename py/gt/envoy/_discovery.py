@@ -1,9 +1,9 @@
-"""
-Bundle discovery for wrapper environments.
+"""Bundle discovery for wrapper environments.
 
 Supports two methods of discovering bundles:
 1. Auto-discovery: Search directories specified in ENVOY_BNDL_ROOTS for git repositories
 2. Config file: Explicit list of bundle paths
+
 """
 
 import os
@@ -21,16 +21,28 @@ class BundleInfo:
     """Information about a discovered bundle."""
     
     def __init__(self, root: Path, name: str):
-        """
-        Initialize bundle information.
+        """Initialize bundle information.
         
         Args:
             root: Root directory of the bundle
             name: Name of the bundle (directory name)
+        
         """
         self.root = root
         self.name = name
         self.envoy_env = root / "envoy_env"
+        self.env_files: dict[str, Path] = self._index_env_files()
+
+    def _index_env_files(self) -> dict[str, Path]:
+        """Scan envoy_env/ once and index all JSON files by filename.
+        
+        Returns:
+            Dict mapping filename to absolute Path
+        
+        """
+        if not self.envoy_env.is_dir():
+            return {}
+        return {f.name: f for f in self.envoy_env.glob('*.json')}
         
     def __repr__(self):
         return f"BundleInfo(name={self.name}, root={self.root})"
@@ -40,34 +52,33 @@ class BundleInfo:
 
 
 def is_git_repo(path: Path) -> bool:
-    """
-    Check if a directory is a git repository.
+    """Check if a directory is a git repository.
     
     Args:
         path: Path to check
         
     Returns:
         True if path contains a .git directory
+    
     """
     return (path / ".git").is_dir()
 
 
 def has_envoy_env(path: Path) -> bool:
-    """
-    Check if a directory has an envoy_env subdirectory.
+    """Check if a directory has an envoy_env subdirectory.
     
     Args:
         path: Path to check
         
     Returns:
         True if path contains an envoy_env directory
+    
     """
     return (path / "envoy_env").is_dir()
 
 
 def validate_bundle(path: Path) -> bool:
-    """
-    Validate that a path is a valid envoy bundle.
+    """Validate that a path is a valid envoy bundle.
     
     A valid bundle must:
     - Be a directory
@@ -78,6 +89,7 @@ def validate_bundle(path: Path) -> bool:
         
     Returns:
         True if path is a valid bundle
+    
     """
     if not path.is_dir():
         return False
@@ -89,8 +101,7 @@ def validate_bundle(path: Path) -> bool:
 
 
 def find_git_repos(root_dir: Path, max_depth: int = 5) -> list[Path]:
-    """
-    Recursively find git repositories under a root directory.
+    """Recursively find git repositories under a root directory.
     
     Args:
         root_dir: Root directory to search
@@ -98,6 +109,7 @@ def find_git_repos(root_dir: Path, max_depth: int = 5) -> list[Path]:
         
     Returns:
         List of paths to git repository roots
+    
     """
     repos = []
     
@@ -106,7 +118,9 @@ def find_git_repos(root_dir: Path, max_depth: int = 5) -> list[Path]:
         return repos
     
     def search_dir(path: Path, depth: int = 0):
-        """Recursively search for git repos."""
+        """Recursively search for git repos.
+        
+        """
         if depth > max_depth:
             return
         
@@ -131,8 +145,7 @@ def find_git_repos(root_dir: Path, max_depth: int = 5) -> list[Path]:
 
 
 def discover_bundles_from_roots(root_dirs: list[str]) -> list[BundleInfo]:
-    """
-    Discover bundles in specified root directories.
+    """Discover bundles in specified root directories.
     
     Searches for git repositories and validates them as envoy bundles.
     
@@ -141,6 +154,7 @@ def discover_bundles_from_roots(root_dirs: list[str]) -> list[BundleInfo]:
         
     Returns:
         List of discovered bundles
+    
     """
     bundles = []
     
@@ -168,14 +182,14 @@ def discover_bundles_from_roots(root_dirs: list[str]) -> list[BundleInfo]:
 
 
 def discover_bundles_auto() -> list[BundleInfo]:
-    """
-    Auto-discover bundles using ENVOY_BNDL_ROOTS environment variable.
+    """Auto-discover bundles using ENVOY_BNDL_ROOTS environment variable.
     
     ENVOY_BNDL_ROOTS should contain a list of root directories separated by
     the OS path separator (';' on Windows, ':' on Unix).
     
     Returns:
         List of discovered bundles
+    
     """
     roots_str = os.environ.get('ENVOY_BNDL_ROOTS', '')
     
@@ -196,8 +210,7 @@ def discover_bundles_auto() -> list[BundleInfo]:
 
 
 def load_bundles_from_config(config_file: Path) -> list[BundleInfo]:
-    """
-    Load bundle paths from a configuration file.
+    """Load bundle paths from a configuration file.
     
     Config file format (JSON):
     {
@@ -221,6 +234,7 @@ def load_bundles_from_config(config_file: Path) -> list[BundleInfo]:
         
     Raises:
         WrapperError: If config file is invalid
+    
     """
     if not config_file.is_file():
         raise WrapperError(f"Config file not found: {config_file}")
@@ -260,8 +274,7 @@ def load_bundles_from_config(config_file: Path) -> list[BundleInfo]:
 
 
 def get_bundles(config_file: Path | None = None) -> list[BundleInfo]:
-    """
-    Get all bundles using config file or auto-discovery.
+    """Get all bundles using config file or auto-discovery.
     
     If config_file is provided, only bundles from the config are used.
     Otherwise, auto-discovery is attempted using ENVOY_BNDL_ROOTS.
@@ -271,6 +284,7 @@ def get_bundles(config_file: Path | None = None) -> list[BundleInfo]:
         
     Returns:
         List of discovered bundles
+    
     """
     if config_file:
         logger.info(f"Using bundle config file: {config_file}")
@@ -281,8 +295,7 @@ def get_bundles(config_file: Path | None = None) -> list[BundleInfo]:
 
 
 def get_bundle_env_files(bundles: list[BundleInfo]) -> dict[str, list[Path]]:
-    """
-    Get all environment files from discovered bundles.
+    """Get all environment files from discovered bundles.
     
     Returns a mapping of bundle names to their environment JSON files.
     
@@ -291,6 +304,7 @@ def get_bundle_env_files(bundles: list[BundleInfo]) -> dict[str, list[Path]]:
     
     Returns:
         Dict mapping bundle name to list of environment file paths
+    
     """
     env_files = {}
     
@@ -313,8 +327,7 @@ def get_bundle_env_files(bundles: list[BundleInfo]) -> dict[str, list[Path]]:
 
 
 def get_bundle_commands_files(bundles: list[BundleInfo]) -> dict[str, Path]:
-    """
-    Get commands.json files from discovered bundles.
+    """Get commands.json files from discovered bundles.
     
     Returns a mapping of bundle names to their commands.json files.
     
@@ -323,6 +336,7 @@ def get_bundle_commands_files(bundles: list[BundleInfo]) -> dict[str, Path]:
     
     Returns:
         Dict mapping bundle name to commands.json path
+    
     """
     commands_files = {}
     

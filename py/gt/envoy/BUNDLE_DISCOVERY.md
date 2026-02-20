@@ -1,33 +1,34 @@
-# Bundle Discovery Feature
+# Bundle Discovery
 
 ## Overview
 
-The wrapper now supports discovering and loading commands from multiple bundles, enabling centralized management of development environments across multiple repositories.
+Envoy discovers commands from one or more **bundles** — Git repositories containing an `envoy_env/` directory. Commands from all discovered bundles are merged into a single registry, with each command tagged with its source bundle.
 
 ## Discovery Methods
 
-### 1. Auto-Discovery (ENVOY_BNDL_ROOTS)
+### 1. Auto-Discovery (`ENVOY_BNDL_ROOTS`)
 
-Automatically discover bundles by searching for Git repositories in specified root directories.
+Set `ENVOY_BNDL_ROOTS` to a list of root directories. Envoy scans each root for subdirectories that are Git repositories with an `envoy_env/` directory.
 
-#### Setup
+```powershell
+# PowerShell
+$env:ENVOY_BNDL_ROOTS = "R:\repo\gtvfx-contrib;R:\repo\gtvfx"
 
-Set the `ENVOY_BNDL_ROOTS` environment variable with root directories to search:
+# cmd
+set ENVOY_BNDL_ROOTS=R:\repo\gtvfx-contrib;R:\repo\gtvfx
 
-```bash
-# Windows
-set ENVOY_BNDL_ROOTS=R:\repo;D:\projects
-
-# Linux/Mac  
-export ENVOY_BNDL_ROOTS=/home/user/repos:/opt/projects
+# Unix/macOS
+export ENVOY_BNDL_ROOTS=/home/user/repos:/opt/studio
 ```
+
+Separator: `;` on Windows, `:` on Unix/macOS.
 
 #### How it Works
 
-1. Searches each root directory for subdirectories containing `.git` folders
-2. Validates each Git repository by checking for an `envoy_env/` directory
-3. Loads commands from`envoy_env/commands.json` in each valid bundle
-4. Commands from all bundles are merged into a single registry
+1. Each root is scanned one level deep for subdirectories
+2. A subdirectory qualifies if it has both a `.git/` folder and an `envoy_env/` directory
+3. `envoy_env/commands.json` is loaded from each qualifying bundle
+4. All JSON files in each `envoy_env/` are indexed at discovery time for fast lookup at run time
 
 #### Example Structure
 
@@ -37,333 +38,249 @@ R:\repo\
 │   ├── .git\
 │   └── envoy_env\
 │       ├── commands.json
-│       └── env.json
+│       ├── global_env.json
+│       └── project_env.json
 ├── project-b\
 │   ├── .git\
 │   └── envoy_env\
 │       ├── commands.json
-│       └── env.json
-└── other-folder\
-    └── not-a-bundle\
+│       └── project_env.json
+└── not-a-bundle\        ← no envoy_env/, skipped
 ```
 
-Auto-discovery would find `project-a` and `project-b`.
+### 2. Config File (`--bundles-config` / `-bc`)
 
-### 2. Config File Discovery
-
-Explicitly specify bundles in a JSON configuration file.
-
-#### Config File Format
+Explicitly list bundles in a JSON file and pass it with `--bundles-config`/`-bc`:
 
 ```json
 {
-  "bundles": [
-    "/absolute/path/to/bundle1",
-    "R:\\Windows\\Path\\to\\bundle2",
-    "/another/bundle"
-  ]
+    "bundles": [
+        "R:/repo/gtvfx-contrib/gt/unreal/wrapper",
+        "R:/repo/gtvfx-contrib/gt/globals",
+        "R:/repo/gtvfx-contrib/gt/pythoncore"
+    ]
 }
 ```
 
-Or simplified array format:
+Or as a direct array:
 
 ```json
 [
-  "/path/to/bundle1",
-  "/path/to/bundle2"
+    "R:/repo/gtvfx-contrib/gt/unreal/wrapper",
+    "R:/repo/gtvfx-contrib/gt/globals"
 ]
 ```
 
-#### Usage
+Usage:
 
-```bash
-# Using config file
-do --bundles-config /path/to/bundles.json --list
-
-# With python -m
-python -m gt.envoy --bundles-config bundles.json --list
+```powershell
+envoy --bundles-config R:/repo/bundles.json --list
+envoy -bc R:/repo/bundles.json --list
+envoy -bc R:/repo/bundles.json unreal
 ```
 
-## CLI Integration
+### 3. Local Fallback
 
-### New Command-Line Option
-
-```bash
---bundles-config PATH    Path to bundles config file
-```
-
-### Command Listing with Bundles
-
-Commands now show their source bundle:
-
-```bash
-$ do --bundles-config bundles.json --list
-
-Available commands:
-
-  python_dev           → python [my-bundle]
-  build_tools          → make [build-system]
-  test_runner          → pytest [test-framework]
-```
-
-### Command Info with Bundle Details
-
-```bash
-$ do --bundles-config bundles.json --info python_dev
-
-Command: python_dev
-Bundle: my-bundle
-Executable: python
-Environment files:
-  - dev_env.json
-Environment directory: /path/to/my-bundle/envoy_env
-Alias: python
-```
+If no bundles are found via the above methods, Envoy walks up from the current directory looking for `envoy_env/commands.json`. This allows running from inside a single-bundle project without any configuration.
 
 ## Bundle Structure
 
-A valid bundle must:
-
-1. Have an `envoy_env/` directory
-2. Optionally include `envoy_env/commands.json` for command definitions
-3. Optionally include environment JSON files in `envoy_env/`
+A valid bundle must have an `envoy_env/` directory. A `.git/` directory is required for auto-discovery but not for config-file or local-fallback discovery.
 
 ```
 my-bundle/
-├── .git/                      # Optional (for auto-discovery)
+├── .git/                       # required for auto-discovery
 ├── envoy_env/
-│   ├── commands.json          # Command definitions
-│   ├── base_env.json          # Environment variables
-│   └── dev_env.json           # Additional environments
+│   ├── commands.json           # command definitions
+│   ├── global_env.json         # loaded automatically before every command's env files
+│   ├── base_env.json           # shared environment
+│   └── tool_env.json           # per-tool overrides
 └── src/
-    └── ...
+```
+
+### `global_env.json`
+
+If a bundle contains `envoy_env/global_env.json`, it is loaded automatically before any command-specific env files for every command sourced from that bundle. Use it for studio-wide or bundle-wide baseline variables:
+
+```json
+{
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "STUDIO": "gtvfx"
+}
 ```
 
 ## Priority and Conflict Resolution
 
 ### Loading Order
 
-1. **Config File**: If `--bundles-config` is specified, only those bundles are loaded
-2. **Auto-Discovery**: If no config file, attempts auto-discovery via `ENVOY_BNDL_ROOTS`
-3. **Local Fallback**: If no bundles found, falls back to local `envoy_env/commands.json`
+1. `--bundles-config`/`-bc` — if specified, only those bundles are used
+2. `ENVOY_BNDL_ROOTS` auto-discovery — if no config file
+3. Local `envoy_env/commands.json` fallback — if no bundles found
 
 ### Command Conflicts
 
-If multiple bundles define the same command name, the last loaded bundle wins. A warning is logged:
+If two bundles define the same command name, the last loaded bundle wins and a warning is logged:
 
 ```
-WARNING - Command 'python_dev' from bundle2 overrides existing command from bundle1
+WARNING - Command 'python_dev' from bundle-b overrides existing command from bundle-a
 ```
+
+Use `--verbose` to surface these warnings.
+
+## CLI Integration
+
+### Listing with Bundle Tags
+
+```powershell
+envoy --list
+```
+
+Output:
+```
+Available commands:
+
+  python_dev           → python -X dev  [pythoncore]
+  unreal               (executable on PATH)  [unreal]
+  vscode               → C:/.../Code.exe --wait  [globals]
+```
+
+### Command Info
+
+```powershell
+envoy --info unreal
+```
+
+Output:
+```
+Command: unreal
+Bundle: unreal
+Executable: unreal
+Environment files:
+  - unreal_env.json
+Environment directory: R:/repo/.../unreal/wrapper/envoy_env
+```
+
+### Verbose Discovery Logging
+
+```powershell
+envoy --verbose --list
+```
+
+Shows which roots were scanned, which bundles qualified, which commands were loaded, and any conflicts.
 
 ## Examples
 
-### Example 1: Using Config File
+### Example 1: Auto-Discovery
 
-Create `bundles.json`:
+```powershell
+$env:ENVOY_BNDL_ROOTS = "R:/repo/gtvfx-contrib"
+envoy --list
+envoy unreal
+envoy python_dev script.py
+```
 
+### Example 2: Config File
+
+```powershell
+envoy -bc R:/repo/bundles.json --list
+envoy -bc R:/repo/bundles.json unreal
+```
+
+### Example 3: Multi-Bundle Registry
+
+With two bundles:
+
+**`app-framework/envoy_env/commands.json`:**
 ```json
 {
-  "bundles": [
-    "R:\\repo\\my-app",
-    "R:\\repo\\shared-tools"
-  ]
+    "python_dev": {
+        "environment": ["python_env.json"],
+        "alias": ["python", "-X", "dev"]
+    }
 }
 ```
 
-List all commands:
-
-```bash
-do --bundles-config bundles.json --list
-```
-
-Execute a command:
-
-```bash
-do --bundles-config bundles.json python_dev script.py
-```
-
-### Example 2: Auto-Discovery
-
-Set environment variable:
-
-```bash
-set ENVOY_BNDL_ROOTS=R:\repo;D:\projects
-```
-
-Auto-discover and list:
-
-```bash
-do --list
-```
-
-### Example 3: Mixed Environments
-
-Bundle 1 (`app-framework/envoy_env/commands.json`):
-
+**`tools/envoy_env/commands.json`:**
 ```json
 {
-  "python_dev": {
-    "environment": ["python39.json"],
-    "alias": ["python"]
-  }
+    "build": {
+        "environment": ["build_env.json"],
+        "alias": ["make", "build"]
+    }
 }
 ```
 
-Bundle 2 (`tools/envoy_env/commands.json`):
+Both commands are available after discovery:
 
-```json
-{
-  "build": {
-    "environment": ["build_env.json"],
-    "alias": ["make", "build"]
-  }
-}
 ```
+envoy --list
 
-Both commands are available when bundles are discovered:
-
-```bash
-$ do --list
-
-Available commands:
-
-  python_dev           → python [app-framework]
-  build                → make build [tools]
+  python_dev           → python -X dev  [app-framework]
+  build                → make build  [tools]
 ```
 
 ## Python API
 
-### Programmatic Access
-
 ```python
 from gt.envoy import get_bundles, BundleInfo
 
-# Auto-discovery
+# Auto-discovery (reads ENVOY_BNDL_ROOTS)
 bundles = get_bundles()
 
 # From config file
 from pathlib import Path
-config = Path("bundles.json")
-bundles = get_bundles(config_file=config)
+bundles = get_bundles(config_file=Path("bundles.json"))
 
 # Inspect bundles
 for bundle in bundles:
     print(f"{bundle.name}: {bundle.root}")
-    print(f"  Envoy env: {bundle.envoy_env}")
+    print(f"  envoy_env: {bundle.envoy_env}")
+    # env_files is pre-indexed at discovery time: dict[str, Path]
+    print(f"  env files: {list(bundle.env_files.keys())}")
 ```
 
-### Command Registry with Bundles
+### Loading Commands from Bundles
 
 ```python
 from gt.envoy import CommandRegistry, get_bundles
 
-# Load from multiple bundles
 registry = CommandRegistry()
 bundles = get_bundles()
 registry.load_from_bundles(bundles)
 
-# Access commands with bundle info
 for cmd_name in registry.list_commands():
     cmd = registry.get(cmd_name)
-    print(f"{cmd_name} from {cmd.bundle}")
+    print(f"{cmd_name} from bundle: {cmd.bundle}")
 ```
+
+### `BundleInfo` Attributes
+
+| Attribute | Type | Description |
+|---|---|---|
+| `name` | `str` | Bundle directory name |
+| `root` | `Path` | Absolute path to the bundle root |
+| `envoy_env` | `Path` | Absolute path to `envoy_env/` |
+| `env_files` | `dict[str, Path]` | All `*.json` files in `envoy_env/`, indexed by filename at construction time |
 
 ## Environment Variable Reference
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `ENVOY_BNDL_ROOTS` | Semicolon-separated (Windows) or colon-separated (Unix) list of root directories to search for bundles | `R:\repo;D:\projects` |
-2. **Team Collaboration**: Share bundle configurations via version control
-3. **Flexible Discovery**: Choose between auto-discovery or explicit configuration
-4. **Namespace Clarity**: Bundle names show command sources
-5. **Environment Isolation**: Each bundle maintains its own environment files
+| Variable | Separator | Description |
+|---|---|---|
+| `ENVOY_BNDL_ROOTS` | `;` (Windows) / `:` (Unix) | Root directories to scan for bundles |
 
 ## Troubleshooting
 
-### No bundles found
+**No commands loaded**
+- Check `ENVOY_BNDL_ROOTS` is set and points to directories that contain bundle subdirectories
+- Each bundle must have both `.git/` (auto-discovery) and `envoy_env/`
+- Use `--bundles-config`/`-bc` with explicit paths to bypass auto-discovery
+- Run `envoy --verbose --list` to see exactly what is being scanned
 
-```
-Error: No commands loaded
-```
+**Bundle not discovered**
+1. Does the directory have `envoy_env/`?
+2. Does it have `.git/` (required for auto-discovery)?
+3. Is its parent directory in `ENVOY_BNDL_ROOTS`?
+4. Is the path separator correct for the OS (`;` Windows, `:` Unix)?
 
-**Solutions**:
-- Verify `ENVOY_BNDL_ROOTS` is set correctly
-- Check that bundles have `envoy_env/` directories
-- Use `--bundles-config` with explicit paths
-- Ensure Git repositories have `.git` folders for auto-discovery
-
-### Bundle not discovered
-
-**Check**:
-1. Bundle has `envoy_env/` directory
-2. For auto-discovery: bundle has `.git/` folder
-3. Bundle path is in `ENVOY_BNDL_ROOTS` or config file
-4. Path separators match OS (`;` Windows, `:` Unix)
-
-### Command not found
-
-```bash
-# Use --verbose to see bundle loading
-do --bundles-config bundles.json --verbose python_dev
-```
-
-This shows which bundles are loaded and which commands are available.
-
-## Migration from Single Bundle
-
-### Before (single bundle)
-
-```bash
-cd my-project
-do python_dev script.py
-```
-
-### After (multi-bundle)
-
-```bash
-# Option 1: Config file
-do --bundles-config ~/my-bundles.json python_dev script.py
-
-# Option 2: Auto-discovery
-set ENVOY_BNDL_ROOTS=R:\repo
-do python_dev script.py
-
-# Option 3: Still works locally
-cd my-project
-do python_dev script.py
-```
-
-## Advanced Usage
-
-### Combining Multiple Environments
-
-Commands can load multiple environment files from their bundle:
-
-```json
-{
-  "full_stack": {
-    "environment": [
-      "base_env.json",
-      "python_env.json",
-      "node_env.json",
-      "database_env.json"
-    ],
-    "alias": ["python", "-m", "myapp"]
-  }
-}
-```
-
-### Bundle-Specific Paths
-
-Environment files use `{$__BUNDLE__}` for bundle-relative paths:
-
-```json
-{
-  "PYTHONPATH": [
-    "{$__BUNDLE__}/src",
-    "{$__BUNDLE__}/lib"
-  ]
-}
-```
-
-This ensures paths resolve correctly regardless of bundle location.
+**Command resolves to wrong bundle**
+Multiple bundles define the same command name — last loaded wins. Use `--verbose` to see the override warning, then adjust bundle order in your config file or `ENVOY_BNDL_ROOTS`.

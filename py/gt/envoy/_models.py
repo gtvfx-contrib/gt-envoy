@@ -37,7 +37,8 @@ class WrapperConfig:
     # Environment
     env: dict[str, str] | None = None
     env_files: str | Path | list[str | Path] | None = None  # JSON file(s) with environment variables
-    inherit_env: bool = True
+    inherit_env: bool = False
+    env_allowlist: set[str] | None = None  # System vars to inherit in closed mode
     
     # Working directory
     cwd: str | Path | None = None

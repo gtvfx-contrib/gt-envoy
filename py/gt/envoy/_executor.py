@@ -45,11 +45,14 @@ class ProcessExecutor:
         self.on_error = on_error
     
     @staticmethod
-    def resolve_executable(executable: str | Path) -> str:
+    def resolve_executable(executable: str | Path, search_path: str | None = None) -> str:
         """Resolve executable path, checking PATH if necessary.
         
         Args:
             executable: Executable name or path
+            search_path: Value of PATH to search when resolving bare executable
+                names.  Should be the subprocess PATH built from env files, not
+                the envoy process PATH.  Falls back to the system PATH if None.
             
         Returns:
             Absolute path to executable
@@ -66,8 +69,8 @@ class ProcessExecutor:
                 raise WrapperError(f"Executable not found: {exe}")
             return os.path.abspath(exe)
         
-        # Search in PATH
-        found = shutil.which(exe)
+        # Search in the subprocess PATH (or system PATH if not provided)
+        found = shutil.which(exe, path=search_path)
         if found:
             return found
         
@@ -76,19 +79,23 @@ class ProcessExecutor:
     def prepare_command(
         self, 
         executable: str | Path, 
-        args: list[str]
+        args: list[str],
+        search_path: str | None = None,
     ) -> list[str]:
         """Prepare the full command to execute.
         
         Args:
             executable: Executable name or path
             args: Command-line arguments
+            search_path: PATH string to use for bare-name resolution.  Pass the
+                subprocess env PATH so the correct executable is found even in
+                closed-environment mode.
             
         Returns:
             List of command components
             
         """
-        exe = self.resolve_executable(executable)
+        exe = self.resolve_executable(executable, search_path=search_path)
         return [exe] + list(args)
     
     def stream_process_output(self, process: subprocess.Popen) -> tuple[str, str]:

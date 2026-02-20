@@ -2,224 +2,209 @@
 
 ## Overview
 
-The wrapper can now be used as a command-line interface (CLI) where commands are defined in a `commands.json` file.
+Envoy is invoked via the `envoy` command (provided by `bin/envoy.bat`). Commands are discovered automatically from Git repositories on `ENVOY_BNDL_ROOTS`, or loaded from a local `envoy_env/commands.json`.
+
+## Invocation
+
+```powershell
+# With bin/ on PATH
+envoy [options] [command] [args ...]
+
+# Or directly
+R:\path\to\envoy\bin\envoy.bat [options] [command] [args ...]
+```
+
+## Options Reference
+
+| Flag | Short | Description |
+|---|---|---|
+| `--list` | | List all available commands |
+| `--info COMMAND` | | Show detailed information about a command |
+| `--which COMMAND` | | Resolve the executable path for a command |
+| `--commands-file PATH` | `-cf` | Path to a specific `commands.json` |
+| `--bundles-config PATH` | `-bc` | Path to a bundles config file |
+| `--passthrough` | `-pt` | Inherit the full system environment (overrides closed mode) |
+| `--verbose` | `-v` | Enable verbose logging |
+| `--help` | `-h` | Show help message |
 
 ## Command Definition
 
-Create a `envoy_env/commands.json` file with your command definitions:
+Commands are defined in `envoy_env/commands.json`:
 
 ```json
 {
-  "command_name": {
-    "environment": ["env1.json", "env2.json"],
-    "alias": ["executable", "arg1", "arg2"]
-  }
+    "command_name": {
+        "environment": ["env1.json", "env2.json"],
+        "alias": ["executable", "arg1", "arg2"]
+    }
 }
 ```
 
 ### Fields
 
-- **command_name**: The name used to invoke the command via CLI
-- **environment**: List of JSON environment files to load (relative to `envoy_env/`)
-- **alias** (optional): Command and base arguments to execute
-  - If provided: `alias[0]` is the executable, `alias[1:]` are base arguments
-  - If not provided: `command_name` must be an executable on PATH
+- **`environment`** — List of JSON environment files to load (relative to `envoy_env/`)
+- **`alias`** (optional) — Executable and base arguments to run
+  - `alias[0]` is the executable, `alias[1:]` are prepended arguments
+  - If omitted, `command_name` is used as the executable (must be on the subprocess `PATH`)
 
 ### Example
 
 ```json
 {
-  "python_dev": {
-    "environment": ["example_env.json"],
-    "alias": ["python"]
-  },
-  "python_test": {
-    "environment": ["example_env.json", "test_list_paths.json"],
-    "alias": ["python", "-X", "dev"]
-  },
-  "bat_example": {
-    "environment": ["example_env.json"]
-  }
+    "python_dev": {
+        "environment": ["python_env.json"],
+        "alias": ["python", "-X", "dev"]
+    },
+    "unreal": {
+        "environment": ["unreal_env.json"]
+    },
+    "vscode": {
+        "environment": ["vscode_env.json"],
+        "alias": ["C:/Users/me/AppData/Local/Programs/Microsoft VS Code/Code.exe", "--wait"]
+    }
 }
 ```
 
-## CLI Usage
+## Common Usage
 
-### Basic Invocation
+### List available commands
 
-From the `py/` directory or with `PYTHONPATH` set:
-
-```bash
-# On Windows PowerShell
-$env:PYTHONPATH = "R:\repo\gtvfx-contrib\gt\app\wrapper\py"
-python -m gt.app.wrapper COMMAND [ARGS...]
-
-# On Linux/Mac
-export PYTHONPATH="/path/to/py"
-python -m gt.app.wrapper COMMAND [ARGS...]
-```
-
-### List Available Commands
-
-```bash
-python -m gt.app.wrapper --list
+```powershell
+envoy --list
 ```
 
 Output:
 ```
 Available commands:
 
-  bat_example          (executable on PATH)
-  python_dev           → python
-  python_test          → python -X dev
+  python_dev           → python -X dev  [pythoncore]
+  unreal               (executable on PATH)  [unreal]
+  vscode               → C:/.../Code.exe --wait  [globals]
 ```
 
-### Show Command Information
+### Show command details
 
-```bash
-python -m gt.app.wrapper --info COMMAND
+```powershell
+envoy --info unreal
 ```
 
-Output:
-```
-Command: python_dev
-Executable: python
-Environment files:
-  - example_env.json
-Alias: python
+### Resolve executable path
+
+```powershell
+envoy --which unreal
 ```
 
-### Execute a Command
+Resolves the executable using the subprocess `PATH` built from the command's env files — the same PATH the child process will actually see.
 
-```bash
-# Execute python_dev with arguments
-python -m gt.app.wrapper python_dev --version
+### Run a command
 
-# Execute python_test with code
-python -m gt.app.wrapper python_test -c "print('Hello')"
+```powershell
+envoy python_dev script.py --arg value
+envoy unreal
+envoy vscode .
 ```
 
-### Options
+### Run with verbose logging
 
-- `--list`: List all available commands
-- `--info COMMAND`: Show detailed information about a specific command
-- `--commands-file FILE`: Specify a custom commands.json file path
-- `--verbose, -v`: Enable verbose logging (shows environment loading, execution details)
-- `--help, -h`: Show help message
-
-## Creating Windows Batch Files
-
-To make commands easily accessible on Windows, create `.bat` files:
-
-```batch
-@echo off
-set PYTHONPATH=R:\repo\gtvfx-contrib\gt\app\wrapper\py
-python -m gt.app.wrapper python_dev %*
+```powershell
+envoy --verbose python_dev script.py
 ```
 
-Save as `python_dev.bat` and place it in a directory on your PATH.
+Logs bundle discovery, env file loading, environment contents, and executable resolution.
 
-## Command Discovery
+### Run with passthrough (inherit system env)
 
-The CLI automatically searches for `envoy_env/commands.json`:
-
-1. Starts in the current directory
-2. Checks for `envoy_env/commands.json`
-3. If not found, moves up to the parent directory
-4. Repeats until found or reaches the filesystem root
-
-This allows you to run the CLI from anywhere within your project structure.
-
-## Examples
-
-### Running Python with Custom Environment
-
-```bash
-# List commands
-python -m gt.app.wrapper --list
-
-# Get command info
-python -m gt.app.wrapper --info python_dev
-
-# Run Python with loaded environment
-python -m gt.app.wrapper python_dev script.py
-
-# Run with verbose output
-python -m gt.app.wrapper --verbose python_dev --version
+```powershell
+envoy --passthrough python_dev script.py
+envoy -pt python_dev script.py
 ```
 
-### From Subdirectory
+## Bundle Discovery
 
-```bash
-# Navigate to any subdirectory in your project
-cd examples/
+### Auto-discovery via `ENVOY_BNDL_ROOTS`
 
-# Set PYTHONPATH
-$env:PYTHONPATH = "R:\repo\gtvfx-contrib\gt\app\wrapper\py"
-
-# Run command (will auto-detect envoy_env/commands.json)
-python -m gt.app.wrapper python_dev --help
+```powershell
+$env:ENVOY_BNDL_ROOTS = "R:/repo/gtvfx-contrib;R:/repo/gtvfx"
+envoy --list
 ```
 
-## Integration with Development Workflow
+Envoy scans each root for Git repositories containing `envoy_env/` and loads their `commands.json`.
 
-### Option 1: Batch Files
+### Config file
 
-Create batch files for each command and add them to PATH:
-
-```
-python_dev.bat    → Calls: gt.app.wrapper python_dev
-python_test.bat   → Calls: gt.app.wrapper python_test
+```powershell
+envoy --bundles-config R:/repo/bundles.json --list
+envoy -bc R:/repo/bundles.json --list
 ```
 
-### Option 2: Shell Aliases
-
-Add to your shell profile:
-
-```bash
-# PowerShell ($PROFILE)
-function python_dev { python -m gt.app.wrapper python_dev $args }
-function python_test { python -m gt.app.wrapper python_test $args }
-
-# Bash (~/.bashrc)
-alias python_dev='python -m gt.app.wrapper python_dev'
-alias python_test='python -m gt.app.wrapper python_test'
+**`bundles.json`:**
+```json
+{
+    "bundles": [
+        "R:/repo/gtvfx-contrib/gt/unreal/wrapper",
+        "R:/repo/gtvfx-contrib/gt/globals"
+    ]
+}
 ```
 
-### Option 3: Direct CLI Usage
+### Explicit commands file
 
-Simply use the CLI directly from your working directory:
-
-```bash
-python -m gt.app.wrapper python_dev script.py
+```powershell
+envoy --commands-file R:/repo/my-tool/envoy_env/commands.json --list
+envoy -cf R:/repo/my-tool/envoy_env/commands.json my_command
 ```
 
-## Environment File Paths
+### Local fallback
 
-Environment files in `commands.json` are relative to the `envoy_env/` directory:
+If no bundles are found and no flags are given, Envoy searches for `envoy_env/commands.json` starting from the current directory and walking up to the filesystem root.
 
-```
-project/
-├── envoy_env/
-│   ├── commands.json
-│   ├── base_env.json       ← "base_env.json"
-│   └── configs/
-│       └── dev.json        ← "configs/dev.json"
-```
+## Environment Modes
 
-## Error Handling
+### Closed mode (default)
 
-If commands.json is not found:
-```
-Error: Could not find commands.json
-Searched for envoy_env/commands.json in current directory and parents
-```
+The subprocess receives only:
 
-Solution: Ensure you're in a project directory with an `envoy_env/commands.json` file or specify the path with `--commands-file`.
+1. **Core OS variables** — `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `TEMP`, `SystemRoot`, `COMPUTERNAME`, `HOME`, `LANG`, etc.
+2. **User allowlist** — variables named in `ENVOY_ALLOWLIST`
+3. **Bundle env files** — `global_env.json` (if present) and command-specific env files
 
-If a command is not found:
-```
-Error: Command 'invalid_cmd' not found
+### Passthrough mode
+
+```powershell
+envoy --passthrough my_command
+envoy -pt my_command
 ```
 
-Solution: Check available commands with `--list`.
+The full system environment is inherited, with bundle env files layered on top.
+
+### Allowlist
+
+```powershell
+$env:ENVOY_ALLOWLIST = "MY_STUDIO_VAR;ANOTHER_VAR"
+envoy my_command
+```
+
+Lets specific system variables through in closed mode without full passthrough. Supports `;` and `,` as separators.
+
+## `global_env.json`
+
+Any bundle can place a `global_env.json` in its `envoy_env/` directory. It is loaded automatically before command-specific env files for every command sourced from that bundle:
+
+```
+my-bundle/
+└── envoy_env/
+    ├── commands.json
+    ├── global_env.json     ← always loaded first
+    └── my_tool_env.json
+```
+
+## Error Reference
+
+**"Could not find commands.json"**
+Set `ENVOY_BNDL_ROOTS`, use `--bundles-config`/`-bc`, use `--commands-file`/`-cf`, or run from inside a project that has `envoy_env/commands.json`.
+
+**"Command 'x' not found"**
+Run `envoy --list` to see what is available.
+
+**"Executable 'x' not found in PATH"**
+In closed mode the subprocess `PATH` is built entirely from bundle env files. Ensure the bundle's env files set `+=PATH` to point at the executable's directory. Use `--which` to inspect resolution, or `--passthrough` to temporarily use the system `PATH`.

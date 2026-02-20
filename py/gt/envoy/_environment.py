@@ -13,6 +13,68 @@ from ._exceptions import WrapperError
 log = logging.getLogger(__name__)
 
 
+# Variables always seeded into the subprocess environment in closed mode.
+# These provide identity, paths, and OS services that most processes assume
+# are present. They are never secret and refusing them typically breaks
+# tools in unexpected ways. The user allowlist (ENVOY_ALLOWLIST / --passthrough)
+# is additive on top of these.
+_CORE_ENV_VARS: frozenset[str] = frozenset({
+    # --- User identity & home ---
+    'USERNAME',
+    'USERPROFILE',
+    'USERDOMAIN',
+    'USERDOMAIN_ROAMINGPROFILE',
+    'HOMEDRIVE',
+    'HOMEPATH',
+    # --- User data directories ---
+    'APPDATA',
+    'LOCALAPPDATA',
+    'PUBLIC',
+    # --- Temp ---
+    'TEMP',
+    'TMP',
+    'TMPDIR',           # macOS / Linux
+    # --- System / Windows layout ---
+    'SystemRoot',
+    'SystemDrive',
+    'windir',
+    'ProgramFiles',
+    'ProgramFiles(x86)',
+    'ProgramW6432',
+    'CommonProgramFiles',
+    'CommonProgramFiles(x86)',
+    'CommonProgramW6432',
+    # --- Hardware / OS identity ---
+    'COMPUTERNAME',
+    'OS',
+    'PROCESSOR_ARCHITECTURE',
+    'PROCESSOR_IDENTIFIER',
+    'PROCESSOR_LEVEL',
+    'PROCESSOR_REVISION',
+    'NUMBER_OF_PROCESSORS',
+    # --- Shell / console ---
+    'COMSPEC',
+    'TERM',
+    'TERM_PROGRAM',
+    'COLORTERM',
+    # --- Unix identity (macOS / Linux) ---
+    'HOME',
+    'USER',
+    'LOGNAME',
+    'SHELL',
+    # --- Locale / encoding ---
+    'LANG',
+    'LC_ALL',
+    'LC_CTYPE',
+    'LC_MESSAGES',
+    # --- XDG base dirs (Linux) ---
+    'XDG_RUNTIME_DIR',
+    'XDG_CONFIG_HOME',
+    'XDG_DATA_HOME',
+    'XDG_CACHE_HOME',
+})
+
+
 class EnvironmentManager:
     """Manages environment variable loading, expansion, and preparation.
     
@@ -24,16 +86,28 @@ class EnvironmentManager:
     - List-based paths with automatic joining
     - Append (+=) and prepend (^=) operators
     
+    Environment modes:
+    - Closed (default): child process receives variables defined in env files,
+      plus the built-in core OS variables (_CORE_ENV_VARS) and any additional
+      variables listed in the user allowlist (ENVOY_ALLOWLIST / --passthrough).
+    - Passthrough: child process inherits the full system environment, with env
+      file values layered on top.
+    
     """
     
-    def __init__(self, inherit_env: bool = True):
+    def __init__(self, inherit_env: bool = False, allowlist: set[str] | None = None):
         """Initialize the environment manager.
         
         Args:
-            inherit_env: Whether to inherit system environment variables
+            inherit_env: If True, child process inherits the full system environment
+                (passthrough mode). If False, only env file variables and allowlisted
+                system variables are passed through (closed mode).
+            allowlist: Set of system environment variable names to inherit even in
+                closed mode. Typically sourced from ENVOY_ALLOWLIST.
             
         """
         self.inherit_env = inherit_env
+        self.allowlist = allowlist or set()
     
     @staticmethod
     def expand_env_value(
@@ -55,7 +129,10 @@ class EnvironmentManager:
         Lookup priority:
         1. Special wrapper variables (if provided)
         2. Current environment being built
-        3. System environment variables
+        
+        Unresolved references expand to an empty string. In closed mode
+        only allowlisted variables are seeded into current_env, so unknown
+        references produce empty strings rather than leaking system values.
         
         Args:
             value: String potentially containing {$VARNAME} references
@@ -80,8 +157,8 @@ class EnvironmentManager:
             if var_name in current_env:
                 return current_env[var_name]
             
-            # Fall back to os.environ
-            return os.environ.get(var_name, '')
+            # Unresolved — return empty string (never read from os.environ here).
+            return ''
         
         return pattern.sub(replacer, value)
     
@@ -191,7 +268,8 @@ class EnvironmentManager:
     
     def load_env_from_files(
         self, 
-        env_files: str | Path | list[str | Path] | None
+        env_files: str | Path | list[str | Path] | None,
+        base_env: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Load environment variables from JSON file(s).
         
@@ -216,16 +294,22 @@ class EnvironmentManager:
         
         Args:
             env_files: Single file path or list of file paths to load
+            base_env: Variables already in scope before any file is processed.
+                Used for {$VARNAME} expansion and as the starting point for +=
+                and ^= operators.  Should be os.environ.copy() in passthrough
+                mode, or the allowlist-seeded dict in closed mode.  Never
+                modified — a copy is taken before file processing begins.
             
         Returns:
-            Dictionary of environment variables from files
+            Dictionary of environment variables from files (base_env entries
+            are included so callers can update result_env with this return value)
             
         Raises:
             WrapperError: If file cannot be read or parsed
             
         """
         if not env_files:
-            return {}
+            return dict(base_env) if base_env else {}
         
         # Normalize to list
         if isinstance(env_files, (str, Path)):
@@ -234,7 +318,10 @@ class EnvironmentManager:
         # Determine path separator based on OS
         path_sep = ';' if os.name == 'nt' else ':'
         
-        merged_env = {}
+        # Seed from base_env so {$VAR} references and += operators see whatever
+        # variables are legitimately in scope (allowlist or full system env).
+        # A copy is taken so the caller's dict is never modified.
+        merged_env: dict[str, str] = dict(base_env) if base_env else {}
         
         for file_path in env_files:
             path = Path(file_path)
@@ -273,8 +360,10 @@ class EnvironmentManager:
                     
                     # Handle append/prepend operations
                     if append_mode or prepend_mode:
-                        # Get current value from merged_env or os.environ
-                        current_value = merged_env.get(var_name) or os.environ.get(var_name, '')
+                        # Only look in merged_env — never fall back to os.environ.
+                        # If the variable isn't defined yet it's treated as empty,
+                        # making += and ^= equivalent to a plain assignment on first use.
+                        current_value = merged_env.get(var_name, '')
                         
                         if append_mode:
                             # Append: current + separator + new
@@ -309,9 +398,9 @@ class EnvironmentManager:
         """Prepare environment variables for subprocess.
         
         Priority (later overrides earlier):
-        1. System environment (if inherit_env=True)
-        2. Environment from JSON files (env_files)
-        3. Explicit environment dict (env)
+        1. Allowlisted system variables (closed mode) or full system env (passthrough mode)
+        2. Environment from JSON files
+        3. Explicit environment dict
         
         Args:
             env_files: JSON file(s) to load environment from
@@ -322,12 +411,23 @@ class EnvironmentManager:
             
         """
         if self.inherit_env:
+            # Passthrough: start with the full system environment
             result_env = os.environ.copy()
         else:
+            # Closed: always seed core OS variables first, then the user allowlist.
+            # Core vars (identity, temp, system paths, locale, etc.) are safe to
+            # carry through unconditionally and their absence tends to break tools
+            # in unexpected ways.
             result_env = {}
+            for var in _CORE_ENV_VARS | self.allowlist:
+                if var in os.environ:
+                    result_env[var] = os.environ[var]
         
-        # Load from files (overrides inherited env)
-        file_env = self.load_env_from_files(env_files)
+        # Load from files (overrides inherited/seeded env).
+        # Pass result_env as base_env so {$VAR} expansion and += / ^= operators
+        # inside env files see exactly the same variables that will be in scope —
+        # no silent leakage of system variables that aren't in base_env.
+        file_env = self.load_env_from_files(env_files, base_env=result_env)
         result_env.update(file_env)
         
         # Explicit env dict overrides everything

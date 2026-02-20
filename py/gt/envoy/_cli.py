@@ -1,14 +1,16 @@
 """Command-line interface for envoy."""
 
+import os
 import sys
 import argparse
 import logging
-import shutil
 from pathlib import Path
 
 from ._commands import CommandRegistry, find_commands_file
 from ._discovery import get_bundles, BundleInfo
 from ._wrapper import ApplicationWrapper
+from ._environment import EnvironmentManager
+from ._executor import ProcessExecutor
 from ._models import WrapperConfig
 from ._exceptions import WrapperError
 
@@ -104,12 +106,24 @@ def show_command_info(registry: CommandRegistry, command_name: str) -> int:
     return 0
 
 
-def show_which(registry: CommandRegistry, command_name: str) -> int:
+def show_which(
+    registry: CommandRegistry,
+    command_name: str,
+    bundles: list[BundleInfo] | None = None,
+    passthrough: bool = False,
+    env_allowlist: set[str] | None = None,
+) -> int:
     """Show the resolved executable path for a command.
+    
+    Builds the subprocess environment from the command's env files so that
+    PATH resolution matches what the child process would actually see.
     
     Args:
         registry: Command registry
         command_name: Name of command to find
+        bundles: Discovered bundles (for multi-bundle env file search)
+        passthrough: Whether to inherit the full system environment
+        env_allowlist: System variable names to seed in closed mode
         
     Returns:
         Exit code (0 for success)
@@ -121,29 +135,42 @@ def show_which(registry: CommandRegistry, command_name: str) -> int:
         print(f"Error: Command '{command_name}' not found", file=sys.stderr)
         return 1
     
-    # Try to resolve the executable path
     executable = cmd.executable
-    resolved_path = None
     
-    # Check if it's an absolute path that exists
-    exe_path = Path(executable)
-    if exe_path.is_absolute() and exe_path.exists():
-        resolved_path = str(exe_path)
-    else:
-        # Try to find it on PATH
-        resolved_path = shutil.which(executable)
-    
-    # Build the output message
     if cmd.alias:
-        # Command has an alias
         alias_str = " ".join(cmd.alias)
         print(f"command {command_name} aliased to: {alias_str}")
-    else:
-        # Command uses its name as executable
-        if resolved_path:
-            print(f"command {command_name} resolved to: {resolved_path}")
-        else:
-            print(f"command {command_name} executable: {executable} (not found on PATH)")
+        return 0
+    
+    # Build env files the same way run_command does so PATH is correct.
+    env_files = []
+    if bundles:
+        for bundle in bundles:
+            if 'global_env.json' in bundle.env_files:
+                env_files.append(str(bundle.env_files['global_env.json']))
+        for env_file_name in cmd.environment:
+            for bundle in bundles:
+                if env_file_name in bundle.env_files:
+                    env_files.append(str(bundle.env_files[env_file_name]))
+    elif cmd.envoy_env_dir:
+        global_env = cmd.envoy_env_dir / 'global_env.json'
+        if global_env.exists():
+            env_files.append(str(global_env))
+        env_files.extend(str(cmd.envoy_env_dir / f) for f in cmd.environment)
+    
+    env_mgr = EnvironmentManager(inherit_env=passthrough, allowlist=env_allowlist)
+    try:
+        env = env_mgr.prepare_environment(env_files=[Path(f) for f in env_files])
+    except WrapperError as e:
+        print(f"Warning: Could not build environment: {e}", file=sys.stderr)
+        env = {}
+    
+    # Resolve using the subprocess PATH.
+    try:
+        resolved = ProcessExecutor.resolve_executable(executable, search_path=env.get('PATH'))
+        print(f"command {command_name} resolved to: {resolved}")
+    except WrapperError:
+        print(f"command {command_name} executable: {executable} (not found on PATH)")
     
     return 0
 
@@ -153,7 +180,9 @@ def run_command(
     command_name: str,
     args: list[str],
     bundles: list[BundleInfo] | None = None,
-    verbose: bool = False
+    verbose: bool = False,
+    passthrough: bool = False,
+    env_allowlist: set[str] | None = None
 ) -> int:
     """Run a command from the registry.
     
@@ -163,6 +192,8 @@ def run_command(
         args: Arguments to pass to the command
         bundles: List of discovered bundles (for multi-bundle env file search)
         verbose: Enable verbose output
+        passthrough: If True, child process inherits the full system environment
+        env_allowlist: System variable names to inherit in closed mode
         
     Returns:
         Exit code from the executed command
@@ -179,13 +210,17 @@ def run_command(
     env_files = []
     
     if bundles:
-        # Multi-bundle mode: search for each env file across ALL bundles
+        # Multi-bundle mode: use pre-indexed env_files dict — no filesystem calls at run time
+        for bundle in bundles:
+            if 'global_env.json' in bundle.env_files:
+                env_files.append(str(bundle.env_files['global_env.json']))
+                log.debug(f"Found global environment file: {bundle.env_files['global_env.json']}")
+        
         for env_file_name in cmd.environment:
             for bundle in bundles:
-                env_file_path = bundle.envoy_env / env_file_name
-                if env_file_path.exists():
-                    env_files.append(str(env_file_path))
-                    log.debug(f"Found environment file: {env_file_path}")
+                if env_file_name in bundle.env_files:
+                    env_files.append(str(bundle.env_files[env_file_name]))
+                    log.debug(f"Found environment file: {bundle.env_files[env_file_name]}")
     else:
         # Legacy mode: use command's envoy_env_dir
         if cmd.envoy_env_dir:
@@ -199,14 +234,22 @@ def run_command(
                 print(f"Error: Cannot determine envoy_env directory", file=sys.stderr)
                 return 1
         
+        # Collect global_env.json first if it exists
+        global_env = wrapper_env_dir / 'global_env.json'
+        if global_env.exists():
+            env_files.append(str(global_env))
+            log.debug(f"Found global environment file: {global_env}")
+        
         # Build full environment file paths
-        env_files = [str(wrapper_env_dir / env_file) for env_file in cmd.environment]
+        cmd_env_files = [str(wrapper_env_dir / env_file) for env_file in cmd.environment]
         
         # Verify all environment files exist (only in legacy mode)
-        for env_file in env_files:
+        for env_file in cmd_env_files:
             if not Path(env_file).exists():
                 print(f"Error: Environment file not found: {env_file}", file=sys.stderr)
                 return 1
+        
+        env_files.extend(cmd_env_files)
     
     # Combine base args with user args
     full_args = cmd.base_args + args
@@ -216,8 +259,10 @@ def run_command(
         executable=cmd.executable,
         args=full_args,
         env_files=[Path(f) for f in env_files],
+        inherit_env=passthrough,
+        env_allowlist=env_allowlist,
         capture_output=False,
-        stream_output=True,
+        stream_output=False,
         log_execution=verbose
     )
     
@@ -283,6 +328,12 @@ def main(argv: list[str] | None = None) -> int:
         '--verbose', '-v',
         action='store_true',
         help='Enable verbose logging'
+    )
+    
+    parser.add_argument(
+        '--passthrough', '-pt',
+        action='store_true',
+        help='Inherit the full system environment (overrides default closed environment mode)'
     )
     
     parser.add_argument(
@@ -377,9 +428,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.info:
         return show_command_info(registry, args.info)
     
+    # Parse allowlist and passthrough — needed by both --which and run.
+    allowlist_str = os.environ.get('ENVOY_ALLOWLIST', '')
+    env_allowlist = (
+        {v.strip() for v in allowlist_str.replace(',', ';').split(';') if v.strip()}
+        if allowlist_str else None
+    )
+    if env_allowlist:
+        log.debug(f"Allowlist: {sorted(env_allowlist)}")
+
     # Handle which
     if args.which:
-        return show_which(registry, args.which)
+        return show_which(
+            registry,
+            args.which,
+            bundles=bundles,
+            passthrough=args.passthrough,
+            env_allowlist=env_allowlist,
+        )
     
     # Must have a command to execute
     if not args.command:
@@ -392,7 +458,9 @@ def main(argv: list[str] | None = None) -> int:
         command_name=args.command,
         args=args.args,
         bundles=bundles,
-        verbose=args.verbose
+        verbose=args.verbose,
+        passthrough=args.passthrough,
+        env_allowlist=env_allowlist
     )
 
 
