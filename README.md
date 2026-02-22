@@ -204,13 +204,13 @@ By default Envoy runs in **closed mode**: the subprocess environment contains on
 
 This prevents accidental dependency on the developer's machine state and makes environments fully reproducible.
 
-### Passthrough Mode
+### Inherit-Env Mode
 
-Pass `--passthrough` (or `-pt`) to inherit the full system environment, with bundle env files layered on top:
+Pass `--inherit-env` (or `-ie`) to inherit the full system environment, with bundle env files layered on top:
 
 ```bash
-envoy --passthrough python_dev script.py
-envoy -pt python_dev script.py
+envoy --inherit-env python_dev script.py
+envoy -ie python_dev script.py
 ```
 
 ### Allowlist
@@ -312,7 +312,7 @@ Any bundle can place a `global_env.json` in its `envoy_env/` directory. It is lo
 usage: envoy [-h] [--list] [--info COMMAND] [--which COMMAND]
              [--commands-file PATH] [-cf PATH]
              [--bundles-config PATH] [-bc PATH]
-             [--passthrough] [-pt]
+             [--inherit-env] [-ie]
              [--verbose] [-v]
              [command] [args ...]
 
@@ -323,7 +323,7 @@ Options:
   --which COMMAND               Show the resolved executable path for a command
   --commands-file, -cf PATH     Path to commands.json (auto-detected by default)
   --bundles-config, -bc PATH    Path to bundles config file
-  --passthrough, -pt            Inherit the full system environment (overrides closed mode)
+  --inherit-env, -ie            Inherit the full system environment (overrides closed mode)
   --verbose, -v                 Enable verbose logging
 
 Arguments:
@@ -420,7 +420,7 @@ Envoy is part of the GT Tools collection. See `LICENSE` for details.
 **Executable not found**
 - In closed mode the subprocess `PATH` comes entirely from bundle env files — ensure the bundle defines `+=PATH` pointing to the executable's directory
 - Use `--which <command>` to check what path the executable resolves to against the subprocess `PATH`
-- Use `--passthrough`/`-pt` temporarily to confirm the executable is found when the system `PATH` is inherited
+- Use `--inherit-env`/`-ie` temporarily to confirm the executable is found when the system `PATH` is inherited
 
 **Environment variables not applying**
 - Check JSON syntax in environment files

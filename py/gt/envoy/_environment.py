@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 # Variables always seeded into the subprocess environment in closed mode.
 # These provide identity, paths, and OS services that most processes assume
 # are present. They are never secret and refusing them typically breaks
-# tools in unexpected ways. The user allowlist (ENVOY_ALLOWLIST / --passthrough)
+# tools in unexpected ways. The user allowlist (ENVOY_ALLOWLIST / --inherit-env)
 # is additive on top of these.
 _CORE_ENV_VARS: frozenset[str] = frozenset({
     # --- User identity & home ---
@@ -97,8 +97,8 @@ class EnvironmentManager:
     Environment modes:
     - Closed (default): child process receives variables defined in env files,
       plus the built-in core OS variables (_CORE_ENV_VARS) and any additional
-      variables listed in the user allowlist (ENVOY_ALLOWLIST / --passthrough).
-    - Passthrough: child process inherits the full system environment, with env
+      variables listed in the user allowlist (ENVOY_ALLOWLIST / --inherit-env).
+    - Inherit-env: child process inherits the full system environment, with env
       file values layered on top.
     
     """
@@ -108,7 +108,7 @@ class EnvironmentManager:
         
         Args:
             inherit_env: If True, child process inherits the full system environment
-                (passthrough mode). If False, only env file variables and allowlisted
+                (inherit-env mode). If False, only env file variables and allowlisted
                 system variables are passed through (closed mode).
             allowlist: Set of system environment variable names to inherit even in
                 closed mode. Typically sourced from ENVOY_ALLOWLIST.
@@ -304,7 +304,7 @@ class EnvironmentManager:
             env_files: Single file path or list of file paths to load
             base_env: Variables already in scope before any file is processed.
                 Used for {$VARNAME} expansion and as the starting point for +=
-                and ^= operators.  Should be os.environ.copy() in passthrough
+                and ^= operators.  Should be os.environ.copy() in inherit-env
                 mode, or the allowlist-seeded dict in closed mode.  Never
                 modified — a copy is taken before file processing begins.
             
@@ -406,7 +406,7 @@ class EnvironmentManager:
         """Prepare environment variables for subprocess.
         
         Priority (later overrides earlier):
-        1. Allowlisted system variables (closed mode) or full system env (passthrough mode)
+        1. Allowlisted system variables (closed mode) or full system env (inherit-env mode)
         2. Environment from JSON files
         3. Explicit environment dict
         
@@ -419,7 +419,7 @@ class EnvironmentManager:
             
         """
         if self.inherit_env:
-            # Passthrough: start with the full system environment
+            # Inherit-env: start with the full system environment
             result_env = os.environ.copy()
         else:
             # Closed: always seed core OS variables first, then the user allowlist.

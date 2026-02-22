@@ -23,7 +23,7 @@ R:\path\to\envoy\bin\envoy.bat [options] [command] [args ...]
 | `--which COMMAND` | | Resolve the executable path for a command |
 | `--commands-file PATH` | `-cf` | Path to a specific `commands.json` |
 | `--bundles-config PATH` | `-bc` | Path to a bundles config file |
-| `--passthrough` | `-pt` | Inherit the full system environment (overrides closed mode) |
+| `--inherit-env` | `-ie` | Inherit the full system environment (overrides closed mode) |
 | `--verbose` | `-v` | Enable verbose logging |
 | `--help` | `-h` | Show help message |
 
@@ -112,11 +112,11 @@ envoy --verbose python_dev script.py
 
 Logs bundle discovery, env file loading, environment contents, and executable resolution.
 
-### Run with passthrough (inherit system env)
+### Run with inherit-env (inherit system env)
 
 ```powershell
-envoy --passthrough python_dev script.py
-envoy -pt python_dev script.py
+envoy --inherit-env python_dev script.py
+envoy -ie python_dev script.py
 ```
 
 ## Bundle Discovery
@@ -168,11 +168,11 @@ The subprocess receives only:
 2. **User allowlist** — variables named in `ENVOY_ALLOWLIST`
 3. **Bundle env files** — `global_env.json` (if present) and command-specific env files
 
-### Passthrough mode
+### Inherit-env mode
 
 ```powershell
-envoy --passthrough my_command
-envoy -pt my_command
+envoy --inherit-env my_command
+envoy -ie my_command
 ```
 
 The full system environment is inherited, with bundle env files layered on top.
@@ -184,7 +184,7 @@ $env:ENVOY_ALLOWLIST = "MY_STUDIO_VAR;ANOTHER_VAR"
 envoy my_command
 ```
 
-Lets specific system variables through in closed mode without full passthrough. Supports `;` and `,` as separators.
+Lets specific system variables through in closed mode without full inherit-env. Supports `;` and `,` as separators.
 
 ## `global_env.json`
 
@@ -207,4 +207,4 @@ Set `ENVOY_BNDL_ROOTS`, use `--bundles-config`/`-bc`, use `--commands-file`/`-cf
 Run `envoy --list` to see what is available.
 
 **"Executable 'x' not found in PATH"**
-In closed mode the subprocess `PATH` is built entirely from bundle env files. Ensure the bundle's env files set `+=PATH` to point at the executable's directory. Use `--which` to inspect resolution, or `--passthrough` to temporarily use the system `PATH`.
+In closed mode the subprocess `PATH` is built entirely from bundle env files. Ensure the bundle's env files set `+=PATH` to point at the executable's directory. Use `--which` to inspect resolution, or `--inherit-env` to temporarily use the system `PATH`.
