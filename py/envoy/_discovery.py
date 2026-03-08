@@ -46,6 +46,7 @@ def _is_bndlid(spec: str) -> bool:
 
     Requires the namespace to be at least 2 characters so that Windows drive
     letters (``C:``, ``R:`` etc.) are never mistaken for bundle IDs.
+
     """
     return bool(_BNDLID_RE.match(spec))
 
@@ -76,6 +77,7 @@ def _resolve_bndlid(bndlid: str) -> Path:
 
         path = _resolve_bndlid('gt:pythoncore')
         # → Path('R:/repo/gtvfx-contrib/gt/pythoncore')
+
     """
     m = _BNDLID_RE.match(bndlid)
     if not m:
@@ -132,6 +134,7 @@ def _infer_namespace(bundle_root: Path) -> str:
 
         # R:/repo/gtvfx-contrib/gt/pythoncore  →  'gt'
         # R:/repo/something_weird/pythoncore   →  'gt'  (fallback)
+
     """
     parent_name = bundle_root.parent.name
     if _NAMESPACE_RE.match(parent_name):
@@ -165,6 +168,7 @@ class BundleInfo:
         :class:`BundleInfo` objects (e.g. :class:`~envoy._commands.CommandRegistry`)
         can use the same identifier without round-tripping through a full
         :class:`Bundle` object.
+
         """
         return f"{self.namespace}:{self.name}"
 
@@ -265,6 +269,7 @@ class Bundle:
         print(bundle.version)      # 'checkout'
         print(bundle.is_checkout)  # True
         print(bundle.commands)     # ['python_dev', ...]
+
     """
 
     def __init__(self, spec: str | Path, namespace: str | None = None) -> None:
@@ -305,6 +310,7 @@ class Bundle:
         Can be overridden by passing ``namespace=`` to :class:`Bundle`.
         Defaults to :data:`BUNDLE_DEFAULT_NAMESPACE` when the parent name
         is not a recognised identifier.
+
         """
         return self._info.namespace
 
@@ -320,6 +326,7 @@ class Bundle:
         key once the versioned-build registry is implemented.
 
         Examples: ``'gt:pythoncore'``, ``'gt:globals'``, ``'vfx:maya'``.
+
         """
         return f"{self._info.namespace}:{self._info.name}"
 
@@ -334,6 +341,7 @@ class Bundle:
         When the versioned-build system is implemented this property will
         return a semantic-version string (e.g. ``'1.2.3'``) for production
         bundles, mirroring ``bl.Package.version``.
+
         """
         return BUNDLE_CHECKOUT
 
@@ -347,6 +355,7 @@ class Bundle:
         When the versioned-build pipeline is available, production bundles
         will be resolved from a central registry and this property will
         return ``True``.
+
         """
         return False
 
@@ -356,6 +365,7 @@ class Bundle:
 
         This is the inverse of :attr:`is_production` and always ``True``
         in the current implementation.
+
         """
         return not self.is_production
 
@@ -379,6 +389,7 @@ class Bundle:
         """Sorted list of command names defined in this bundle's ``commands.json``.
 
         Returns an empty list if the file is absent or cannot be parsed.
+
         """
         commands_file = self._info.envoy_env / 'commands.json'
         if not commands_file.exists():
@@ -440,6 +451,7 @@ class BundleConfig:
         for bundle in cfg.bundles:
             print(bundle.name, bundle.version, bundle.is_checkout)
         print(cfg.commands)   # merged command list across all bundles
+
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -547,9 +559,7 @@ def find_git_repos(root_dir: Path, max_depth: int = 5) -> list[Path]:
         return repos
     
     def search_dir(path: Path, depth: int = 0):
-        """Recursively search for git repos.
-        
-        """
+        """Recursively search for git repos."""
         if depth > max_depth:
             return
         

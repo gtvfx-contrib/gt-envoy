@@ -19,6 +19,7 @@ Usage::
         print(f'Process exited {e.returncode}')
     except EnvoyError as e:
         print(f'Envoy error: {e}')
+        
 """
 
 from ._exceptions import (

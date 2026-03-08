@@ -32,6 +32,7 @@ Constants:
     PIPE    -- use as stdout/stderr kwarg to capture a stream (mirrors subprocess.PIPE)
     STDOUT  -- use as stderr kwarg to merge stderr into stdout (mirrors subprocess.STDOUT)
     DEVNULL -- use as stdout/stderr kwarg to discard output (mirrors subprocess.DEVNULL)
+    
 """
 
 from __future__ import annotations
@@ -83,6 +84,7 @@ def _is_raw_path(spec: str) -> bool:
     ``/usr/bin/...``) or contains an explicit directory separator
     (``./code``, ``../bin/code``).  Plain names like ``'maya'``, ``'python'``
     are envoy command names and return ``False``.
+
     """
     p = Path(spec)
     return p.is_absolute() or (os.sep in spec) or ('/' in spec)
@@ -99,6 +101,7 @@ def _raw_popen(
     Unlike :func:`_popen` this does not look up a registry entry — the
     caller is responsible for passing the full path.  The same
     ``CREATE_NO_WINDOW`` / ``cmd /c`` treatment is applied on Windows.
+
     """
     full_cmd: list[str] = [executable] + list(extra_args)
 
@@ -128,6 +131,7 @@ def _load_registry(
     Returns:
         ``(registry, bundles_or_None)``.  *bundles* is ``None`` when the
         registry was seeded from a bare ``commands.json`` rather than bundles.
+
     """
     registry = CommandRegistry()
     bundles: list[BundleInfo] | None = None
@@ -166,6 +170,7 @@ def _collect_env_files(
     Raises:
         CommandNotFoundError: Command not registered.
         EnvironmentBuildError: Env resolution failed or a required file is absent.
+
     """
     cmd = registry.get(command_name)
     if cmd is None:
@@ -245,6 +250,7 @@ def _prepare_env(
     Raises:
         CommandNotFoundError: Command not registered.
         EnvironmentBuildError: Environment preparation failed.
+
     """
     # Decide which command name drives env-file collection.
     env_source = env_override if env_override is not None else command_name
@@ -295,6 +301,7 @@ def _popen(
     Executable is resolved against the subprocess PATH from *env*.  On
     Windows, ``CREATE_NO_WINDOW`` is applied automatically unless the caller
     passes an explicit ``creationflags``.
+
     """
     try:
         resolved = ProcessExecutor.resolve_executable(
@@ -352,6 +359,7 @@ class Environment:
 
         # Capture output from a tool
         output = Environment('python').check_output(['-c', 'import sys; print(sys.version)'])
+
     """
 
     def __init__(
@@ -423,6 +431,7 @@ class Environment:
         Raises:
             CommandNotFoundError: The command is not in any discovered registry.
             EnvironmentBuildError: Environment files are missing or invalid.
+
         """
         if self._env is None:
             if _is_raw_path(self._command) and self._env_override is None:
@@ -465,6 +474,7 @@ class Environment:
 
         Returns:
             The running :class:`subprocess.Popen` instance.
+
         """
         self.build()
         assert self._cmd_def is not None and self._env is not None
@@ -486,6 +496,7 @@ class Environment:
             ValueError: If ``stdout`` or ``stderr`` is :data:`PIPE`.
                 Use :meth:`check_output` or :meth:`spawn` when you need to
                 capture a stream.
+
         """
         if kwargs.get('stdout') is PIPE or kwargs.get('stderr') is PIPE:
             raise ValueError(
@@ -509,6 +520,7 @@ class Environment:
 
         Raises:
             CalledProcessError: If the process exits with a non-zero status.
+
         """
         rc = self.call(args, **kwargs)
         if rc != 0:
@@ -540,6 +552,7 @@ class Environment:
             CalledProcessError: If the process exits with a non-zero status.
             ValueError: If ``stdout`` is given in *kwargs* (it will be
                 overridden), or if both ``input`` and ``stdin`` are provided.
+
         """
         input_ = kwargs.pop('input', None)  # noqa: A001
         if 'stdout' in kwargs:
@@ -605,6 +618,7 @@ def call(
 
     See also:
         :func:`subprocess.call`
+
     """
     if not cmd:
         raise ValueError("'cmd' must be a non-empty list")
@@ -652,6 +666,7 @@ def spawn(
 
     See also:
         :class:`subprocess.Popen`
+
     """
     if not cmd:
         raise ValueError("'cmd' must be a non-empty list")
@@ -695,6 +710,7 @@ def check_call(
 
     See also:
         :func:`subprocess.check_call`
+
     """
     rc = call(
         cmd,
@@ -748,6 +764,7 @@ def check_output(
 
     See also:
         :func:`subprocess.check_output`
+
     """
     if not cmd:
         raise ValueError("'cmd' must be a non-empty list")

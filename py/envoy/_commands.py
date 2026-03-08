@@ -304,6 +304,7 @@ def find_commands_file(start_path: Path | None = None) -> Path | None:
 
     Returns:
         Path to commands.json if found, None otherwise.
+        
     """
     # 1. Honour the override env var set by envoy_testing.patch_commands_file.
     env_override = os.environ.get('ENVOY_COMMANDS_FILE')

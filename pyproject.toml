@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "envoy"
+dynamic = ["version"]
+requires-python = ">=3.10"
+description = "Environment orchestration for managed application execution."
+readme = "README.md"
+license = { file = "LICENSE" }
+
+[project.scripts]
+envoy = "envoy._cli:main"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+# Written automatically at install/build time — committed _version.py is not needed.
+version-file = "py/envoy/_version.py"
+
+[tool.hatch.build.targets.wheel]
+# Package source lives under py/, not the project root.
+packages = ["py/envoy"]

@@ -4,7 +4,16 @@ import os
 import sys
 import argparse
 import logging
+from importlib.metadata import version as _metadata_version, PackageNotFoundError as _PackageNotFoundError
 from pathlib import Path
+
+try:
+    _VERSION = _metadata_version('envoy')
+except _PackageNotFoundError:
+    try:
+        from ._version import __version__ as _VERSION
+    except ImportError:
+        _VERSION = '0.0.0+uninstalled'
 
 from ._commands import CommandRegistry, find_commands_file
 from ._discovery import get_bundles, BundleInfo
@@ -346,7 +355,13 @@ def main(argv: list[str] | None = None) -> int:
         prog='envoy',
         description='Envoy: Environment orchestration for applications'
     )
-    
+
+    parser.add_argument(
+        '--version',
+        action='version',
+        version=f'%(prog)s {_VERSION}',
+    )
+
     parser.add_argument(
         '--list',
         action='store_true',

@@ -17,6 +17,7 @@ and ``CalledProcessError`` is also re-exported on ``envoy.proc`` so that
 the following identity holds::
 
     envoy.exceptions.CalledProcessError is envoy.proc.CalledProcessError
+
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ class EnvoyError(Exception):
 
     Analogous to ``bl.exceptions.BlError``.  Catching this class will catch
     any exception raised by the envoy package.
+
     """
 
 
@@ -47,6 +49,7 @@ class WrapperError(EnvoyError):
 
     Equivalent to ``EnvoyError``; retained so existing code that catches
     ``WrapperError`` continues to work.
+
     """
 
 
@@ -77,6 +80,7 @@ class CalledProcessError(EnvoyError, subprocess.CalledProcessError):
     ``envoy.exceptions``; they are the **same object**::
 
         envoy.exceptions.CalledProcessError is envoy.proc.CalledProcessError
+
     """
 
     def __init__(self, returncode: int, cmd: Union[str, bytes, PathLike], output=None, stderr=None):
@@ -93,6 +97,7 @@ class EnvironmentBuildError(EnvoyError):
 
     Raised when environment files are missing, contain invalid JSON, or when
     variable expansion or path resolution fails during env preparation.
+
     """
 
 
@@ -101,6 +106,7 @@ class CommandNotFoundError(EnvoyError):
 
     Raised by the Python API (``envoy.proc``) when a caller references a
     command that is not registered in any discovered bundle or commands file.
+
     """
 
 
@@ -108,4 +114,5 @@ class ValidationError(EnvoyError):
     """A value provided to an envoy API failed validation.
 
     Analogous to ``bl.exceptions.ValidationError``.
+    
     """

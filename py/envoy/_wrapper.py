@@ -74,9 +74,7 @@ class ApplicationWrapper:
         log.setLevel(self.config.log_level)
     
     def _handle_signal(self, signum, frame):
-        """Handle interrupt signals.
-        
-        """
+        """Handle interrupt signals."""
         log.warning(f"Received signal {signum}, terminating process...")
         self._interrupted = True
         if self._process:
@@ -84,9 +82,7 @@ class ApplicationWrapper:
     
     @contextmanager
     def _signal_handler_context(self):
-        """Context manager for signal handling.
-        
-        """
+        """Context manager for signal handling."""
         self._original_sigint_handler = signal.signal(signal.SIGINT, self._handle_signal)
         try:
             yield
@@ -94,9 +90,7 @@ class ApplicationWrapper:
             signal.signal(signal.SIGINT, self._original_sigint_handler)
     
     def _execute_pre_run(self):
-        """Execute pre-run operations.
-        
-        """
+        """Execute pre-run operations."""
         if not self.config.pre_run:
             return
         
@@ -110,9 +104,7 @@ class ApplicationWrapper:
                 raise PreRunError(f"Pre-run operation failed: {e}") from e
     
     def _execute_post_run(self, result: ExecutionResult):
-        """Execute post-run operations.
-        
-        """
+        """Execute post-run operations."""
         if not self.config.post_run:
             return
         
@@ -251,16 +243,12 @@ class ApplicationWrapper:
         return result
     
     def __call__(self) -> ExecutionResult:
-        """Allow wrapper to be called as a function.
-        
-        """
+        """Allow wrapper to be called as a function."""
         return self.run()
     
     @contextmanager
     def __enter__(self):
-        """Context manager entry.
-        
-        """
+        """Context manager entry."""
         yield self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
