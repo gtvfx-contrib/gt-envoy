@@ -101,7 +101,7 @@ try:
 except _PackageNotFoundError:
     # Raw sys.path checkout — use the file written by hatch-vcs at install time.
     try:
-        from ._version import __version__
+        from ._version import __version__ # type: ignore[no-redef]
     except ImportError:
         __version__ = '0.0.0+uninstalled'
 
