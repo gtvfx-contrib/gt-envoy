@@ -12,6 +12,7 @@ license = { file = "LICENSE" }
 
 [project.scripts]
 envoy = "envoy._cli:main"
+engit = "engit._cli:main"
 
 [tool.hatch.version]
 source = "vcs"
@@ -21,5 +22,5 @@ source = "vcs"
 version-file = "py/envoy/_version.py"
 
 [tool.hatch.build.targets.wheel]
-# Package source lives under py/, not the project root.
-packages = ["py/envoy"]
+# Package sources live under py/, not the project root.
+packages = ["py/envoy", "py/engit"]
