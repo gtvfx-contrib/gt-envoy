@@ -19,11 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Version sentinel constants  (analogous to bl.Package version strings)
+# Version sentinel constants
 # ---------------------------------------------------------------------------
 
 #: Version sentinel for a bundle that lives directly in a git checkout.
-#: Analogous to ``bl.Package(version='checkout')``.
 #: All :class:`Bundle` objects constructed from a filesystem path use this
 #: version until the versioned-build system is implemented.
 BUNDLE_CHECKOUT: str = 'checkout'
@@ -31,8 +30,7 @@ BUNDLE_CHECKOUT: str = 'checkout'
 #: Default namespace prefix for bundles.  Matches the ``gt`` team directory
 #: convention where bundles live under ``<bundle_roots>/gt/<bundle_name>``.
 #: Used when constructing :attr:`Bundle.bndlid` and no explicit namespace is
-#: supplied.  Analogous to the team prefix in ``bl`` package IDs (e.g.
-#: ``'bfd:maya'`` where ``'bfd'`` is the team and ``'maya'`` is the name).
+#: supplied.
 BUNDLE_DEFAULT_NAMESPACE: str = 'gt'
 
 _NAMESPACE_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{1,19}$')
@@ -191,13 +189,13 @@ class BundleInfo:
 
 
 # ---------------------------------------------------------------------------
-# Public API classes  (analogous to bl.Package and bl.Pipeline)
+# Public API classes
 # ---------------------------------------------------------------------------
 
 class Bundle:
     """A discovered envoy bundle.
 
-    Analogous to ``bl.Package``.  A bundle is a directory (or, in the future,
+    A bundle is a directory (or, in the future,
     a versioned built directory) that contains an ``envoy_env/`` subdirectory
     with a ``commands.json`` and one or more environment JSON files.
 
@@ -232,8 +230,7 @@ class Bundle:
         assert bundle.is_production is True
 
     A production bundle is the result of ``git tag`` → build-to-directory
-    process, analogous to how ``bl`` publishes packages.  The
-    :class:`BundleConfig` file will pin these versions (see its docstring
+    process; the :class:`BundleConfig` file will pin these versions (see its docstring
     for the planned config format).
 
     Args:
@@ -318,7 +315,7 @@ class Bundle:
     def bndlid(self) -> str:
         """Namespaced package identifier: ``'<namespace>:<name>'``.
 
-        Analogous to ``bl.Package.bndlid``.  Uniquely identifies a bundle
+        Uniquely identifies a bundle
         within a team's registry and allows bundles from multiple teams to
         coexist without name collisions.
 
@@ -340,7 +337,7 @@ class Bundle:
 
         When the versioned-build system is implemented this property will
         return a semantic-version string (e.g. ``'1.2.3'``) for production
-        bundles, mirroring ``bl.Package.version``.
+        bundles.
 
         """
         return BUNDLE_CHECKOUT
@@ -350,7 +347,7 @@ class Bundle:
         """``True`` if this bundle is a built, versioned release directory.
 
         Always ``False`` in the current implementation — all bundles are git
-        checkout directories.  Mirrors ``bl.Package.isProduction``.
+        checkout directories.
 
         When the versioned-build pipeline is available, production bundles
         will be resolved from a central registry and this property will
@@ -411,8 +408,7 @@ class Bundle:
 class BundleConfig:
     """An envoy bundle configuration file.
 
-    Analogous to ``bl.Pipeline``.  A bundle config is a JSON file that
-    declares which bundles envoy should use — the file passed to the CLI
+    A bundle config is a JSON file that declares which bundles envoy should use — the file passed to the CLI
     via ``--bundles-config``/``-bc``.
 
     **Current format** — flat list of filesystem paths (all checkout mode)::
@@ -434,10 +430,9 @@ class BundleConfig:
         }
 
     In the versioned model each bundle entry resolves to a built output
-    directory tagged with the requested version, analogous to how a
-    ``bl`` pipeline pins specific ``bl.Package`` versions.  The
-    ``checkout:`` prefix will preserve the current path-based behaviour
-    for in-development bundles, mirroring ``bl.Package(version='checkout')``.
+directory tagged with the requested version.  The
+        ``checkout:`` prefix will preserve the current path-based behaviour
+        for in-development bundles.
 
     Args:
         path: Path to the bundle config JSON file.

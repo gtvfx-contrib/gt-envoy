@@ -15,7 +15,7 @@ from ._environment import _CORE_ENV_VARS, _ENVOY_ENV_VARS
 
 
 # ---------------------------------------------------------------------------
-# Public constants (mirrors bl.OPERATING_SYSTEM / bl.SUPPORTED_OPERATING_SYSTEMS)
+# Public constants
 # ---------------------------------------------------------------------------
 
 #: The current operating system name as returned by :func:`platform.system`
@@ -84,8 +84,6 @@ def get_allowlist(extra: list[str] | None = None) -> frozenset[str]:
     temp, system paths, locale) and :data:`~._environment._ENVOY_ENV_VARS`
     (``ENVOY_BNDL_ROOTS``, ``ENVOY_ALLOWLIST``).
 
-    Mirrors ``bl.getPlatformEnvironmentAllowlist()``.
-
     Args:
         extra: Additional variable names to include in the returned set.
 
@@ -108,7 +106,7 @@ def get_allowlist(extra: list[str] | None = None) -> frozenset[str]:
 def set_api_verbosity(level: int | str) -> None:
     """Set the logging verbosity for the ``envoy`` logger.
 
-    Analogous to ``bl.setAPIVerbosity()``.  Pass a :mod:`logging` level
+    Pass a :mod:`logging` level
     constant (``logging.DEBUG``, ``logging.INFO``, etc.) or its string
     equivalent (``'DEBUG'``, ``'INFO'``, etc.).
 

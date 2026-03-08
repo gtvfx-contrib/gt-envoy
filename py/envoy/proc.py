@@ -1,8 +1,7 @@
 ﻿"""envoy.proc -- Process execution with pre-built command environments.
 
 This module is the primary Python API for launching managed subprocesses
-through envoy's environment system.  It mirrors the ergonomics of
-``bl.proc`` so users familiar with that framework can switch seamlessly.
+through envoy's environment system.
 
 Usage examples::
 
@@ -32,7 +31,7 @@ Constants:
     PIPE    -- use as stdout/stderr kwarg to capture a stream (mirrors subprocess.PIPE)
     STDOUT  -- use as stderr kwarg to merge stderr into stdout (mirrors subprocess.STDOUT)
     DEVNULL -- use as stdout/stderr kwarg to discard output (mirrors subprocess.DEVNULL)
-    
+
 """
 
 from __future__ import annotations

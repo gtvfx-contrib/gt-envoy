@@ -23,7 +23,7 @@ Quickstart (Python API)::
     env = proc.Environment('nuke')
     env.spawn(['comp.nk'])
 
-    # Inspect an individual bundle (analogous to bl.Package)
+    # Inspect an individual bundle
     bundle = envoy.Bundle('gt:pythoncore')           # resolve by bndlid via ENVOY_BNDL_ROOTS
     bundle = envoy.Bundle('/repo/gtvfx-contrib/gt/pythoncore')  # or by path
     print(bundle.bndlid)    # 'gt:pythoncore'  (namespace inferred from parent dir)
@@ -31,7 +31,7 @@ Quickstart (Python API)::
     print(bundle.namespace) # 'gt'
     print(bundle.commands)
 
-    # Load a bundle config file (analogous to bl.Pipeline)
+    # Load a bundle config file
     cfg = envoy.BundleConfig('/studio/bundles.json')
     for b in cfg.bundles:
         print(b.name, b.commands)
@@ -158,5 +158,5 @@ from . import exceptions # noqa: E402
 #: Public alias for :class:`~._commands.CommandDefinition`.
 #:
 #: Exposes ``.name``, ``.alias``, ``.bundle``, ``.environment``,
-#: ``.executable``, and ``.base_args`` — a superset of ``bl.Command``.
+#: ``.executable``, and ``.base_args``.
 Command = CommandDefinition

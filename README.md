@@ -261,7 +261,7 @@ Supports both `;` and `,` as separators. These are merged on top of the built-in
 
 ## Python API
 
-Envoy exposes a Python API that mirrors the `bl` library's package model, with bundle-native terminology.
+Envoy exposes a Python API for working with bundles, commands, and managed subprocesses.
 
 ```python
 import envoy as envoy
@@ -271,7 +271,7 @@ import envoy.proc as proc
 print(envoy.__version__)           # '0.1.0'
 envoy.set_api_verbosity('DEBUG')
 
-# ── Bundle  (analogous to bl.Package) ────────────────────────────────────────
+# ── Bundle ──────────────────────────────────────────────────────────────────────
 # Construct by bndlid — resolved from ENVOY_BNDL_ROOTS automatically:
 bundle = envoy.Bundle('gt:pythoncore')
 
@@ -286,7 +286,7 @@ print(bundle.is_checkout)  # True
 print(bundle.commands)     # ['python_dev', ...]
 print(bundle.env_files)    # {'python_env.json': Path(...), ...}
 
-# ── BundleConfig  (analogous to bl.Pipeline) ─────────────────────────────────
+# ── BundleConfig ────────────────────────────────────────────────────────────────
 cfg = envoy.BundleConfig(r'R:/studio/bundles.json')
 for b in cfg.bundles:              # list[Bundle]
     print(b.bndlid, b.version)
@@ -312,7 +312,7 @@ except envoy.CommandNotFoundError:
 
 ### bndlid
 
-A **bundle ID** (`bndlid`) uniquely identifies a bundle as `'<namespace>:<name>'`, analogous to `bl.Package.pkgid`. The namespace is inferred from the parent directory name following the convention `<bundle_roots>/<namespace>/<bundle_name>`, and defaults to `'gt'` when the parent name is not a valid identifier. It can be overridden explicitly:
+A **bundle ID** (`bndlid`) uniquely identifies a bundle as `'<namespace>:<name>'`. The namespace is inferred from the parent directory name following the convention `<bundle_roots>/<namespace>/<bundle_name>`, and defaults to `'gt'` when the parent name is not a valid identifier. It can be overridden explicitly:
 
 ```python
 bundle = envoy.Bundle(r'R:/repo/gtvfx-contrib/gt/pythoncore', namespace='vfx')

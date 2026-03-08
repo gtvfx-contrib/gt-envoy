@@ -34,8 +34,7 @@ from os import PathLike
 class EnvoyError(Exception):
     """Root base class for all envoy exceptions.
 
-    Analogous to ``bl.exceptions.BlError``.  Catching this class will catch
-    any exception raised by the envoy package.
+    Catching this class will catch any exception raised by the envoy package.
 
     """
 
@@ -111,8 +110,4 @@ class CommandNotFoundError(EnvoyError):
 
 
 class ValidationError(EnvoyError):
-    """A value provided to an envoy API failed validation.
-
-    Analogous to ``bl.exceptions.ValidationError``.
-    
-    """
+    """A value provided to an envoy API failed validation."""
