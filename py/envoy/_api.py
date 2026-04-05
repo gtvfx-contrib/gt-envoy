@@ -100,7 +100,68 @@ def get_allowlist(extra: list[str] | None = None) -> frozenset[str]:
     base = _CORE_ENV_VARS | _ENVOY_ENV_VARS
     if extra:
         return base | frozenset(extra)
-    return base
+def trace_environment(
+    command: str,
+    var: str,
+    *,
+    inherit_env: bool = False,
+    allowlist: list[str] | None = None,
+    bundle_roots: list[str] | None = None,
+    commands_file: Path | None = None,
+) -> tuple[dict[str, str], list]:
+    """Build the environment for *command* and return a trace of how *var* mutated.
+
+    This is the programmatic equivalent of ``envoy --trace VAR command``.  It
+    performs all the same environment-file processing without launching a
+    process, returning both the final environment dict and a list of trace
+    events that describe each mutation step.
+
+    Args:
+        command: The envoy command name (e.g. ``'unreal'``).
+        var: Name of the environment variable to trace (e.g. ``'UE_PYTHONPATH'``).
+        inherit_env: When ``True`` the dict is based on the full current process
+            environment.  When ``False`` (default) only env file variables and
+            the built-in OS seed vars are included.
+        allowlist: Additional system variable names to include in closed mode.
+        bundle_roots: Override bundle discovery roots.
+        commands_file: Explicit ``commands.json`` path.
+
+    Returns:
+        A ``(env_dict, trace_events)`` tuple.  *trace_events* is a list of
+        :class:`~._environment.TraceAllowlistEvent` and
+        :class:`~._environment.TraceStepEvent` instances in processing order.
+
+    Raises:
+        ~.CommandNotFoundError: If *command* is not registered.
+        ~.EnvironmentBuildError: If environment preparation fails.
+
+    Example::
+
+        env, events = envoy.trace_environment('unreal', 'UE_PYTHONPATH')
+        for ev in events:
+            print(ev)
+
+    """
+    from .proc import _load_registry, _collect_env_files
+    from ._environment import EnvironmentManager
+
+    registry, bundles = _load_registry(
+        bundle_roots=bundle_roots,
+        commands_file=commands_file,
+    )
+    env_files = _collect_env_files(command, registry, bundles)
+
+    trace_events: list = []
+    env_mgr = EnvironmentManager(
+        inherit_env=inherit_env,
+        allowlist=set(allowlist) if allowlist else None,
+    )
+    final_env = env_mgr.prepare_environment(
+        env_files=env_files,
+        trace_var=var,
+        trace_out=trace_events,
+    )
+    return final_env, trace_events
 
 
 def set_api_verbosity(level: int | str) -> None:

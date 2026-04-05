@@ -18,7 +18,7 @@ except _PackageNotFoundError:
 from ._commands import CommandRegistry, find_commands_file
 from ._discovery import get_bundles, BundleInfo
 from ._wrapper import ApplicationWrapper
-from ._environment import EnvironmentManager
+from ._environment import EnvironmentManager, TraceAllowlistEvent, TraceStepEvent
 from ._executor import ProcessExecutor
 from ._models import WrapperConfig
 from ._exceptions import WrapperError
@@ -341,6 +341,162 @@ def run_command(
         return 130
 
 
+def trace_command(
+    registry: CommandRegistry,
+    command_name: str,
+    trace_var: str,
+    bundles: list[BundleInfo] | None = None,
+    inherit_env: bool = False,
+    env_allowlist: set[str] | None = None,
+    env_override: str | None = None,
+) -> int:
+    """Show how *trace_var* is mutated through env file processing for *command_name*.
+
+    Prints each mutation step (allowlist seeding, per-file entries) and exits
+    without running the command.
+
+    Args:
+        registry: Command registry
+        command_name: Name of the command whose env files to trace
+        trace_var: Environment variable name to trace
+        bundles: Discovered bundles (for multi-bundle env file search)
+        inherit_env: Whether to inherit the full system environment
+        env_allowlist: System variable names to seed in closed mode
+        env_override: Alternate command whose env files to use
+
+    Returns:
+        Exit code (0 for success)
+
+    """
+    cmd = registry.get(command_name)
+    if not cmd:
+        print(f"Error: Command '{command_name}' not found", file=sys.stderr)
+        return 1
+
+    env_source_name = command_name
+    if env_override is not None:
+        if registry.get(env_override) is None:
+            print(f"Error: Environment override command '{env_override}' not found", file=sys.stderr)
+            return 1
+        env_source_name = env_override
+
+    # Collect environment files (mirrors run_command logic)
+    env_files: list[str] = []
+    if bundles:
+        for bundle in bundles:
+            if 'global_env.json' in bundle.env_files:
+                env_files.append(str(bundle.env_files['global_env.json']))
+        try:
+            resolved_env = registry.resolve_environment(env_source_name)
+        except WrapperError as e:
+            print(f"Error resolving environment for '{env_source_name}': {e}", file=sys.stderr)
+            return 1
+        for env_file_name, _env_dir in resolved_env:
+            for bundle in bundles:
+                if env_file_name in bundle.env_files:
+                    env_files.append(str(bundle.env_files[env_file_name]))
+    else:
+        env_source_cmd = registry.get(env_source_name)
+        env_dir_cmd = env_source_cmd if env_source_cmd is not None else cmd
+        if env_dir_cmd.envoy_env_dir:
+            wrapper_env_dir = env_dir_cmd.envoy_env_dir
+        else:
+            commands_file = find_commands_file()
+            if commands_file:
+                wrapper_env_dir = commands_file.parent
+            else:
+                print("Error: Cannot determine envoy_env directory", file=sys.stderr)
+                return 1
+        global_env = wrapper_env_dir / 'global_env.json'
+        if global_env.exists():
+            env_files.append(str(global_env))
+        try:
+            resolved_env = registry.resolve_environment(env_source_name)
+        except WrapperError as e:
+            print(f"Error resolving environment for '{env_source_name}': {e}", file=sys.stderr)
+            return 1
+        cmd_env_files = [
+            str((env_dir or wrapper_env_dir) / env_file_name)
+            for env_file_name, env_dir in resolved_env
+        ]
+        for env_file in cmd_env_files:
+            if not Path(env_file).exists():
+                print(f"Error: Environment file not found: {env_file}", file=sys.stderr)
+                return 1
+        env_files.extend(cmd_env_files)
+
+    # Build environment with tracing enabled
+    trace_events: list = []
+    env_mgr = EnvironmentManager(inherit_env=inherit_env, allowlist=env_allowlist)
+    final_env = env_mgr.prepare_environment(
+        env_files=[Path(f) for f in env_files],
+        trace_var=trace_var,
+        trace_out=trace_events,
+    )
+    final_value = final_env.get(trace_var)
+
+    # ── Format output ────────────────────────────────────────────────────────
+    sep = '─' * 64
+    env_label = f" (via --env {env_override})" if env_override else ""
+    print(f"\nTracing '{trace_var}' for command '{command_name}'{env_label}\n")
+
+    print(f"Env files ({len(env_files)}):")
+    for i, f in enumerate(env_files, 1):
+        print(f"  [{i}] {f}")
+    print()
+
+    # Pre-pass: allowlist seeding
+    allowlist_events = [e for e in trace_events if isinstance(e, TraceAllowlistEvent)]
+    print(sep)
+    print("Pre-pass: allowlist seeding")
+    if allowlist_events:
+        for ev in allowlist_events:
+            file_label = Path(ev.file_path).name
+            if ev.already_set:
+                print(f"  {file_label}  {trace_var} in environment_allowlist (already in base env, skipped)")
+            elif ev.seeded:
+                print(f"  {file_label}  {trace_var} in environment_allowlist")
+                print(f"    → seeded from os.environ: {ev.os_value!r}")
+            else:
+                print(f"  {file_label}  {trace_var} in environment_allowlist (not present in os.environ)")
+    else:
+        print(f"  {trace_var} not listed in any environment_allowlist")
+    print()
+
+    # Per-file processing
+    print(sep)
+    print("File processing:")
+    step_events = [e for e in trace_events if isinstance(e, TraceStepEvent)]
+    for i, f in enumerate(env_files, 1):
+        file_path = Path(f)
+        steps = [e for e in step_events if Path(e.file_path) == file_path]
+        print(f"\n  [{i}] {file_path}")
+        if not steps:
+            print(f"       {trace_var} not mentioned")
+        else:
+            for ev in steps:
+                before_str = repr(ev.value_before) if ev.value_before else "<not set>"
+                print(f"       {ev.operator}{trace_var}: {ev.raw_value}")
+                print(f"         before:   {before_str}")
+                if ev.expanded_value != ev.raw_value.strip('"'):
+                    print(f"         expanded: {ev.expanded_value!r}")
+                if not ev.was_applied:
+                    print(f"         → no-op ({ev.operator} skipped, variable already set)")
+                else:
+                    print(f"         after:    {ev.value_after!r}")
+    print()
+
+    # Final result
+    print(sep)
+    if final_value is not None:
+        print(f"Result: {trace_var} = {final_value!r}")
+    else:
+        print(f"Result: {trace_var} is not set")
+    print()
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point.
     
@@ -411,6 +567,17 @@ def main(argv: list[str] | None = None) -> int:
         '--inherit-env', '-ie',
         action='store_true',
         help='Inherit the full system environment (overrides default closed environment mode)'
+    )
+
+    parser.add_argument(
+        '--trace',
+        metavar='VAR',
+        help=(
+            'Show how VAR is mutated through env file processing for COMMAND. '
+            'Prints each mutation step (allowlist seeding, per-file operators) '
+            'and exits without running COMMAND. '
+            'Example: envoy --trace UE_PYTHONPATH unreal'
+        )
     )
     
     parser.add_argument(
@@ -522,6 +689,22 @@ def main(argv: list[str] | None = None) -> int:
             bundles=bundles,
             inherit_env=args.inherit_env,
             env_allowlist=env_allowlist,
+        )
+
+    # Handle trace
+    if args.trace:
+        if not args.command:
+            print("Error: --trace requires a COMMAND argument", file=sys.stderr)
+            print("Example: envoy --trace UE_PYTHONPATH unreal", file=sys.stderr)
+            return 1
+        return trace_command(
+            registry=registry,
+            command_name=args.command,
+            trace_var=args.trace,
+            bundles=bundles,
+            inherit_env=args.inherit_env,
+            env_allowlist=env_allowlist,
+            env_override=args.env,
         )
     
     # Must have a command to execute

@@ -77,6 +77,11 @@ __all__ = [
     'get_environment',
     'get_allowlist',
     'set_api_verbosity',
+    'trace_environment',
+
+    # ---- Trace event types ----
+    'TraceAllowlistEvent',
+    'TraceStepEvent',
 
     # ---- Utility functions ----
     'create_wrapper',
@@ -145,7 +150,9 @@ from ._api import (
     get_environment,
     get_allowlist,
     set_api_verbosity,
+    trace_environment,
 )
+from ._environment import TraceAllowlistEvent, TraceStepEvent
 from ._cli import main as cli_main
 
 # Convenience submodule imports — ``import envoy`` makes these available as

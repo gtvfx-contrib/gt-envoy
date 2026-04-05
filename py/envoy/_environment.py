@@ -4,6 +4,7 @@ import os
 import json
 import re
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,38 @@ from ._exceptions import WrapperError
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class TraceAllowlistEvent:
+    """Emitted when the traced variable appears in an ``environment_allowlist``."""
+    file_path: Path
+    var_name: str
+    #: True → the variable was actually written into the merged env.
+    seeded: bool
+    #: Value from ``os.environ`` at seed time (empty string if absent).
+    os_value: str
+    #: True → var was already present in ``merged_env`` (base_env wins); seeded is False.
+    already_set: bool
+
+
+@dataclass
+class TraceStepEvent:
+    """Emitted for each env-file entry that touches the traced variable."""
+    file_path: Path
+    var_name: str
+    #: Operator string: ``'='``, ``'+='``, ``'^='``, or ``'?='``.
+    operator: str
+    #: Raw JSON value from the file (as produced by ``json.dumps``).
+    raw_value: str
+    #: Value after ``${VAR}`` expansion.
+    expanded_value: str
+    #: ``merged_env[var_name]`` before this entry was processed (empty string if absent).
+    value_before: str
+    #: ``merged_env[var_name]`` after this entry was processed.
+    value_after: str
+    #: False when a ``?=`` entry was skipped because the variable was already set.
+    was_applied: bool
 
 
 # Variables always seeded into the subprocess environment in closed mode.
@@ -30,6 +63,8 @@ _CORE_ENV_VARS: frozenset[str] = frozenset({
     'APPDATA',
     'LOCALAPPDATA',
     'PUBLIC',
+    'PROGRAMDATA',
+    'ALLUSERSPROFILE',  # legacy alias for PROGRAMDATA, still set on all Windows versions
     # --- Temp ---
     'TEMP',
     'TMP',
@@ -54,6 +89,7 @@ _CORE_ENV_VARS: frozenset[str] = frozenset({
     'NUMBER_OF_PROCESSORS',
     # --- Shell / console ---
     'COMSPEC',
+    'PATHEXT',          # Windows: executable file extensions (.COM;.EXE;.BAT;.CMD;...)
     'TERM',
     'TERM_PROGRAM',
     'COLORTERM',
@@ -282,6 +318,8 @@ class EnvironmentManager:
         self, 
         env_files: str | Path | list[str | Path] | None,
         base_env: dict[str, str] | None = None,
+        trace_var: str | None = None,
+        trace_out: list | None = None,
     ) -> dict[str, str]:
         """Load environment variables from JSON file(s).
         
@@ -392,8 +430,18 @@ class EnvironmentManager:
         for _path, _data in parsed_files:
             if isinstance(_data, dict):
                 for var in _data.get('environment_allowlist', []):
-                    if var not in merged_env and var in os.environ:
+                    already_set = var in merged_env
+                    in_os = var in os.environ
+                    if not already_set and in_os:
                         merged_env[var] = os.environ[var]
+                    if trace_out is not None and trace_var == var:
+                        trace_out.append(TraceAllowlistEvent(
+                            file_path=_path,
+                            var_name=var,
+                            seeded=not already_set and in_os,
+                            os_value=os.environ.get(var, ''),
+                            already_set=already_set,
+                        ))
 
         # --- Main pass: process each file's entries in order -----------------
         for path, file_data in parsed_files:
@@ -472,10 +520,14 @@ class EnvironmentManager:
                     
                     # Process the value (handles lists, normalization, expansion)
                     processed_value = self.process_env_value(value, merged_env, special_vars)
-                    
+
+                    value_before = merged_env.get(var_name, '')
+                    was_applied = True
                     if default_mode:
                         if var_name not in merged_env:
                             merged_env[var_name] = processed_value
+                        else:
+                            was_applied = False
                     elif append_mode or prepend_mode:
                         current_value = merged_env.get(var_name, '')
                         if append_mode:
@@ -490,6 +542,19 @@ class EnvironmentManager:
                                 merged_env[var_name] = processed_value
                     else:
                         merged_env[var_name] = processed_value
+
+                    if trace_out is not None and trace_var == var_name:
+                        operator = '?=' if default_mode else '+=' if append_mode else '^=' if prepend_mode else '='
+                        trace_out.append(TraceStepEvent(
+                            file_path=path,
+                            var_name=var_name,
+                            operator=operator,
+                            raw_value=json.dumps(value),
+                            expanded_value=processed_value,
+                            value_before=value_before,
+                            value_after=merged_env.get(var_name, ''),
+                            was_applied=was_applied,
+                        ))
                 
                 log.info('Loaded environment from %s (%d entries)', path, len(items))
 
@@ -503,7 +568,9 @@ class EnvironmentManager:
     def prepare_environment(
         self,
         env_files: str | Path | list[str | Path] | None = None,
-        env: dict[str, str] | None = None
+        env: dict[str, str] | None = None,
+        trace_var: str | None = None,
+        trace_out: list | None = None,
     ) -> dict[str, str]:
         """Prepare environment variables for subprocess.
         
@@ -538,7 +605,7 @@ class EnvironmentManager:
         # Pass result_env as base_env so ${VAR} expansion and += / ^= operators
         # inside env files see exactly the same variables that will be in scope —
         # no silent leakage of system variables that aren't in base_env.
-        file_env = self.load_env_from_files(env_files, base_env=result_env)
+        file_env = self.load_env_from_files(env_files, base_env=result_env, trace_var=trace_var, trace_out=trace_out)
         result_env.update(file_env)
         
         # Explicit env dict overrides everything
