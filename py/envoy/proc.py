@@ -302,14 +302,20 @@ def _popen(
     passes an explicit ``creationflags``.
 
     """
+    from ._environment import EnvironmentManager
+
+    expanded = cmd_def.expand_alias(env)
+    executable = expanded[0]
+    base_args = expanded[1:]
+
     try:
         resolved = ProcessExecutor.resolve_executable(
-            cmd_def.executable, search_path=env.get('PATH')
+            executable, search_path=env.get('PATH')
         )
     except WrapperError as e:
         raise EnvironmentBuildError(str(e)) from e
 
-    full_cmd = [resolved] + cmd_def.base_args + list(extra_args)
+    full_cmd = [resolved] + list(base_args) + list(extra_args)
 
     if os.name == 'nt':
         if 'creationflags' not in kwargs:

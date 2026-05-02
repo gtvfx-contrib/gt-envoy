@@ -1,4 +1,4 @@
-"""Environment variable handling for ApplicationWrapper."""
+﻿"""Environment variable handling for ApplicationWrapper."""
 
 import os
 import json
@@ -108,6 +108,10 @@ _CORE_ENV_VARS: frozenset[str] = frozenset({
     'XDG_CONFIG_HOME',
     'XDG_DATA_HOME',
     'XDG_CACHE_HOME',
+    # --- NOTE: PATH and PYTHONPATH are intentionally excluded ---
+    # These are only inherited from the local environment when inherit_env=True.
+    # In closed mode (the default) env files are solely responsible for setting PATH
+    # and PYTHONPATH, preventing unintentional leakage from the host environment.
 })
 
 # Envoy's own environment variables — always carried through so that child
@@ -578,6 +582,12 @@ class EnvironmentManager:
         1. Allowlisted system variables (closed mode) or full system env (inherit-env mode)
         2. Environment from JSON files
         3. Explicit environment dict
+
+        Note:
+            ``PATH`` and ``PYTHONPATH`` are **not** seeded automatically in closed
+            mode (the default).  Env files are solely responsible for defining
+            them.  Pass ``inherit_env=True`` to ``EnvironmentManager`` if you need
+            to propagate them from the host environment.
         
         Args:
             env_files: JSON file(s) to load environment from

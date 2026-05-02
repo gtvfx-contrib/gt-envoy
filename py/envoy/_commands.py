@@ -22,6 +22,7 @@ class CommandDefinition:
             e.g. ``'gt:pythoncore'``).  ``None`` for commands loaded from a
             bare ``commands.json`` without bundle context.
         envoy_env_dir: Directory containing environment files
+        source_file: Path to the commands.json file this command was loaded from. None for commands constructed programmatically.
         
     """
     
@@ -31,7 +32,8 @@ class CommandDefinition:
         environment: list[str],
         alias: list[str] | None = None,
         bundle: str | None = None,
-        envoy_env_dir: Path | None = None
+        envoy_env_dir: Path | None = None,
+        source_file: Path | None = None
     ):
         """Initialize command definition.
         
@@ -41,6 +43,7 @@ class CommandDefinition:
             alias: Optional alias command parts (e.g., ["python", "-m", "module"])
             bundle: Optional bundle name this command belongs to
             envoy_env_dir: Optional directory containing environment files
+            source_file: Optional path to the commands.json this was loaded from
             
         """
         self.name = name
@@ -48,6 +51,7 @@ class CommandDefinition:
         self.alias = alias
         self.bundle = bundle  # bndlid string, e.g. 'gt:pythoncore'
         self.envoy_env_dir = envoy_env_dir
+        self.source_file = source_file
     
     @property
     def executable(self) -> str:
@@ -72,8 +76,41 @@ class CommandDefinition:
         if self.alias and len(self.alias) > 1:
             return self.alias[1:]
         return []
-    
-    def __repr__(self) -> str:
+
+    def expand_alias(self, env: dict[str, str] | None = None) -> list[str]:
+        """Return the alias with ``${__BUNDLE__}`` and env-var references expanded.
+
+        Special variables (``${__BUNDLE__}``, ``${__BUNDLE_ENV__}``,
+        ``${__BUNDLE_NAME__}``) are resolved from :attr:`envoy_env_dir`.
+        Any remaining ``${VAR}`` references are resolved against *env* if
+        provided.
+
+        Args:
+            env: Optional subprocess environment dict for expanding
+                ``${VAR}`` references beyond the built-in special vars.
+
+        Returns:
+            Expanded alias parts, or ``[self.name]`` when no alias is defined.
+
+        """
+        raw = self.alias if self.alias else [self.name]
+        if self.envoy_env_dir is None:
+            return list(raw)
+
+        from ._environment import EnvironmentManager
+        special_vars = {
+            '__BUNDLE__': str(self.envoy_env_dir.parent).replace('\\', '/'),
+            '__BUNDLE_ENV__': str(self.envoy_env_dir).replace('\\', '/'),
+            '__BUNDLE_NAME__': self.envoy_env_dir.parent.name,
+        }
+        return [
+            EnvironmentManager.normalize_path(
+                EnvironmentManager.expand_env_value(part, env or {}, special_vars)
+            )
+            for part in raw
+        ]
+
+
         """String representation."""
         alias_str = f" (alias: {' '.join(self.alias)})" if self.alias else ""
         bundle_str = f" [{self.bundle}]" if self.bundle else ""
@@ -149,7 +186,8 @@ class CommandRegistry:
                     environment=environment,
                     alias=alias,
                     bundle=bundle_name,
-                    envoy_env_dir=wrapper_env_dir
+                    envoy_env_dir=wrapper_env_dir,
+                    source_file=commands_file
                 )
                 
                 # Track conflicts

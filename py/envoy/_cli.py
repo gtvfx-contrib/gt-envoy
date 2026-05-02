@@ -1,4 +1,4 @@
-"""Command-line interface for envoy."""
+﻿"""Command-line interface for envoy."""
 
 import os
 import sys
@@ -150,11 +150,13 @@ def show_which(
         print(f"Error: Command '{command_name}' not found", file=sys.stderr)
         return 1
     
-    executable = cmd.executable
+    executable = cmd.expand_alias()[0]
     
     if cmd.alias:
         alias_str = " ".join(cmd.alias)
         print(f"command {command_name} aliased to: {alias_str}")
+        if cmd.source_file:
+            print(f"  defined in: {cmd.source_file}")
         return 0
     
     # Build env files the same way run_command does so PATH is correct.
@@ -192,8 +194,12 @@ def show_which(
     try:
         resolved = ProcessExecutor.resolve_executable(executable, search_path=env.get('PATH'))
         print(f"command {command_name} resolved to: {resolved}")
+        if cmd.source_file:
+            print(f"  defined in: {cmd.source_file}")
     except WrapperError:
         print(f"command {command_name} executable: {executable} (not found on PATH)")
+        if cmd.source_file:
+            print(f"  defined in: {cmd.source_file}")
     
     return 0
 
@@ -313,12 +319,14 @@ def run_command(
 
         env_files.extend(cmd_env_files)
     
+    # Expand ${__BUNDLE__} and other special vars in alias parts.
+    expanded = cmd.expand_alias()
     # Combine base args with user args
-    full_args = cmd.base_args + args
+    full_args = expanded[1:] + args
     
     # Create wrapper config
     config = WrapperConfig(
-        executable=cmd.executable,
+        executable=expanded[0],
         args=full_args,
         env_files=[Path(f) for f in env_files],
         inherit_env=inherit_env,
@@ -537,13 +545,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     
     parser.add_argument(
-        '--commands-file', '-cf',
+        '--commands-file', '-c',
         type=Path,
         help='Path to commands.json file (auto-detected if not specified)'
     )
     
     parser.add_argument(
-        '--bundles-config', '-bc',
+        '--bundles-config', '-b',
         type=Path,
         help='Path to bundles config file (auto-discovers from ENVOY_BNDL_ROOTS if not specified)'
     )
@@ -564,7 +572,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     
     parser.add_argument(
-        '--inherit-env', '-ie',
+        '--inherit-env', '-i',
         action='store_true',
         help='Inherit the full system environment (overrides default closed environment mode)'
     )
@@ -588,19 +596,16 @@ def main(argv: list[str] | None = None) -> int:
     
     parser.add_argument(
         'args',
-        nargs='*',
+        nargs=argparse.REMAINDER,
         help='Arguments to pass to the command'
     )
     
-    # Parse args - use parse_known_args to allow passthrough to commands
+    # Parse args - REMAINDER captures everything after the command verbatim,
+    # including flags like -c or --version that belong to the child process.
     if argv is None:
         argv = sys.argv[1:]
     
-    args, unknown_args = parser.parse_known_args(argv)
-    
-    # Combine args with any unknown args (these should be passed to the command)
-    if unknown_args:
-        args.args = list(args.args) + unknown_args
+    args = parser.parse_args(argv)
     
     # Setup logging
     setup_logging(args.verbose)

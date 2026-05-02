@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
 from envoy._commands import CommandRegistry
-from envoy._cli import show_command_info
+from envoy._cli import show_command_info, show_which
 
 
 def _make_registry(commands: dict) -> CommandRegistry:
@@ -61,3 +61,36 @@ def test_show_command_info_wrappererror_returns_1(capsys):
     assert rc == 1
     assert "Error" in captured.err
     assert "broken" in captured.err
+
+
+def test_show_which_alias_prints_source_file(capsys):
+    """show_which for an alias command should print the commands.json path."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cmds = {
+            "python": {"environment": [], "alias": ["python"]},
+        }
+        f = Path(tmpdir) / "commands.json"
+        f.write_text(json.dumps(cmds))
+        registry = CommandRegistry(f)
+
+    rc = show_which(registry, "python")
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "aliased to: python" in captured.out
+    assert "defined in:" in captured.out
+
+
+def test_show_which_unknown_command_returns_1(capsys):
+    """show_which should return 1 when the command is not found."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cmds = {"python": {"environment": [], "alias": ["python"]}}
+        f = Path(tmpdir) / "commands.json"
+        f.write_text(json.dumps(cmds))
+        registry = CommandRegistry(f)
+
+    rc = show_which(registry, "nonexistent")
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "not found" in captured.err

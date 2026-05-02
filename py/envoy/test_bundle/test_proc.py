@@ -563,6 +563,48 @@ class TestBundleDiscoveryIntegration:
         assert built.get("GLOBAL_BUNDLE_VAR") == "from_global"
         assert built.get("APP_VAR") == "from_app"
 
+    def test_bundle_alias_expansion(self, tmp_path):
+        """${__BUNDLE__} in an alias is expanded to the bundle root before execution."""
+        # Create a thin wrapper script inside the bundle that delegates to the
+        # real Python interpreter.  This lets us reference it as
+        # "${__BUNDLE__}/bin/<script>" without copying the full runtime.
+        bundle_bin = tmp_path / "gt" / "myapp" / "bin"
+        bundle_bin.mkdir(parents=True)
+
+        if os.name == "nt":
+            wrapper = bundle_bin / "pyalias.bat"
+            wrapper.write_text(
+                f'@echo off\n"{sys.executable}" %*\n', encoding="utf-8"
+            )
+            alias_entry = "${__BUNDLE__}/bin/pyalias.bat"
+        else:
+            wrapper = bundle_bin / "pyalias.sh"
+            wrapper.write_text(
+                f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8"
+            )
+            wrapper.chmod(0o755)
+            alias_entry = "${__BUNDLE__}/bin/pyalias.sh"
+
+        _make_bundle(
+            tmp_path,
+            name="myapp",
+            commands={
+                "myapp": {
+                    "environment": ["myapp_env.json"],
+                    "alias": [alias_entry],
+                }
+            },
+            env_files={"myapp_env.json": {"BUNDLE_ALIAS_TEST": "expanded"}},
+        )
+
+        env = Environment("myapp", bundle_roots=[str(tmp_path)])
+        # If ${__BUNDLE__} is NOT expanded, EnvironmentBuildError is raised.
+        # If it IS expanded, the wrapper runs Python successfully.
+        result = env.check_output(
+            ["-c", "import os; print(os.environ['BUNDLE_ALIAS_TEST'])"],
+        )
+        assert result.strip() == b"expanded"
+
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
