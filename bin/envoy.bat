@@ -1,14 +1,16 @@
 @echo off
 REM Main entry point for envoy CLI
-REM Usage: do [command] [args...]
-REM        do --list
-REM        do --info <command>
+REM Usage: envoy [command] [args...]
+REM        envoy --list
+REM        envoy --info <command>
 
-REM Set PYTHONPATH to find the envoy module
+REM Prefer the pre-built standalone executable when available.
+if exist "%~dp0..\dist\envoy.exe" (
+    "%~dp0..\dist\envoy.exe" %*
+    exit /b %errorlevel%
+)
+
+REM Fall back to running from source (development mode).
 set "PYTHONPATH=%~dp0..\py;%PYTHONPATH%"
-
-REM Execute the envoy CLI module
 python -m envoy %*
-
-REM Exit with the same code as the Python process
 exit /b %errorlevel%
