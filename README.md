@@ -59,37 +59,37 @@ Envoy simplifies the execution of applications that require specific environment
 
 ### Installation
 
-1. Clone the repository:
+**Pre-built executables (recommended)**
+
+Download `envoy.exe` and `engit.exe` from the latest [GitHub Release](../../releases) and add them to a directory on your `PATH`.
+
+**From source**
+
 ```bash
 git clone <repo-url> envoy
-```
-
-2. Add the `bin` directory to your PATH, or use the full path to `envoy.bat`:
-```bash
-# Windows
+cd envoy
+pip install -e py        # installs the envoy package
+# Add bin/ to PATH for the en / engit / envoy .bat launchers
 set PATH=%PATH%;C:\path\to\envoy\bin
-
-# Or use directly
-C:\path\to\envoy\bin\envoy.bat --help
 ```
 
 ### Basic Usage
 
 ```bash
 # List all available commands
-envoy --list
+en --list
 
 # Show detailed information about a command
-envoy --info python_dev
+en --info python_dev
 
 # Show where a command's executable is located
-envoy --which python_dev
+en --which python_dev
 
 # Run a command
-envoy python_dev script.py --arg value
+en python_dev script.py --arg value
 
 # Enable verbose logging
-envoy --verbose python_dev script.py
+en --verbose python_dev script.py
 ```
 
 ## Core Concepts
@@ -142,6 +142,7 @@ Environment files define variable assignments using JSON. Keys may carry an oper
 | `"VAR": "value"` | Assign / replace |
 | `"+=VAR": "value"` | Append `value` to existing, separated by the OS path separator (`;` / `:`) |
 | `"^=VAR": "value"` | Prepend `value` to existing, separated by the OS path separator |
+| `"?=VAR": "value"` | Set only if `VAR` is not already defined (default / fallback) |
 
 **List values** — A JSON array is joined with the OS path separator:
 
@@ -173,7 +174,7 @@ Environment files define variable assignments using JSON. Keys may carry an oper
 | `${__BUNDLE_NAME__}` | Bundle directory name |
 | `${__FILE__}` | Full path of the current JSON file being loaded |
 
-See [ENV_FILES_README.md](py/gt/envoy/examples/envoy_env/ENV_FILES_README.md) for detailed documentation.
+See [ENV_FILES_README.md](py/envoy/examples/envoy_env/ENV_FILES_README.md) for detailed documentation.
 
 ## Bundle Discovery
 
@@ -222,11 +223,11 @@ Or as a direct array:
 
 Use with:
 ```bash
-envoy --bundles-config bundles.json --list
-envoy -bc bundles.json --list
+en --bundles-config bundles.json --list
+en -b bundles.json --list
 ```
 
-See [BUNDLE_DISCOVERY.md](py/gt/envoy/BUNDLE_DISCOVERY.md) for more.
+See [BUNDLE_DISCOVERY.md](py/envoy/BUNDLE_DISCOVERY.md) for more.
 
 ## Environment Modes
 
@@ -242,11 +243,11 @@ This prevents accidental dependency on the developer's machine state and makes e
 
 ### Inherit-Env Mode
 
-Pass `--inherit-env` (or `-ie`) to inherit the full system environment, with bundle env files layered on top:
+Pass `--inherit-env` (or `-i`) to inherit the full system environment, with bundle env files layered on top:
 
 ```bash
-envoy --inherit-env python_dev script.py
-envoy -ie python_dev script.py
+en --inherit-env python_dev script.py
+en -i python_dev script.py
 ```
 
 ### Allowlist
@@ -405,27 +406,35 @@ Any bundle can place a `global_env.json` in its `envoy_env/` directory. In multi
 ## CLI Reference
 
 ```
-usage: envoy [-h] [--list] [--info COMMAND] [--which COMMAND]
-             [--commands-file PATH] [-cf PATH]
-             [--bundles-config PATH] [-bc PATH]
-             [--inherit-env] [-ie]
+usage: envoy [-h] [--version]
+             [--list] [--info COMMAND] [--which COMMAND]
+             [--commands-file PATH] [-c PATH]
+             [--bundles-config PATH] [-b PATH]
+             [--env ENV_COMMAND] [-e ENV_COMMAND]
+             [--inherit-env] [-i]
              [--verbose] [-v]
+             [--trace VAR]
              [command] [args ...]
 
 Options:
   -h, --help                    Show this help message
+  --version                     Show version and exit
   --list                        List all available commands
   --info COMMAND                Show detailed information about a command
   --which COMMAND               Show the resolved executable path for a command
-  --commands-file, -cf PATH     Path to commands.json (auto-detected by default)
-  --bundles-config, -bc PATH    Path to bundles config file
-  --inherit-env, -ie            Inherit the full system environment (overrides closed mode)
+  --commands-file, -c PATH      Path to commands.json (auto-detected by default)
+  --bundles-config, -b PATH     Path to bundles config file
+  --env, -e ENV_COMMAND         Run command inside a different command's environment
+  --inherit-env, -i             Inherit the full system environment (overrides closed mode)
   --verbose, -v                 Enable verbose logging
+  --trace VAR                   Trace how VAR is mutated through env file processing
 
 Arguments:
   command                       Command to execute
   args                          Arguments passed through to the command
 ```
+
+> **Flags before vs. after the command name** — envoy flags (`-c`, `-b`, `-i`, etc.) must appear *before* the command name. Anything after the command name is passed through to the child process verbatim. This means `en python -c "code"` passes `-c "code"` to Python, while `en -c file.json python` passes `-c file.json` to envoy.
 
 ## Environment Variables
 
@@ -473,29 +482,45 @@ If no bundles are discovered, Envoy searches for `envoy_env/commands.json` in th
 ```
 envoy/
 ├── bin/
-│   └── envoy.bat              # CLI entry point
+│   ├── en.bat              # Short alias → envoy.bat
+│   ├── engit.bat           # Git helper launcher
+│   └── envoy.bat           # Main launcher → dist/envoy.exe
+├── dist/
+│   ├── envoy.exe           # Pre-built standalone executable (PyInstaller)
+│   └── engit.exe           # Pre-built git helper executable
+├── scripts/
+│   ├── _envoy_entry.py     # PyInstaller entry point for envoy.exe
+│   ├── _engit_entry.py     # PyInstaller entry point for engit.exe
+│   └── build_exe.bat       # Local build script (runs pyinstaller envoy.spec)
 ├── py/
-│   └── gt/
-│       └── envoy/
-│           ├── __main__.py     # Module entry point
-│           ├── _cli.py         # CLI implementation
-│           ├── _commands.py    # Command registry
-│           ├── _discovery.py   # Bundle discovery
-│           ├── _environment.py # Environment processing
-│           ├── _executor.py    # Process execution
-│           ├── _wrapper.py     # Application wrapper
-│           ├── _models.py      # Data models
-│           ├── _exceptions.py  # Exception types
-│           └── examples/
-│               └── envoy_env/  # Example configurations
+│   └── envoy/
+│       ├── __init__.py
+│       ├── __main__.py     # Module entry point
+│       ├── _api.py         # Public Python API
+│       ├── _cli.py         # CLI implementation
+│       ├── _commands.py    # Command registry
+│       ├── _discovery.py   # Bundle discovery
+│       ├── _environment.py # Environment processing
+│       ├── _executor.py    # Process execution
+│       ├── _models.py      # Data models
+│       ├── _exceptions.py  # Exception types
+│       ├── _version.py     # Version (generated by hatch-vcs)
+│       ├── _wrapper.py     # Application wrapper
+│       ├── exceptions.py   # Public exception re-exports
+│       ├── proc.py         # Public process API
+│       ├── testing.py      # Test helpers
+│       └── examples/
+│           └── envoy_env/  # Example configurations
+├── envoy.spec              # PyInstaller build spec
+├── pyproject.toml
 └── README.md
 ```
 
 ## Documentation
 
-- **[CLI_USAGE.md](py/gt/envoy/CLI_USAGE.md)** — Detailed CLI usage guide
-- **[BUNDLE_DISCOVERY.md](py/gt/envoy/BUNDLE_DISCOVERY.md)** — Bundle discovery system
-- **[ENV_FILES_README.md](py/gt/envoy/examples/envoy_env/ENV_FILES_README.md)** — Environment file format reference
+- **[CLI_USAGE.md](py/envoy/CLI_USAGE.md)** — Detailed CLI usage guide
+- **[BUNDLE_DISCOVERY.md](py/envoy/BUNDLE_DISCOVERY.md)** — Bundle discovery system
+- **[ENV_FILES_README.md](py/envoy/examples/envoy_env/ENV_FILES_README.md)** — Environment file format reference
 
 ## Contributing
 
@@ -516,7 +541,7 @@ Envoy is part of the GT Tools collection. See `LICENSE` for details.
 **Executable not found**
 - In closed mode the subprocess `PATH` comes entirely from bundle env files — ensure the bundle defines `+=PATH` pointing to the executable's directory
 - Use `--which <command>` to check what path the executable resolves to against the subprocess `PATH`
-- Use `--inherit-env`/`-ie` temporarily to confirm the executable is found when the system `PATH` is inherited
+- Use `--inherit-env`/`-i` temporarily to confirm the executable is found when the system `PATH` is inherited
 
 **Environment variables not applying**
 - Check JSON syntax in environment files
