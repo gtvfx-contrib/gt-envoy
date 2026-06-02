@@ -100,6 +100,7 @@ def get_allowlist(extra: list[str] | None = None) -> frozenset[str]:
     base = _CORE_ENV_VARS | _ENVOY_ENV_VARS
     if extra:
         return base | frozenset(extra)
+    return base
 def trace_environment(
     command: str,
     var: str,

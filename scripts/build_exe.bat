@@ -9,18 +9,19 @@ REM   (en.exe is NOT built -- en.bat already aliases envoy.bat -> envoy.exe)
 REM
 REM Requirements:
 REM   PyInstaller must be installed in the Python 3.14 bundle:
-REM     V:\repo\gtvfx-contrib\gt\python\prebuilt\python314\Scripts\pip install pyinstaller
+REM     C:\Users\gf_th\AppData\Local\Python\pythoncore-3.14-64\Scripts\pip install pyinstaller
+
 
 setlocal
 
 set "REPO_ROOT=%~dp0.."
-set "PY314=%REPO_ROOT%\..\python\prebuilt\python314\python.exe"
-set "PYINSTALLER=%REPO_ROOT%\..\python\prebuilt\python314\Scripts\pyinstaller.exe"
+set "PY314=C:\Users\gf_th\AppData\Local\Python\bin\python.exe"
+set "PYINSTALLER=C:\Users\gf_th\AppData\Local\Python\pythoncore-3.14-64\Scripts\pyinstaller.exe"
 
 REM Verify the Python 3.14 interpreter is present.
 if not exist "%PY314%" (
     echo ERROR: Python 3.14 not found at %PY314%
-    echo        Run 'en python' or check the python bundle.
+    echo        Check the pythoncore-3.14-64 installation.
     exit /b 1
 )
 
@@ -38,7 +39,7 @@ set PYTHONHOME=
 
 cd /d "%REPO_ROOT%"
 echo Building envoy and engit executables...
-"%PYINSTALLER%" envoy.spec --noconfirm
+%PYINSTALLER% envoy.spec --noconfirm
 if %errorlevel% neq 0 (
     echo ERROR: PyInstaller build failed.
     exit /b %errorlevel%

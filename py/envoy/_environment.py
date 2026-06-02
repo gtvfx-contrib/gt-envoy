@@ -319,14 +319,15 @@ class EnvironmentManager:
         return special_vars
     
     def load_env_from_files(
-        self, 
+        self,
         env_files: str | Path | list[str | Path] | None,
         base_env: dict[str, str] | None = None,
         trace_var: str | None = None,
         trace_out: list | None = None,
+        allowlist_out: list | None = None,
     ) -> dict[str, str]:
         """Load environment variables from JSON file(s).
-        
+
         Files are merged in order, with later files overriding earlier ones.
         Supports variable expansion, append/prepend operators, and path lists.
         
@@ -388,14 +389,20 @@ class EnvironmentManager:
                 and ^= operators.  Should be os.environ.copy() in inherit-env
                 mode, or the allowlist-seeded dict in closed mode.  Never
                 modified — a copy is taken before file processing begins.
-            
+            trace_var: Variable name to trace mutations for (optional).
+            trace_out: List to append :class:`TraceStepEvent` and
+                :class:`TraceAllowlistEvent` objects to (optional).
+            allowlist_out: If provided, all variable names found in any
+                ``"environment_allowlist"`` key across all files are appended
+                to this list (duplicates may appear; caller deduplicates).
+
         Returns:
             Dictionary of environment variables from files (base_env entries
             are included so callers can update result_env with this return value)
-            
+
         Raises:
             WrapperError: If file cannot be read or parsed
-            
+
         """
         if not env_files:
             return dict(base_env) if base_env else {}
@@ -438,6 +445,8 @@ class EnvironmentManager:
                     in_os = var in os.environ
                     if not already_set and in_os:
                         merged_env[var] = os.environ[var]
+                    if allowlist_out is not None:
+                        allowlist_out.append(var)
                     if trace_out is not None and trace_var == var:
                         trace_out.append(TraceAllowlistEvent(
                             file_path=_path,
@@ -615,8 +624,24 @@ class EnvironmentManager:
         # Pass result_env as base_env so ${VAR} expansion and += / ^= operators
         # inside env files see exactly the same variables that will be in scope —
         # no silent leakage of system variables that aren't in base_env.
-        file_env = self.load_env_from_files(env_files, base_env=result_env, trace_var=trace_var, trace_out=trace_out)
+        allowlist_additions: list[str] = []
+        file_env = self.load_env_from_files(
+            env_files,
+            base_env=result_env,
+            trace_var=trace_var,
+            trace_out=trace_out,
+            allowlist_out=allowlist_additions,
+        )
         result_env.update(file_env)
+
+        # Propagate environment_allowlist declarations into ENVOY_ALLOWLIST so
+        # that any child envoy process can inspect the full set of vars that are
+        # passing through and inherits the same allowlist automatically.
+        if allowlist_additions:
+            existing = result_env.get('ENVOY_ALLOWLIST', '')
+            existing_set = {v.strip() for v in existing.replace(',', ';').split(';') if v.strip()}
+            combined = existing_set | set(allowlist_additions)
+            result_env['ENVOY_ALLOWLIST'] = ';'.join(sorted(combined))
         
         # Explicit env dict overrides everything
         if env:
