@@ -53,3 +53,9 @@ echo.
 echo Add %REPO_ROOT%\dist to your PATH, or the bin\ scripts will pick them up automatically.
 
 endlocal
+
+if %errorlevel% neq 0 (
+    echo ERROR: Build process failed.
+    pause
+    exit /b %errorlevel%
+)
