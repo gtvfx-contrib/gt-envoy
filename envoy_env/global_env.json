@@ -1,0 +1,5 @@
+{
+    "+=PATH": [
+        "${SystemRoot}/System32"
+    ]
+}
