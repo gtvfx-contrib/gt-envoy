@@ -11,7 +11,7 @@ permissions:
 jobs:
   build-windows:
     name: Build Windows executables
-    runs-on: windows-latest
+    runs-on: [self-hosted, windows, synology]
 
     steps:
       - name: Checkout
