@@ -287,27 +287,17 @@ Multiple bundles define the same command name — last loaded wins. Use `--verbo
 
 ## Versioning Roadmap
 
-The current implementation treats all bundles as **checkout** bundles — paths pointing directly to live git repositories on disk. This mirrors `bl.Package(version='checkout')`.
-
-The planned versioning model brings parity with `bl`'s package+pipeline system:
-
-### Bundle Versioning (`bl.Package` parity)
-
-| Stage | bl equivalent | envoy description |
-|---|---|---|
-| **Now** | `bl.Package(version='checkout')` | `Bundle(path='/repo/pythoncore')` — live git repo |
-| **Future** | `bl.Package(version='latest')` | `Bundle('pythoncore', version='latest')` — latest built release |
-| **Future** | `bl.Package(version='1.2.3')` | `Bundle('pythoncore', version='1.2.3')` — pinned semver |
+The current implementation treats all bundles as **checkout** bundles — paths pointing directly to live git repositories on disk.
 
 A **production bundle** is created by:
 
 1. Tagging a git commit (`git tag v1.2.3`) in the bundle repo.
-2. Running an envoy build step that exports the `envoy_env/` contents to a versioned output directory — analogous to `bl publish`.
-3. Registering the built directory in a central bundle registry (the equivalent of `bl`'s `prodPackagesRoot`).
+2. Running an envoy build step that exports the `envoy_env/` contents to a versioned output directory.
+3. Registering the built directory in a central bundle registry.
 
 The `Bundle.version` property returns `'checkout'` for all current path-based bundles and will return a semver string for production bundles. `Bundle.is_production` will become `True` for built releases.
 
-### BundleConfig Versioning (`bl.Pipeline` parity)
+### BundleConfig Versioning
 
 A `BundleConfig` (the pipeline equivalent) will evolve from a flat list of paths to a file that pins specific bundle versions:
 
@@ -330,7 +320,7 @@ A `BundleConfig` (the pipeline equivalent) will evolve from a flat list of paths
 }
 ```
 
-The `checkout:` prefix preserves the current path-based behaviour for in-development bundles living in git repos alongside production-pinned counterparts — the same developer-vs-production duality that `bl` provides via `version='checkout'` vs an explicit semver.
+The `checkout:` prefix preserves the current path-based behaviour for in-development bundles living in git repos alongside production-pinned counterparts.
 
 ### Python API Preview
 
