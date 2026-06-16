@@ -49,14 +49,18 @@ jobs:
         # the extracted zip works as a drop-in bundle without modification.
         # Note: no .git/ in the zip means auto-discovery via ENVOY_BNDL_ROOTS
         # won't work; use --bundles-config to register the extracted bundle.
+        # Output is written to the workspace root first to avoid a self-
+        # referential file lock (Compress-Archive cannot write into a directory
+        # it is also reading), then moved into dist/.
         run: |
           $version = "${{ github.ref_name }}"
           $workspace = "${{ github.workspace }}"
           $excludeDirs = @('build', '.git', '.pytest_cache')
           $items = Get-ChildItem -Path $workspace |
                    Where-Object { $excludeDirs -notcontains $_.Name }
-          Compress-Archive -Path $items.FullName `
-                           -DestinationPath "$workspace\dist\envoy-bundle-$version.zip"
+          $tempZip = "$workspace\envoy-bundle-$version.zip"
+          Compress-Archive -Path $items.FullName -DestinationPath $tempZip
+          Move-Item $tempZip "$workspace\dist\envoy-bundle-$version.zip"
 
       - name: Build Python wheel
         # pip wheel is used instead of python -m build for reliability.
