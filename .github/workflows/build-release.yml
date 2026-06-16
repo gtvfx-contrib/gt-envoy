@@ -27,7 +27,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller build
+          pip install pyinstaller
 
       - name: Install envoy (editable) so hatch-vcs writes _version.py
         working-directory: ${{ github.workspace }}/py
@@ -43,10 +43,11 @@ jobs:
           .\dist\engit.exe --help
 
       - name: Build Python wheel
-        # Run after PyInstaller so --noconfirm does not wipe the wheel.
-        # python -m build --wheel appends to dist/ rather than clearing it.
+        # pip wheel is used instead of python -m build for reliability.
+        # --no-deps builds only the envoy wheel, not dependency wheels.
+        # Runs after PyInstaller so --noconfirm does not wipe the wheel.
         working-directory: ${{ github.workspace }}
-        run: python -m build --wheel --outdir dist
+        run: pip wheel . -w dist --no-deps
 
       - name: Create bundle zip
         # Zip the full repo (minus dev/build artefacts) for teams that want
