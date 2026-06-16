@@ -42,26 +42,28 @@ jobs:
           .\dist\envoy.exe --version
           .\dist\engit.exe --help
 
-      - name: Build Python wheel
-        # pip wheel is used instead of python -m build for reliability.
-        # --no-deps builds only the envoy wheel, not dependency wheels.
-        # Runs after PyInstaller so --noconfirm does not wipe the wheel.
-        working-directory: ${{ github.workspace }}
-        run: pip wheel . -w dist --no-deps
-
       - name: Create bundle zip
-        # Zip the full repo (minus dev/build artefacts) for teams that want
-        # to use envoy as a discoverable bundle via --bundles-config.
+        # Zip the full repo including dist/ (which has the EXEs at this point,
+        # before the wheel is added).  The bin/*.bat files already reference
+        # dist\envoy.exe and dist\engit.exe relative to the bundle root, so
+        # the extracted zip works as a drop-in bundle without modification.
         # Note: no .git/ in the zip means auto-discovery via ENVOY_BNDL_ROOTS
-        # won't work; explicit --bundles-config is required.
+        # won't work; use --bundles-config to register the extracted bundle.
         run: |
           $version = "${{ github.ref_name }}"
           $workspace = "${{ github.workspace }}"
-          $excludeDirs = @('dist', 'build', '.git', '.pytest_cache')
+          $excludeDirs = @('build', '.git', '.pytest_cache')
           $items = Get-ChildItem -Path $workspace |
                    Where-Object { $excludeDirs -notcontains $_.Name }
           Compress-Archive -Path $items.FullName `
                            -DestinationPath "$workspace\dist\envoy-bundle-$version.zip"
+
+      - name: Build Python wheel
+        # pip wheel is used instead of python -m build for reliability.
+        # --no-deps builds only the envoy wheel, not dependency wheels.
+        # Runs after the bundle zip so the wheel is not included in the zip.
+        working-directory: ${{ github.workspace }}
+        run: pip wheel . -w dist --no-deps
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
