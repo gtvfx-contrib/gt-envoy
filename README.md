@@ -59,16 +59,60 @@ Envoy simplifies the execution of applications that require specific environment
 
 ### Installation
 
-**Pre-built executables (recommended)**
+Each GitHub Release ships three artefacts. Choose the one that matches your use case:
+
+**CLI tools only** *(most users)*
 
 Download `envoy.exe` and `engit.exe` from the latest [GitHub Release](../../releases) and add them to a directory on your `PATH`.
 
-**From source**
+```powershell
+# PowerShell — add the directory containing the EXEs to PATH
+$env:PATH = "C:\tools\envoy;$env:PATH"
+```
+
+**Python API** *(scripting / pipeline integration)*
+
+Download `envoy-*.whl` from the latest [GitHub Release](../../releases) and install it:
+
+```bash
+pip install envoy-0.1.0-py3-none-any.whl
+```
+
+Then use it in Python:
+
+```python
+import envoy
+import envoy.proc as proc
+```
+
+**Full bundle** *(envoy ecosystem — CLI + Python API via bundle discovery)*
+
+Download `envoy-bundle-vX.Y.Z.zip` from the latest [GitHub Release](../../releases), extract it, and register it in a bundle config:
+
+```json
+{
+  "bundles": [
+    "C:/tools/envoy-bundle-v1.2.3",
+    "R:/repo/my-other-bundle"
+  ]
+}
+```
+
+```bash
+en --bundles-config C:/studio/bundles.json --list
+```
+
+> **Note:** The extracted bundle zip has no `.git/` directory, so it will not be
+> auto-discovered via `ENVOY_BNDL_ROOTS`. Use `--bundles-config` to register it explicitly.
+> Commands referencing `python_env.json` from the envoy bundle will have the Python API
+> on `PYTHONPATH` automatically.
+
+**Developer / from source**
 
 ```bash
 git clone <repo-url> envoy
 cd envoy
-pip install -e py        # installs the envoy package
+pip install -e py        # installs the envoy package in editable mode
 # Add bin/ to PATH for the en / engit / envoy .bat launchers
 set PATH=%PATH%;C:\path\to\envoy\bin
 ```
