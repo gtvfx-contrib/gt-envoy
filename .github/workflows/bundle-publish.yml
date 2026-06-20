@@ -1,0 +1,72 @@
+name: Bundle Publish
+
+# Reusable workflow for publishing a simple envoy bundle.
+#
+# Produces a versioned zip (<bundle-name>-<version>.zip) with internal
+# paths <bundle-name>/<version>/... so it can be extracted directly into
+# any install root.
+#
+# Usage from a bundle's own build-release.yml:
+#
+#   jobs:
+#     publish:
+#       uses: <org>/<envoy-repo>/.github/workflows/reusable-bundle-publish.yml@main
+#       with:
+#         extra_excludes: 'myspec.spec pyproject.toml scripts'
+#       secrets: inherit
+#       permissions:
+#         contents: write
+
+on:
+  workflow_call:
+    inputs:
+      extra_excludes:
+        description: >
+          Space-separated list of additional glob patterns to exclude from the
+          publish zip (e.g. "myapp.spec pyproject.toml scripts"). These are
+          passed as repeated --exclude arguments to engit publish.
+        type: string
+        required: false
+        default: ''
+      runner:
+        description: >
+          JSON array of runner labels (e.g. '["self-hosted","Windows","X64"]').
+          Defaults to the synology self-hosted runner.
+        type: string
+        required: false
+        default: '["self-hosted", "X64", "Windows", "synology"]'
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Create and upload publish zip
+    runs-on: ${{ fromJson(inputs.runner) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build publish zip
+        shell: pwsh
+        run: |
+          $excludeArgs = @()
+          if ('${{ inputs.extra_excludes }}' -ne '') {
+              foreach ($pat in '${{ inputs.extra_excludes }}'.Split(' ')) {
+                  $pat = $pat.Trim()
+                  if ($pat) { $excludeArgs += '--exclude'; $excludeArgs += $pat }
+              }
+          }
+          $distDir = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Path $distDir -Force | Out-Null
+          $engitArgs = @('publish', '--zip', '--output', $distDir) + $excludeArgs
+          engit @engitArgs
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          fail_on_unmatched_files: true
