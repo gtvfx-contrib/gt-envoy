@@ -114,8 +114,11 @@ def test_allowlist_var_available_for_append_operator():
     """Var seeded via environment_allowlist is visible to += in the same file."""
     print("Testing environment_allowlist var is available for += operator...")
 
+    host_val = EnvironmentManager.normalize_path("/host/bin")
+    bundle_val = EnvironmentManager.normalize_path("/bundle/bin")
+
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["_ENVOY_TEST_ALLW_PATH"] = "/host/bin"
+        os.environ["_ENVOY_TEST_ALLW_PATH"] = host_val
         try:
             env_file = _write_env_file(tmp, "env.json", {
                 "environment": {
@@ -129,7 +132,7 @@ def test_allowlist_var_available_for_append_operator():
             del os.environ["_ENVOY_TEST_ALLW_PATH"]
 
     path_sep = ";" if os.name == "nt" else ":"
-    expected = f"/host/bin{path_sep}/bundle/bin"
+    expected = f"{host_val}{path_sep}{bundle_val}"
     assert result.get("_ENVOY_TEST_ALLW_PATH") == expected, (
         f"Expected '{expected}', got '{result.get('_ENVOY_TEST_ALLW_PATH')}'"
     )
@@ -141,9 +144,11 @@ def test_allowlist_cross_file_visible_to_prepend():
     print("Testing cross-file: allowlist in file B visible to ^= in file A...")
 
     path_sep = ";" if os.name == "nt" else ":"
+    host_val = EnvironmentManager.normalize_path("/host/bin")
+    bundle_val = EnvironmentManager.normalize_path("/bundle/bin")
 
     with tempfile.TemporaryDirectory() as tmp:
-        os.environ["_ENVOY_TEST_ALLW_CROSS"] = "/host/bin"
+        os.environ["_ENVOY_TEST_ALLW_CROSS"] = host_val
         try:
             # File A: uses ^= (would be a no-op if var isn't seeded yet)
             file_a = _write_env_file(tmp, "file_a.json", {
@@ -161,7 +166,7 @@ def test_allowlist_cross_file_visible_to_prepend():
         finally:
             del os.environ["_ENVOY_TEST_ALLW_CROSS"]
 
-    expected = f"/bundle/bin{path_sep}/host/bin"
+    expected = f"{bundle_val}{path_sep}{host_val}"
     assert result.get("_ENVOY_TEST_ALLW_CROSS") == expected, (
         f"Expected '{expected}', got '{result.get('_ENVOY_TEST_ALLW_CROSS')}' — "
         "cross-file pre-pass should seed the host var before file A's ^= runs"
