@@ -1,4 +1,4 @@
-﻿# Envoy
+# Envoy
 
 **Environment orchestration for applications** — A CLI-first tool for managing complex application environments with JSON-based configuration and multi-bundle support.
 
@@ -10,7 +10,7 @@
 - **Closed Environment** — Subprocesses receive only what you define, not the full system environment
 - **Auto-Discovery** — Automatic bundle detection via `ENVOY_BNDL_ROOTS`
 - **Path Normalization** — Automatic OS-native path handling
-- **Null-Safe** — Undefined variables warn and skip rather than propagate empty values
+- **Null-Safe** — Undefined variables in env files warn and skip rather than propagate empty values
 
 ## Quick Start
 
@@ -19,18 +19,18 @@
 $env:ENVOY_BNDL_ROOTS = "R:/repo/gtvfx-contrib"
 
 # 2. List available commands
-envoy --list
+en --list
 
 # 3. Run a command
-envoy unreal
+en python_dev script.py
 
 # 4. Show command details
-envoy --info unreal
+en --info python_dev
 ```
 
 ## Documentation
 
-Full documentation: **[gtvfx-contrib.github.io/gt-envoy](https://gtvfx-contrib.github.io/gt-envoy/)**
+Full documentation is available at **[gtvfx-contrib.github.io/gt-envoy](https://gtvfx-contrib.github.io/gt-envoy/)**.
 
 | Topic | Description |
 |---|---|

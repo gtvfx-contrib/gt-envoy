@@ -42,25 +42,39 @@ jobs:
           .\dist\envoy.exe --version
           .\dist\engit.exe --help
 
-      - name: Create bundle zip
-        # Zip the full repo including dist/ (which has the EXEs at this point,
-        # before the wheel is added).  The bin/*.bat files already reference
-        # dist\envoy.exe and dist\engit.exe relative to the bundle root, so
-        # the extracted zip works as a drop-in bundle without modification.
-        # Note: no .git/ in the zip means auto-discovery via ENVOY_BNDL_ROOTS
-        # won't work; use --bundles-config to register the extracted bundle.
-        # Output is written to the workspace root first to avoid a self-
-        # referential file lock (Compress-Archive cannot write into a directory
-        # it is also reading), then moved into dist/.
+      - name: Create publish zip
+        # Staged publish: copy only deployment-relevant items into a clean
+        # staging directory, place EXEs into bin/ (replacing their bat
+        # counterparts), strip dev/test artefacts, then zip the result.
+        # en.bat is kept as a tiny alias wrapper that calls envoy.exe directly.
         run: |
-          $version = "${{ github.ref_name }}"
+          $version   = "${{ github.ref_name }}"
           $workspace = "${{ github.workspace }}"
-          $excludeDirs = @('build', '.git', '.pytest_cache')
-          $items = Get-ChildItem -Path $workspace |
-                   Where-Object { $excludeDirs -notcontains $_.Name }
-          $tempZip = "$workspace\envoy-bundle-$version.zip"
-          Compress-Archive -Path $items.FullName -DestinationPath $tempZip
-          Move-Item $tempZip "$workspace\dist\envoy-bundle-$version.zip"
+          $staging   = "$workspace\_publish_staging"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+
+          foreach ($item in @('bin', 'envoy_env', 'py', 'LICENSE', 'README.md')) {
+              $src = "$workspace\$item"
+              if (Test-Path $src) {
+                  Copy-Item $src "$staging\" -Recurse -Force
+              }
+          }
+
+          # Remove bat launchers that are replaced by EXEs in the publish layout
+          Remove-Item "$staging\bin\envoy.bat" -Force -ErrorAction SilentlyContinue
+          Remove-Item "$staging\bin\engit.bat" -Force -ErrorAction SilentlyContinue
+
+          # Remove dev/test-only files
+          Remove-Item "$staging\py\envoy\test_bundle" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item "$staging\py\envoy\testing.py"  -Force        -ErrorAction SilentlyContinue
+
+          # Place EXEs into bin/ (envoy.exe also serves as the target for en.bat)
+          Copy-Item "$workspace\dist\envoy.exe" "$staging\bin\envoy.exe" -Force
+          Copy-Item "$workspace\dist\engit.exe" "$staging\bin\engit.exe" -Force
+
+          $zipPath = "$workspace\dist\envoy-$version.zip"
+          Compress-Archive -Path "$staging\*" -DestinationPath $zipPath
+          Remove-Item $staging -Recurse -Force
 
       - name: Build Python wheel
         # pip wheel is used instead of python -m build for reliability.
@@ -76,5 +90,5 @@ jobs:
             dist/envoy.exe
             dist/engit.exe
             dist/envoy-*.whl
-            dist/envoy-bundle-*.zip
+            dist/envoy-v*.zip
           fail_on_unmatched_files: true

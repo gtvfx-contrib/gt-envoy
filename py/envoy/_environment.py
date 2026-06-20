@@ -134,6 +134,9 @@ class EnvironmentManager:
     - Path normalization (Unix → Windows)
     - List-based paths with automatic joining
     - Append (+=), prepend (^=), and default (?=) operators
+    - Null value detection: JSON null entries are skipped with a warning
+    - Unresolved reference filtering: list items containing undefined ${VAR}
+      references are omitted from the result with a warning
     
     Environment modes:
     - Closed (default): child process receives variables defined in env files,
@@ -233,6 +236,35 @@ class EnvironmentManager:
             return path.replace('/', '\\')
         return path
     
+    @staticmethod
+    def _find_unresolved_refs(
+        value: str,
+        current_env: dict[str, str],
+        special_vars: dict[str, str] | None = None,
+    ) -> set[str]:
+        """Return the set of variable names in ``${VAR}`` references that are not defined.
+
+        Scans the string for ``${VARNAME}`` (and legacy ``{$VARNAME}``) patterns and
+        returns the names of any that are absent from both ``special_vars`` and
+        ``current_env``.
+
+        Args:
+            value: String potentially containing ``${VARNAME}`` references.
+            current_env: Current environment dictionary being built.
+            special_vars: Special wrapper-internal variables (optional).
+
+        Returns:
+            Set of variable names that could not be resolved.
+
+        """
+        pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\$([A-Za-z_][A-Za-z0-9_]*)\}')
+        unresolved: set[str] = set()
+        for match in pattern.finditer(value):
+            var_name = match.group(1) or match.group(2)
+            if (not special_vars or var_name not in special_vars) and var_name not in current_env:
+                unresolved.add(var_name)
+        return unresolved
+    
     def process_env_value(
         self, 
         value: Any, 
@@ -246,7 +278,8 @@ class EnvironmentManager:
         - Strings: used as-is
         - Other types: converted to string
         - ${VARNAME} expansion (including special variables)
-        - Paths stored in UNIX style (forward slashes) for cross-platform compatibility
+        - Path normalization to OS-native format (forward slashes → backslashes
+          on Windows) applied after expansion
         
         Args:
             value: The value from JSON (string, list, or other)
@@ -254,7 +287,7 @@ class EnvironmentManager:
             special_vars: Special wrapper-internal variables (optional)
             
         Returns:
-            Processed string value
+            Processed string value with OS-native path separators
             
         """
         # Determine path separator based on OS
@@ -262,16 +295,17 @@ class EnvironmentManager:
         
         # Handle list values - join with path separator
         if isinstance(value, list):
-            # Keep paths in UNIX style (forward slashes) for consistency
             str_value = path_sep.join(str(item) for item in value)
         else:
-            # Convert to string, keep as-is
             str_value = str(value)
         
-        # Expand any ${VARNAME} references (including special vars)
+        # Expand any ${VARNAME} references (including special vars), then
+        # normalize to OS-native path separators so the final environment
+        # value is consistent regardless of how slashes appear in JSON or
+        # in referenced variables (e.g. APPDATA uses backslashes on Windows
+        # while ${__BUNDLE__} is stored with forward slashes internally).
         expanded_value = self.expand_env_value(str_value, merged_env, special_vars)
-        
-        return expanded_value
+        return self.normalize_path(expanded_value)
     
     @staticmethod
     def get_special_variables(env_file_path: Path) -> dict[str, str]:
@@ -375,6 +409,20 @@ class EnvironmentManager:
             ``^=VAR`` — prepend (new + sep + current)
             ``?=VAR`` — default (set only if VAR is not already defined)
             (none)   — replace unconditionally
+
+        Null and unresolved-reference handling:
+            If a value is JSON ``null`` (Python ``None``), the entry is skipped
+            entirely and a warning is logged naming the variable and file.
+
+            When the value is a list, each item is validated before inclusion.
+            Items that are ``null`` or that contain a ``${VAR}`` reference to an
+            undefined variable are omitted from the list and a warning is logged.
+            The remaining valid items are still applied to the environment variable.
+
+            For scalar (non-list) string values that reference an undefined
+            variable, a warning is logged but the value is still set (the
+            unresolved reference expands to an empty string, matching the
+            current expansion behaviour).
 
         Special wrapper variables available in ``${...}`` expansion:
             ``${__BUNDLE__}``      — bundle root directory (parent of ``envoy_env/``)
@@ -530,7 +578,52 @@ class EnvironmentManager:
                     elif key.startswith('^='):
                         prepend_mode = True
                         var_name = key[2:]
-                    
+
+                    # Skip the entire entry when the top-level value is null.
+                    if value is None:
+                        log.warning(
+                            "Skipping '%s' in %s: value is null",
+                            var_name, path,
+                        )
+                        continue
+
+                    # For list values, filter out null items and items whose
+                    # ${VAR} references cannot be resolved, warning for each one.
+                    if isinstance(value, list):
+                        filtered: list = []
+                        for item in value:
+                            if item is None:
+                                log.warning(
+                                    "Skipping null item for '%s' in %s",
+                                    var_name, path,
+                                )
+                                continue
+                            item_str = str(item)
+                            unresolved = self._find_unresolved_refs(
+                                item_str, merged_env, special_vars
+                            )
+                            if unresolved:
+                                log.warning(
+                                    "Skipping item '%s' for '%s' in %s: "
+                                    "undefined variable(s): %s",
+                                    item_str, var_name, path,
+                                    ', '.join(sorted(unresolved)),
+                                )
+                            else:
+                                filtered.append(item)
+                        value = filtered
+
+                    elif isinstance(value, str):
+                        unresolved = self._find_unresolved_refs(
+                            value, merged_env, special_vars
+                        )
+                        if unresolved:
+                            log.warning(
+                                "Variable '%s' in %s references undefined "
+                                "variable(s): %s",
+                                var_name, path, ', '.join(sorted(unresolved)),
+                            )
+
                     # Process the value (handles lists, normalization, expansion)
                     processed_value = self.process_env_value(value, merged_env, special_vars)
 
