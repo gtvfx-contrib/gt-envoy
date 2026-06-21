@@ -141,7 +141,7 @@ class ApplicationWrapper:
             # resolution uses the subprocess PATH rather than the envoy
             # process PATH (critical in closed-environment mode).
             env = self._env_manager.prepareEnvironment(
-                envFiles=self.config.envFiles,
+                env_files=self.config.env_files,
                 env=self.config.env
             )
             command = self._executor.prepareCommand(
@@ -263,7 +263,7 @@ def createWrapper(
     executable: str | Path,
     *args: str,
     env: dict[str, str] | None = None,
-    envFiles: str | Path | list[str | Path] | None = None,
+    env_files: str | Path | list[str | Path] | None = None,
     preRun: Callable[[], None] | None = None,
     postRun: Callable[[ExecutionResult], None] | None = None,
     **kwargs
@@ -274,7 +274,7 @@ def createWrapper(
         executable: Path to executable or command name
         *args: Command-line arguments
         env: Environment variables to add/update
-        envFiles: JSON file(s) containing environment variables
+        env_files: JSON file(s) containing environment variables
         preRun: Pre-run callback
         postRun: Post-run callback
         **kwargs: Additional WrapperConfig parameters
@@ -285,7 +285,7 @@ def createWrapper(
     Example:
         >>> wrapper = createWrapper(
         ...     "python", "script.py", "--verbose",
-        ...     envFiles="config/env.json",
+        ...     env_files="config/env.json",
         ...     timeout=60
         ... )
         >>> result = wrapper.run()
@@ -295,7 +295,7 @@ def createWrapper(
         executable=executable,
         args=list(args),
         env=env,
-        envFiles=envFiles,
+        env_files=env_files,
         preRun=preRun,
         postRun=postRun,
         **kwargs

@@ -16,7 +16,7 @@ Usage example::
     # Patch a bare commands.json instead of full bundles
     def test_with_commands_file(tmp_path):
         commands = {'python': {'environment': ['python_env.json']}}
-        cf = tmp_path / 'envoyEnv' / 'commands.json'
+        cf = tmp_path / 'envoy_env' / 'commands.json'
         cf.parent.mkdir()
         cf.write_text(json.dumps(commands))
         with envoy_testing.patchCommandsFile(cf):
@@ -42,7 +42,7 @@ def patchBundleRoots(roots: list[str | Path]):
     Args:
         roots: Sequence of directory paths to use as bundle search roots.
             Each path should contain at least one subdirectory with an
-            ``envoyEnv/`` folder.
+            ``envoy_env/`` folder.
 
     Example::
 
@@ -76,7 +76,7 @@ def patchCommandsFile(commands_file: str | Path):
     .. note::
         This helper is complementary to :func:`patchBundleRoots`.  Use
         :func:`patchBundleRoots` when your fixture looks like a real bundle
-        (``my_bundle/envoyEnv/commands.json``), and use this helper when you
+        (``my_bundle/envoy_env/commands.json``), and use this helper when you
         only have a standalone JSON file.
 
     Args:

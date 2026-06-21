@@ -153,7 +153,7 @@ def traceEnvironment(
         bundle_roots=bundle_roots,
         commands_file=commands_file,
     )
-    envFiles = _collectEnvFiles(command, registry, bundles)
+    env_files = _collectEnvFiles(command, registry, bundles)
 
     trace_events: list = []
     env_mgr = EnvironmentManager(
@@ -161,7 +161,7 @@ def traceEnvironment(
         allowlist=set(allowlist) if allowlist else None,
     )
     final_env = env_mgr.prepareEnvironment(
-        envFiles=envFiles,
+        env_files=env_files,
         trace_var=var,
         trace_out=trace_events,
     )

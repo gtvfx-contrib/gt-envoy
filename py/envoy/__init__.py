@@ -195,5 +195,5 @@ from . import exceptions # noqa: E402
 #: Public alias for :class:`~._commands.CommandDefinition`.
 #:
 #: Exposes ``.name``, ``.alias``, ``.bundle``, ``.environment``,
-#: ``.executable``, and ``.baseArgs``.
+#: ``.executable``, and ``.base_args``.
 Command = CommandDefinition

@@ -103,8 +103,8 @@ def showCommandInfo(registry: CommandRegistry, command_name: str) -> int:
     
     print(f"Executable: {cmd.executable}")
     
-    if cmd.baseArgs:
-        print(f"Base args: {' '.join(cmd.baseArgs)}")
+    if cmd.base_args:
+        print(f"Base args: {' '.join(cmd.base_args)}")
     
     try:
         resolved_env = registry.resolveEnvironment(command_name)
@@ -164,7 +164,7 @@ def showWhich(
         return 0
     
     # Build env files the same way runCommand does so PATH is correct.
-    envFiles = []
+    env_files = []
     try:
         resolved_env = registry.resolveEnvironment(command_name)
     except WrapperError as e:
@@ -173,23 +173,23 @@ def showWhich(
 
     if bundles:
         for bundle in bundles:
-            if 'global_env.json' in bundle.envFiles:
-                envFiles.append(str(bundle.envFiles['global_env.json']))
+            if 'global_env.json' in bundle.env_files:
+                env_files.append(str(bundle.env_files['global_env.json']))
         for env_file_name, _env_dir in resolved_env:
             for bundle in bundles:
-                if env_file_name in bundle.envFiles:
-                    envFiles.append(str(bundle.envFiles[env_file_name]))
+                if env_file_name in bundle.env_files:
+                    env_files.append(str(bundle.env_files[env_file_name]))
     elif cmd.envoy_env_dir:
         global_env = cmd.envoy_env_dir / 'global_env.json'
         if global_env.exists():
-            envFiles.append(str(global_env))
+            env_files.append(str(global_env))
         for env_file_name, env_dir in resolved_env:
             dir_to_use = env_dir or cmd.envoy_env_dir
-            envFiles.append(str(dir_to_use / env_file_name))
+            env_files.append(str(dir_to_use / env_file_name))
     
     env_mgr = EnvironmentManager(inherit_env=inherit_env, allowlist=env_allowlist)
     try:
-        env = env_mgr.prepareEnvironment(envFiles=[Path(f) for f in envFiles])
+        env = env_mgr.prepareEnvironment(env_files=[Path(f) for f in env_files])
     except WrapperError as e:
         print(f"Warning: Could not build environment: {e}", file=sys.stderr)
         env = {}
@@ -259,14 +259,14 @@ def runCommand(
         log.debug(f"Using environment from '{env_override}' for command '{command_name}'")
 
     # Collect environment files
-    envFiles = []
+    env_files = []
 
     if bundles:
-        # Multi-bundle mode: use pre-indexed envFiles dict — no filesystem calls at run time
+        # Multi-bundle mode: use pre-indexed env_files dict — no filesystem calls at run time
         for bundle in bundles:
-            if 'global_env.json' in bundle.envFiles:
-                envFiles.append(str(bundle.envFiles['global_env.json']))
-                log.debug(f"Found global environment file: {bundle.envFiles['global_env.json']}")
+            if 'global_env.json' in bundle.env_files:
+                env_files.append(str(bundle.env_files['global_env.json']))
+                log.debug(f"Found global environment file: {bundle.env_files['global_env.json']}")
 
         try:
             resolved_env = registry.resolveEnvironment(env_source_name)
@@ -276,9 +276,9 @@ def runCommand(
 
         for env_file_name, _env_dir in resolved_env:
             for bundle in bundles:
-                if env_file_name in bundle.envFiles:
-                    envFiles.append(str(bundle.envFiles[env_file_name]))
-                    log.debug(f"Found environment file: {bundle.envFiles[env_file_name]}")
+                if env_file_name in bundle.env_files:
+                    env_files.append(str(bundle.env_files[env_file_name]))
+                    log.debug(f"Found environment file: {bundle.env_files[env_file_name]}")
     else:
         # Legacy mode: use the env-source command's envoy_env_dir for env resolution
         # but the target command's dir as fallback.
@@ -293,13 +293,13 @@ def runCommand(
             if commands_file:
                 wrapper_env_dir = commands_file.parent
             else:
-                print(f"Error: Cannot determine envoyEnv directory", file=sys.stderr)
+                print(f"Error: Cannot determine envoy_env directory", file=sys.stderr)
                 return 1
 
         # Collect global_env.json first if it exists
         global_env = wrapper_env_dir / 'global_env.json'
         if global_env.exists():
-            envFiles.append(str(global_env))
+            env_files.append(str(global_env))
             log.debug(f"Found global environment file: {global_env}")
 
         # Resolve env file names (expanding any command-name references) and
@@ -321,7 +321,7 @@ def runCommand(
                 print(f"Error: Environment file not found: {env_file}", file=sys.stderr)
                 return 1
 
-        envFiles.extend(cmd_env_files)
+        env_files.extend(cmd_env_files)
     
     # Expand ${__BUNDLE__} and other special vars in alias parts.
     expanded = cmd.expandAlias()
@@ -332,7 +332,7 @@ def runCommand(
     config = WrapperConfig(
         executable=expanded[0],
         args=full_args,
-        envFiles=[Path(f) for f in envFiles],
+        env_files=[Path(f) for f in env_files],
         inherit_env=inherit_env,
         env_allowlist=env_allowlist,
         capture_output=False,
@@ -393,11 +393,11 @@ def traceCommand(
         env_source_name = env_override
 
     # Collect environment files (mirrors runCommand logic)
-    envFiles: list[str] = []
+    env_files: list[str] = []
     if bundles:
         for bundle in bundles:
-            if 'global_env.json' in bundle.envFiles:
-                envFiles.append(str(bundle.envFiles['global_env.json']))
+            if 'global_env.json' in bundle.env_files:
+                env_files.append(str(bundle.env_files['global_env.json']))
         try:
             resolved_env = registry.resolveEnvironment(env_source_name)
         except WrapperError as e:
@@ -405,8 +405,8 @@ def traceCommand(
             return 1
         for env_file_name, _env_dir in resolved_env:
             for bundle in bundles:
-                if env_file_name in bundle.envFiles:
-                    envFiles.append(str(bundle.envFiles[env_file_name]))
+                if env_file_name in bundle.env_files:
+                    env_files.append(str(bundle.env_files[env_file_name]))
     else:
         env_source_cmd = registry.get(env_source_name)
         env_dir_cmd = env_source_cmd if env_source_cmd is not None else cmd
@@ -417,11 +417,11 @@ def traceCommand(
             if commands_file:
                 wrapper_env_dir = commands_file.parent
             else:
-                print("Error: Cannot determine envoyEnv directory", file=sys.stderr)
+                print("Error: Cannot determine envoy_env directory", file=sys.stderr)
                 return 1
         global_env = wrapper_env_dir / 'global_env.json'
         if global_env.exists():
-            envFiles.append(str(global_env))
+            env_files.append(str(global_env))
         try:
             resolved_env = registry.resolveEnvironment(env_source_name)
         except WrapperError as e:
@@ -435,13 +435,13 @@ def traceCommand(
             if not Path(env_file).exists():
                 print(f"Error: Environment file not found: {env_file}", file=sys.stderr)
                 return 1
-        envFiles.extend(cmd_env_files)
+        env_files.extend(cmd_env_files)
 
     # Build environment with tracing enabled
     trace_events: list = []
     env_mgr = EnvironmentManager(inherit_env=inherit_env, allowlist=env_allowlist)
     final_env = env_mgr.prepareEnvironment(
-        envFiles=[Path(f) for f in envFiles],
+        env_files=[Path(f) for f in env_files],
         trace_var=trace_var,
         trace_out=trace_events,
     )
@@ -452,8 +452,8 @@ def traceCommand(
     env_label = f" (via --env {env_override})" if env_override else ""
     print(f"\nTracing '{trace_var}' for command '{command_name}'{env_label}\n")
 
-    print(f"Env files ({len(envFiles)}):")
-    for i, f in enumerate(envFiles, 1):
+    print(f"Env files ({len(env_files)}):")
+    for i, f in enumerate(env_files, 1):
         print(f"  [{i}] {f}")
     print()
 
@@ -479,7 +479,7 @@ def traceCommand(
     print(sep)
     print("File processing:")
     step_events = [e for e in trace_events if isinstance(e, TraceStepEvent)]
-    for i, f in enumerate(envFiles, 1):
+    for i, f in enumerate(env_files, 1):
         file_path = Path(f)
         steps = [e for e in step_events if Path(e.file_path) == file_path]
         print(f"\n  [{i}] {file_path}")
@@ -908,7 +908,7 @@ def main(argv: list[str] | None = None) -> int:
                     return 1
             else:
                 print("Error: Could not find commands.json", file=sys.stderr)
-                print("Searched for envoyEnv/commands.json in current directory and parents", file=sys.stderr)
+                print("Searched for envoy_env/commands.json in current directory and parents", file=sys.stderr)
                 print("Or set ENVOY_BNDL_ROOTS environment variable for auto-discovery", file=sys.stderr)
                 return 1
     

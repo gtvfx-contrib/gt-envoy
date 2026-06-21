@@ -174,8 +174,8 @@ class EnvironmentManager:
         backward compatibility.
         
         Special variables:
-            ${__BUNDLE__}      - Root directory of the bundle (parent of envoyEnv/)
-            ${__BUNDLE_ENV__}  - The envoyEnv/ directory itself
+            ${__BUNDLE__}      - Root directory of the bundle (parent of envoy_env/)
+            ${__BUNDLE_ENV__}  - The envoy_env/ directory itself
             ${__BUNDLE_NAME__} - Name of the bundle (directory name)
             ${__FILE__}        - Current environment JSON file being processed
         
@@ -312,8 +312,8 @@ class EnvironmentManager:
         """Calculate special wrapper-internal variables for an environment file.
         
         Special variables (available as ``${NAME}`` in env file values):
-            __BUNDLE__      - Root directory of the bundle (parent of envoyEnv/)
-            __BUNDLE_ENV__  - The envoyEnv/ directory itself
+            __BUNDLE__      - Root directory of the bundle (parent of envoy_env/)
+            __BUNDLE_ENV__  - The envoy_env/ directory itself
             __BUNDLE_NAME__ - Name of the bundle (directory name)
             __FILE__        - Path to the current environment JSON file
             
@@ -323,19 +323,19 @@ class EnvironmentManager:
         """
         env_file_abs = env_file_path.resolve()
         
-        # Try to find the envoyEnv/ directory by walking up the path
+        # Try to find the envoy_env/ directory by walking up the path
         current = env_file_abs.parent
         package_env_dir = None
         package_root = None
         
-        # Look for 'envoyEnv' directory in the path
+        # Look for 'envoy_env' directory in the path
         for parent in [current] + list(current.parents):
-            if parent.name == 'envoyEnv':
+            if parent.name == 'envoy_env':
                 package_env_dir = parent
                 package_root = parent.parent
                 break
         
-        # If no envoyEnv/ directory found, use file's parent as bundle root
+        # If no envoy_env/ directory found, use file's parent as bundle root
         if package_root is None:
             package_root = env_file_abs.parent
             package_env_dir = package_root
@@ -354,7 +354,7 @@ class EnvironmentManager:
     
     def loadEnvFromFiles(
         self,
-        envFiles: str | Path | list[str | Path] | None,
+        env_files: str | Path | list[str | Path] | None,
         base_env: dict[str, str] | None = None,
         trace_var: str | None = None,
         trace_out: list | None = None,
@@ -425,13 +425,13 @@ class EnvironmentManager:
             current expansion behaviour).
 
         Special wrapper variables available in ``${...}`` expansion:
-            ``${__BUNDLE__}``      — bundle root directory (parent of ``envoyEnv/``)
-            ``${__BUNDLE_ENV__}``  — the ``envoyEnv/`` directory itself
+            ``${__BUNDLE__}``      — bundle root directory (parent of ``envoy_env/``)
+            ``${__BUNDLE_ENV__}``  — the ``envoy_env/`` directory itself
             ``${__BUNDLE_NAME__}`` — bundle directory name
             ``${__FILE__}``        — current environment JSON file path
         
         Args:
-            envFiles: Single file path or list of file paths to load
+            env_files: Single file path or list of file paths to load
             base_env: Variables already in scope before any file is processed.
                 Used for ${VARNAME} expansion (with {$VARNAME} as a legacy alias) and as the starting point for +=
                 and ^= operators.  Should be os.environ.copy() in inherit-env
@@ -452,12 +452,12 @@ class EnvironmentManager:
             WrapperError: If file cannot be read or parsed
 
         """
-        if not envFiles:
+        if not env_files:
             return dict(base_env) if base_env else {}
         
         # Normalize to list
-        if isinstance(envFiles, (str, Path)):
-            envFiles = [envFiles]
+        if isinstance(env_files, (str, Path)):
+            env_files = [env_files]
         
         # Determine path separator based on OS
         path_sep = ';' if os.name == 'nt' else ':'
@@ -473,7 +473,7 @@ class EnvironmentManager:
         # This means a var declared in a later file's allowlist is already
         # visible to += / ^= operators in earlier files.
         parsed_files: list[tuple[Path, Any]] = []
-        for file_path in envFiles:
+        for file_path in env_files:
             path = Path(file_path)
             if not path.exists():
                 raise WrapperError(f"Environment file not found: {path}")
@@ -673,7 +673,7 @@ class EnvironmentManager:
     
     def prepareEnvironment(
         self,
-        envFiles: str | Path | list[str | Path] | None = None,
+        env_files: str | Path | list[str | Path] | None = None,
         env: dict[str, str] | None = None,
         trace_var: str | None = None,
         trace_out: list | None = None,
@@ -692,7 +692,7 @@ class EnvironmentManager:
             to propagate them from the host environment.
         
         Args:
-            envFiles: JSON file(s) to load environment from
+            env_files: JSON file(s) to load environment from
             env: Explicit environment variables to add/override
             
         Returns:
@@ -719,7 +719,7 @@ class EnvironmentManager:
         # no silent leakage of system variables that aren't in base_env.
         allowlist_additions: list[str] = []
         file_env = self.loadEnvFromFiles(
-            envFiles,
+            env_files,
             base_env=result_env,
             trace_var=trace_var,
             trace_out=trace_out,

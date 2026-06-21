@@ -210,7 +210,7 @@ def test_prepare_environment_appends_to_envoy_allowlist():
         original_allowlist = os.environ.pop("ENVOY_ALLOWLIST", None)
         try:
             manager = EnvironmentManager(inherit_env=False)
-            result = manager.prepareEnvironment(envFiles=[env_file])
+            result = manager.prepareEnvironment(env_files=[env_file])
         finally:
             if original_allowlist is not None:
                 os.environ["ENVOY_ALLOWLIST"] = original_allowlist
@@ -236,7 +236,7 @@ def test_prepare_environment_merges_with_existing_envoy_allowlist():
         os.environ["ENVOY_ALLOWLIST"] = "EXISTING_VAR"
         try:
             manager = EnvironmentManager(inherit_env=False, allowlist={"EXISTING_VAR"})
-            result = manager.prepareEnvironment(envFiles=[env_file])
+            result = manager.prepareEnvironment(env_files=[env_file])
         finally:
             if original_allowlist is not None:
                 os.environ["ENVOY_ALLOWLIST"] = original_allowlist

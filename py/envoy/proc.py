@@ -125,7 +125,7 @@ def _loadRegistry(
        ``ENVOY_BNDL_ROOTS`` entirely.
     2. ``ENVOY_BNDL_ROOTS`` environment variable (standard auto-discovery).
     3. ``commands_file`` — explicit path to a bare ``commands.json``.
-    4. Upward search from CWD for ``envoyEnv/commands.json``.
+    4. Upward search from CWD for ``envoy_env/commands.json``.
 
     Returns:
         ``(registry, bundles_or_None)``.  *bundles* is ``None`` when the
@@ -185,31 +185,31 @@ def _collectEnvFiles(
             f"Failed to resolve environment for '{command_name}': {e}"
         ) from e
 
-    envFiles: list[str | Path] = []
+    env_files: list[str | Path] = []
 
     if bundles:
-        # Multi-bundle mode: use the pre-indexed envFiles mapping.
+        # Multi-bundle mode: use the pre-indexed env_files mapping.
         for bundle in bundles:
-            if 'global_env.json' in bundle.envFiles:
-                envFiles.append(bundle.envFiles['global_env.json'])
+            if 'global_env.json' in bundle.env_files:
+                env_files.append(bundle.env_files['global_env.json'])
         for env_file_name, _env_dir in resolved_env:
             for bundle in bundles:
-                if env_file_name in bundle.envFiles:
-                    envFiles.append(bundle.envFiles[env_file_name])
+                if env_file_name in bundle.env_files:
+                    env_files.append(bundle.env_files[env_file_name])
     else:
-        # Legacy (single commands.json) mode: build paths from envoyEnv dir.
+        # Legacy (single commands.json) mode: build paths from envoy_env dir.
         env_dir = cmd.envoy_env_dir
         if env_dir is None:
             cf = findCommandsFile()
             if cf is None:
                 raise EnvironmentBuildError(
-                    f"Cannot determine envoyEnv directory for '{command_name}'."
+                    f"Cannot determine envoy_env directory for '{command_name}'."
                 )
             env_dir = cf.parent
 
         global_env = env_dir / 'global_env.json'
         if global_env.exists():
-            envFiles.append(global_env)
+            env_files.append(global_env)
 
         for env_file_name, entry_env_dir in resolved_env:
             dir_to_use = entry_env_dir or env_dir
@@ -218,9 +218,9 @@ def _collectEnvFiles(
                 raise EnvironmentBuildError(
                     f"Environment file not found: {file_path}"
                 )
-            envFiles.append(file_path)
+            env_files.append(file_path)
 
-    return envFiles
+    return env_files
 
 
 def _prepareEnv(
@@ -275,12 +275,12 @@ def _prepareEnv(
                 f"Command '{command_name}' is not registered."
             )
 
-    envFiles = _collectEnvFiles(env_source, registry, bundles)
+    env_files = _collectEnvFiles(env_source, registry, bundles)
     allowlist_set: set[str] | None = set(allowlist) if allowlist else None
     env_mgr = EnvironmentManager(inherit_env=inherit_env, allowlist=allowlist_set)
 
     try:
-        env = env_mgr.prepareEnvironment(envFiles=envFiles)
+        env = env_mgr.prepareEnvironment(env_files=env_files)
     except WrapperError as e:
         raise EnvironmentBuildError(
             f"Failed to prepare environment for '{env_source}': {e}"
@@ -306,7 +306,7 @@ def _popen(
 
     expanded = cmd_def.expandAlias(env)
     executable = expanded[0]
-    baseArgs = expanded[1:]
+    base_args = expanded[1:]
 
     try:
         resolved = ProcessExecutor.resolveExecutable(
@@ -315,7 +315,7 @@ def _popen(
     except WrapperError as e:
         raise EnvironmentBuildError(str(e)) from e
 
-    full_cmd = [resolved] + list(baseArgs) + list(extra_args)
+    full_cmd = [resolved] + list(base_args) + list(extra_args)
 
     if os.name == 'nt':
         if 'creationflags' not in kwargs:
@@ -448,7 +448,7 @@ class Environment:
                     inherit_env=self._inherit_env,
                     allowlist=allowlist_set,
                 )
-                self._env = env_mgr.prepareEnvironment(envFiles=[])
+                self._env = env_mgr.prepareEnvironment(env_files=[])
                 self._cmd_def = CommandDefinition(
                     name=self._command,
                     environment=[],

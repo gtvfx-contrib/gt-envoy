@@ -66,7 +66,7 @@ class CommandDefinition:
         return self.name
     
     @property
-    def baseArgs(self) -> list[str]:
+    def base_args(self) -> list[str]:
         """Get the base arguments for this command.
         
         Returns:
@@ -276,12 +276,12 @@ class CommandRegistry:
         
         Args:
             bundles: List of BundleInfo (or Bundle) objects from discovery.
-                Each entry must expose ``.bndlid``, ``.envoyEnv``, and
+                Each entry must expose ``.bndlid``, ``.envoy_env``, and
                 ``.name`` attributes.
             
         """
         for bundle in bundles:
-            commands_file = bundle.envoyEnv / "commands.json"
+            commands_file = bundle.envoy_env / "commands.json"
             if commands_file.exists():
                 try:
                     self.loadFromFile(commands_file, bundle_name=bundle.bndlid)
@@ -327,7 +327,7 @@ class CommandRegistry:
 
 
 def findCommandsFile(start_path: Path | None = None) -> Path | None:
-    """Find commands.json by searching up the directory tree for envoyEnv/.
+    """Find commands.json by searching up the directory tree for envoy_env/.
 
     Resolution order:
 
@@ -335,7 +335,7 @@ def findCommandsFile(start_path: Path | None = None) -> Path | None:
        returned directly (used by :func:`~envoy.testing.patchCommandsFile`
        in tests).
     2. Upward directory walk from *start_path* (or cwd) looking for
-       ``envoyEnv/commands.json``.
+       ``envoy_env/commands.json``.
 
     Args:
         start_path: Starting directory (defaults to cwd).
@@ -362,7 +362,7 @@ def findCommandsFile(start_path: Path | None = None) -> Path | None:
     current = start_path.resolve()
 
     for parent in [current] + list(current.parents):
-        wrapper_env_dir = parent / "envoyEnv"
+        wrapper_env_dir = parent / "envoy_env"
         if wrapper_env_dir.is_dir():
             commands_file = wrapper_env_dir / "commands.json"
             if commands_file.exists():

@@ -14,7 +14,7 @@ def test_validation():
     examples_path = Path(__file__).parent / "examples"
     print(f"Checking: {examples_path}")
     print(f"  Is valid bundle: {validateBundle(examples_path)}")
-    print(f"  Has envoyEnv: {(examples_path / 'envoyEnv').is_dir()}")
+    print(f"  Has envoy_env: {(examples_path / 'envoy_env').is_dir()}")
     print()
 
 def test_config_loading():

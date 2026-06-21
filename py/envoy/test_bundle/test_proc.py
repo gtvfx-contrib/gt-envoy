@@ -36,52 +36,52 @@ from envoy._exceptions import (
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _makeBundle(tmp_dir: Path, name: str, commands: dict, envFiles: dict) -> Path:
+def _makeBundle(tmp_dir: Path, name: str, commands: dict, env_files: dict) -> Path:
     """Create a minimal bundle directory tree.
 
     Produces::
 
         <tmp_dir>/<ns>/<name>/
             .git/          <- makes isGitRepo() return True
-            envoyEnv/
+            envoy_env/
                 commands.json
-                <env_file>.json  (one per entry in envFiles)
+                <env_file>.json  (one per entry in env_files)
 
     Args:
         tmp_dir:   Temp root (the ENVOY_BNDL_ROOTS value should point here).
         name:      Bundle name (also used as namespace for simplicity).
         commands:  Dict written as commands.json.
-        envFiles: Mapping of filename -> dict (written as JSON env files).
+        env_files: Mapping of filename -> dict (written as JSON env files).
 
     Returns:
         Path to the bundle root (``<tmp_dir>/gt/<name>``).
     """
     bundle_root = tmp_dir / "gt" / name
-    envoyEnv = bundle_root / "envoyEnv"
-    envoyEnv.mkdir(parents=True)
+    envoy_env = bundle_root / "envoy_env"
+    envoy_env.mkdir(parents=True)
     # Make it look like a git repo so findGitRepos() picks it up.
     (bundle_root / ".git").mkdir()
 
-    (envoyEnv / "commands.json").write_text(json.dumps(commands), encoding="utf-8")
-    for filename, content in envFiles.items():
-        (envoyEnv / filename).write_text(json.dumps(content), encoding="utf-8")
+    (envoy_env / "commands.json").write_text(json.dumps(commands), encoding="utf-8")
+    for filename, content in env_files.items():
+        (envoy_env / filename).write_text(json.dumps(content), encoding="utf-8")
 
     return bundle_root
 
 
-def _makeCommandsDir(tmp_dir: Path, commands: dict, envFiles: dict) -> Path:
-    """Create a bare envoyEnv directory (no bundle/git structure).
+def _makeCommandsDir(tmp_dir: Path, commands: dict, env_files: dict) -> Path:
+    """Create a bare envoy_env directory (no bundle/git structure).
 
     Returns:
-        Path to the ``envoyEnv/commands.json`` file.
+        Path to the ``envoy_env/commands.json`` file.
     """
-    envoyEnv = tmp_dir / "envoyEnv"
-    envoyEnv.mkdir(parents=True)
+    envoy_env = tmp_dir / "envoy_env"
+    envoy_env.mkdir(parents=True)
 
-    cf = envoyEnv / "commands.json"
+    cf = envoy_env / "commands.json"
     cf.write_text(json.dumps(commands), encoding="utf-8")
-    for filename, content in envFiles.items():
-        (envoyEnv / filename).write_text(json.dumps(content), encoding="utf-8")
+    for filename, content in env_files.items():
+        (envoy_env / filename).write_text(json.dumps(content), encoding="utf-8")
 
     return cf
 
@@ -98,7 +98,7 @@ class TestLoadRegistry:
         cf = _makeCommandsDir(
             tmp_path,
             commands={"mytool": {"environment": ["mytool_env.json"]}},
-            envFiles={"mytool_env.json": {"MY_VAR": "hello"}},
+            env_files={"mytool_env.json": {"MY_VAR": "hello"}},
         )
 
         registry, bundles = _loadRegistry(commands_file=cf)
@@ -112,7 +112,7 @@ class TestLoadRegistry:
             tmp_path,
             name="myapp",
             commands={"myapp": {"environment": ["myapp_env.json"]}},
-            envFiles={"myapp_env.json": {"APP_VAR": "1"}},
+            env_files={"myapp_env.json": {"APP_VAR": "1"}},
         )
 
         registry, bundles = _loadRegistry(bundle_roots=[str(tmp_path)])
@@ -126,7 +126,7 @@ class TestLoadRegistry:
         cf = _makeCommandsDir(
             tmp_path / "bare",
             commands={"fallback_cmd": {"environment": ["fb_env.json"]}},
-            envFiles={"fb_env.json": {"FB": "1"}},
+            env_files={"fb_env.json": {"FB": "1"}},
         )
 
         # Provide an empty bundle_roots list so bundle discovery yields nothing.
@@ -155,20 +155,20 @@ class TestCollectEnvFiles:
         cf = _makeCommandsDir(
             tmp_path,
             commands={"tool": {"environment": ["tool_env.json"]}},
-            envFiles={"tool_env.json": {"TOOL_VAR": "x"}},
+            env_files={"tool_env.json": {"TOOL_VAR": "x"}},
         )
 
         registry, bundles = _loadRegistry(commands_file=cf)
-        envFiles = _collectEnvFiles("tool", registry, bundles)
+        env_files = _collectEnvFiles("tool", registry, bundles)
 
-        assert any(Path(p).name == "tool_env.json" for p in envFiles)
+        assert any(Path(p).name == "tool_env.json" for p in env_files)
 
     def test_command_not_found_raises(self, tmp_path):
         """CommandNotFoundError when the command is not in the registry."""
         cf = _makeCommandsDir(
             tmp_path,
             commands={"tool": {"environment": ["tool_env.json"]}},
-            envFiles={"tool_env.json": {"TOOL_VAR": "x"}},
+            env_files={"tool_env.json": {"TOOL_VAR": "x"}},
         )
 
         registry, bundles = _loadRegistry(commands_file=cf)
@@ -182,16 +182,16 @@ class TestCollectEnvFiles:
             tmp_path,
             name="myapp",
             commands={"myapp": {"environment": ["myapp_env.json"]}},
-            envFiles={
+            env_files={
                 "global_env.json": {"GLOBAL_VAR": "global"},
                 "myapp_env.json": {"APP_VAR": "app"},
             },
         )
 
         registry, bundles = _loadRegistry(bundle_roots=[str(tmp_path)])
-        envFiles = _collectEnvFiles("myapp", registry, bundles)
+        env_files = _collectEnvFiles("myapp", registry, bundles)
 
-        names = [Path(p).name for p in envFiles]
+        names = [Path(p).name for p in env_files]
         assert "global_env.json" in names
         assert "myapp_env.json" in names
         assert names.index("global_env.json") < names.index("myapp_env.json")
@@ -204,16 +204,16 @@ class TestCollectEnvFiles:
                 "base": {"environment": ["base_env.json"]},
                 "derived": {"environment": ["base", "derived_env.json"]},
             },
-            envFiles={
+            env_files={
                 "base_env.json": {"BASE_VAR": "base"},
                 "derived_env.json": {"DERIVED_VAR": "derived"},
             },
         )
 
         registry, bundles = _loadRegistry(commands_file=cf)
-        envFiles = _collectEnvFiles("derived", registry, bundles)
+        env_files = _collectEnvFiles("derived", registry, bundles)
 
-        names = [Path(p).name for p in envFiles]
+        names = [Path(p).name for p in env_files]
         assert "base_env.json" in names
         assert "derived_env.json" in names
         # base must appear before derived
@@ -234,7 +234,7 @@ def _pythonCommandsFile(tmp_path: Path) -> Path:
                 "alias": [sys.executable],
             }
         },
-        envFiles={"py_env.json": {"ENVOY_TEST_MARKER": "proc_test"}},
+        env_files={"py_env.json": {"ENVOY_TEST_MARKER": "proc_test"}},
     )
 
 
@@ -510,7 +510,7 @@ class TestBundleDiscoveryIntegration:
                     "alias": [sys.executable],
                 }
             },
-            envFiles={"myapp_env.json": {"MYAPP_BUNDLE_VAR": "bundle_value"}},
+            env_files={"myapp_env.json": {"MYAPP_BUNDLE_VAR": "bundle_value"}},
         )
 
         env = Environment("myapp", bundle_roots=[str(tmp_path)])
@@ -528,7 +528,7 @@ class TestBundleDiscoveryIntegration:
                     "alias": [sys.executable],
                 },
             },
-            envFiles={
+            env_files={
                 "base_env.json": {"BASE_INHERITED": "yes"},
                 "derived_env.json": {"DERIVED_OWN": "yes"},
             },
@@ -551,7 +551,7 @@ class TestBundleDiscoveryIntegration:
                     "alias": [sys.executable],
                 }
             },
-            envFiles={
+            env_files={
                 "global_env.json": {"GLOBAL_BUNDLE_VAR": "from_global"},
                 "myapp_env.json": {"APP_VAR": "from_app"},
             },
@@ -594,7 +594,7 @@ class TestBundleDiscoveryIntegration:
                     "alias": [alias_entry],
                 }
             },
-            envFiles={"myapp_env.json": {"BUNDLE_ALIAS_TEST": "expanded"}},
+            env_files={"myapp_env.json": {"BUNDLE_ALIAS_TEST": "expanded"}},
         )
 
         env = Environment("myapp", bundle_roots=[str(tmp_path)])

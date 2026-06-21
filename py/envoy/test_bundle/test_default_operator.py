@@ -165,7 +165,7 @@ def test_default_operator_via_wrapper():
                 "-c",
                 "import os; print(os.environ.get('ENVOY_TEST_E2E_DEFAULT', 'MISSING'))",
             ],
-            envFiles=str(env_file),
+            env_files=str(env_file),
             capture_output=True,
             stream_output=False,
             log_execution=False,

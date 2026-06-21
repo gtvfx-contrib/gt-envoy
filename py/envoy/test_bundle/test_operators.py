@@ -16,7 +16,7 @@ print("Test 1: Append operator (+=)")
 config1 = WrapperConfig(
     executable='python',
     args=['-c', 'import os; print(f"TEST_PATH: {os.environ.get(\'TEST_PATH\')}")'],
-    envFiles='gt/app/wrapper/example_env_operator_append.json',
+    env_files='gt/app/wrapper/example_env_operator_append.json',
     capture_output=True,
     stream_output=False
 )
@@ -32,7 +32,7 @@ print("Test 2: Prepend operator (^=)")
 config2 = WrapperConfig(
     executable='python',
     args=['-c', 'import os; print(f"TEST_PATH: {os.environ.get(\'TEST_PATH\')}")'],
-    envFiles='gt/app/wrapper/example_env_operator_prepend.json',
+    env_files='gt/app/wrapper/example_env_operator_prepend.json',
     capture_output=True,
     stream_output=False
 )

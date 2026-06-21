@@ -149,7 +149,7 @@ def _resolveBndlid(bndlid: str) -> Path:
     # 1. Fast path: <root>/<namespace>/<name>
     for root in roots:
         candidate = (root / namespace / name).resolve()
-        if candidate.is_dir() and (candidate / 'envoyEnv').is_dir():
+        if candidate.is_dir() and (candidate / 'envoy_env').is_dir():
             logger.debug("Resolved %s via fast path: %s", bndlid, candidate)
             return candidate
 
@@ -211,8 +211,8 @@ class BundleInfo:
         self.root = root
         self.name = name
         self.namespace = namespace
-        self.envoyEnv = root / "envoyEnv"
-        self.envFiles: dict[str, Path] = self._indexEnvFiles()
+        self.envoy_env = root / "envoy_env"
+        self.env_files: dict[str, Path] = self._indexEnvFiles()
 
     @property
     def bndlid(self) -> str:
@@ -227,15 +227,15 @@ class BundleInfo:
         return f"{self.namespace}:{self.name}"
 
     def _indexEnvFiles(self) -> dict[str, Path]:
-        """Scan envoyEnv/ once and index all JSON files by filename.
+        """Scan envoy_env/ once and index all JSON files by filename.
         
         Returns:
             Dict mapping filename to absolute Path
         
         """
-        if not self.envoyEnv.is_dir():
+        if not self.envoy_env.is_dir():
             return {}
-        return {f.name: f for f in self.envoyEnv.glob('*.json')}
+        return {f.name: f for f in self.envoy_env.glob('*.json')}
         
     def __repr__(self):
         return f"BundleInfo(bndlid={self.bndlid!r}, root={self.root})"
@@ -252,14 +252,14 @@ class Bundle:
     """A discovered envoy bundle.
 
     A bundle is a directory (or, in the future,
-    a versioned built directory) that contains an ``envoyEnv/`` subdirectory
+    a versioned built directory) that contains an ``envoy_env/`` subdirectory
     with a ``commands.json`` and one or more environment JSON files.
 
     **Current behaviour (checkout mode)**
 
     All bundles are constructed from a filesystem path that points directly to
     a live git repository on disk.  :attr:`version` always returns
-    :data:`BUNDLE_CHECKOUT` and :attr:`isProduction` is always ``False``.
+    :data:`BUNDLE_CHECKOUT` and :attr:`is_production` is always ``False``.
 
     **Planned versioned behaviour (future)**
 
@@ -270,7 +270,7 @@ class Bundle:
         bundle = Bundle('gt:pythoncore')
         assert bundle.bndlid == 'gt:pythoncore'
         assert bundle.version == 'checkout'
-        assert bundle.isCheckout is True
+        assert bundle.is_checkout is True
 
         # By filesystem path (current):
         bundle = Bundle('/repo/gtvfx-contrib/gt/pythoncore')
@@ -283,7 +283,7 @@ class Bundle:
         # Production — future, resolved from the built-bundle registry:
         bundle = Bundle('gt:pythoncore', version='1.2.3')   # not yet implemented
         bundle = Bundle('gt:pythoncore', version='latest')  # not yet implemented
-        assert bundle.isProduction is True
+        assert bundle.is_production is True
 
     A production bundle is the result of ``git tag`` → build-to-directory
     process; the :class:`BundleConfig` file will pin these versions (see its docstring
@@ -305,14 +305,14 @@ class Bundle:
         WrapperError: If *spec* is a bundle ID and cannot be resolved via
             ``ENVOY_BNDL_ROOTS``.
         ValueError: If the resolved or supplied path does not exist or lacks
-            an ``envoyEnv/`` subdirectory.
+            an ``envoy_env/`` subdirectory.
 
     Example::
 
         # Resolve by bundle ID (requires ENVOY_BNDL_ROOTS):
         bundle = Bundle('gt:pythoncore')
         print(bundle.bndlid)       # 'gt:pythoncore'
-        print(bundle.isCheckout)  # True
+        print(bundle.is_checkout)  # True
 
         # Construct from a filesystem path:
         bundle = Bundle('/repo/gtvfx-contrib/gt/pythoncore')
@@ -320,7 +320,7 @@ class Bundle:
         print(bundle.namespace)    # 'gt'
         print(bundle.bndlid)       # 'gt:pythoncore'
         print(bundle.version)      # 'checkout'
-        print(bundle.isCheckout)  # True
+        print(bundle.is_checkout)  # True
         print(bundle.commands)     # ['python_dev', ...]
 
     """
@@ -337,8 +337,8 @@ class Bundle:
             root = Path(spec).resolve()
             if not root.is_dir():
                 raise ValueError(f"Bundle path does not exist: {root}")
-            if not (root / 'envoyEnv').is_dir():
-                raise ValueError(f"Not a valid bundle (no envoyEnv/): {root}")
+            if not (root / 'envoy_env').is_dir():
+                raise ValueError(f"Not a valid bundle (no envoy_env/): {root}")
             ns = namespace if namespace is not None else _inferNamespace(root)
         self._info = BundleInfo(root=root, name=root.name, namespace=ns)
 
@@ -404,7 +404,7 @@ class Bundle:
         return BUNDLE_CHECKOUT
 
     @property
-    def isProduction(self) -> bool:
+    def is_production(self) -> bool:
         """``True`` if this bundle is a built, versioned release directory.
 
         Returns ``True`` when a ``.bundle`` marker file is present at the
@@ -415,14 +415,14 @@ class Bundle:
         return (self._info.root / BUNDLE_MARKER_FILE).is_file()
 
     @property
-    def isCheckout(self) -> bool:
+    def is_checkout(self) -> bool:
         """``True`` if this bundle is a live git-repository checkout.
 
-        This is the inverse of :attr:`isProduction`.  ``True`` when no
+        This is the inverse of :attr:`is_production`.  ``True`` when no
         ``.bundle`` marker file is present at the bundle root.
 
         """
-        return not self.isProduction
+        return not self.is_production
 
     @property
     def path(self) -> Path:
@@ -430,14 +430,14 @@ class Bundle:
         return self._info.root
 
     @property
-    def envoyEnv(self) -> Path:
-        """Absolute path to the ``envoyEnv/`` subdirectory."""
-        return self._info.envoyEnv
+    def envoy_env(self) -> Path:
+        """Absolute path to the ``envoy_env/`` subdirectory."""
+        return self._info.envoy_env
 
     @property
-    def envFiles(self) -> dict[str, Path]:
+    def env_files(self) -> dict[str, Path]:
         """Mapping of JSON filename → absolute path for all env files."""
-        return dict(self._info.envFiles)
+        return dict(self._info.env_files)
 
     @property
     def commands(self) -> list[str]:
@@ -446,7 +446,7 @@ class Bundle:
         Returns an empty list if the file is absent or cannot be parsed.
 
         """
-        commands_file = self._info.envoyEnv / 'commands.json'
+        commands_file = self._info.envoy_env / 'commands.json'
         if not commands_file.exists():
             return []
         try:
@@ -505,13 +505,13 @@ class BundleConfig:
         # Load from an explicit path
         cfg = BundleConfig('/studio/envoy_bundles.json')
         for bundle in cfg.bundles:
-            print(bundle.name, bundle.version, bundle.isCheckout)
+            print(bundle.name, bundle.version, bundle.is_checkout)
         print(cfg.commands)   # merged command list across all bundles
 
         # Load from a named config slot (resolved via ENVOY_CFG_ROOTS)
         cfg = BundleConfig.fromName('studio')
         print(cfg.name)         # 'studio'
-        print(cfg.cfgVersion)  # '2026-06-21T10-13-00'
+        print(cfg.cfg_version)  # '2026-06-21T10-13-00'
 
         # Load whatever the user has configured
         cfg = BundleConfig.current()
@@ -570,7 +570,7 @@ class BundleConfig:
 
         Returns:
             :class:`BundleConfig` instance with :attr:`name` and
-            :attr:`cfgVersion` populated.
+            :attr:`cfg_version` populated.
 
         Raises:
             ValueError: If *name* cannot be resolved via ``ENVOY_CFG_ROOTS``
@@ -580,7 +580,7 @@ class BundleConfig:
 
             cfg = BundleConfig.fromName('studio')
             print(cfg.name)         # 'studio'
-            print(cfg.cfgVersion)  # '2026-06-21T10-13-00'
+            print(cfg.cfg_version)  # '2026-06-21T10-13-00'
             print(cfg.path)         # /studio/envoy/configs/studio/2026-...json
             print(cfg.commands)
 
@@ -683,7 +683,7 @@ class BundleConfig:
         return self._name
 
     @property
-    def cfgVersion(self) -> str | None:
+    def cfg_version(self) -> str | None:
         """Version timestamp string if loaded from a named config slot, else ``None``.
 
         Format matches the filenames written by ``engit publish-config``:
@@ -749,22 +749,22 @@ def isPublishedBundle(path: Path) -> bool:
 
 
 def hasEnvoyEnv(path: Path) -> bool:
-    """Check if a directory has an envoyEnv subdirectory.
+    """Check if a directory has an envoy_env subdirectory.
 
     Args:
         path: Path to check.
 
     Returns:
-        True if path contains an envoyEnv directory.
+        True if path contains an envoy_env directory.
 
     """
-    return (path / "envoyEnv").is_dir()
+    return (path / "envoy_env").is_dir()
 
 
 def validateBundle(path: Path) -> bool:
     """Validate that a path is a valid envoy bundle.
 
-    A valid bundle must be a directory with an ``envoyEnv/`` subdirectory.
+    A valid bundle must be a directory with an ``envoy_env/`` subdirectory.
 
     Args:
         path: Path to validate.
@@ -1084,24 +1084,24 @@ def getBundleEnvFiles(bundles: list[BundleInfo]) -> dict[str, list[Path]]:
         Dict mapping bundle name to list of environment file paths
     
     """
-    envFiles = {}
+    env_files = {}
     
     for bundle in bundles:
         files = []
-        wrapper_env = bundle.envoyEnv
+        wrapper_env = bundle.envoy_env
         
         if wrapper_env.is_dir():
-            # Find all .json files in envoyEnv
+            # Find all .json files in envoy_env
             for json_file in wrapper_env.glob("*.json"):
                 # Skip commands.json as it's handled separately
                 if json_file.name != "commands.json":
                     files.append(json_file)
         
         if files:
-            envFiles[bundle.name] = files
+            env_files[bundle.name] = files
             logger.debug(f"Bundle {bundle.name}: {len(files)} environment file(s)")
     
-    return envFiles
+    return env_files
 
 
 def getBundleCommandsFiles(bundles: list[BundleInfo]) -> dict[str, Path]:
@@ -1119,7 +1119,7 @@ def getBundleCommandsFiles(bundles: list[BundleInfo]) -> dict[str, Path]:
     commands_files = {}
     
     for bundle in bundles:
-        commands_file = bundle.envoyEnv / "commands.json"
+        commands_file = bundle.envoy_env / "commands.json"
         
         if commands_file.is_file():
             commands_files[bundle.name] = commands_file

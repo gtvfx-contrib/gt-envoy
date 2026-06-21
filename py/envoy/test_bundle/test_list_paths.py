@@ -24,7 +24,7 @@ print("PRIORITY_PATH:", os.environ.get("PRIORITY_PATH"))
 print()
 print("SIMPLE_VAR:", os.environ.get("SIMPLE_VAR"))
 '''],
-    envFiles='gt/app/wrapper/test_list_paths.json',
+    env_files='gt/app/wrapper/test_list_paths.json',
     capture_output=True,
     stream_output=False
 )

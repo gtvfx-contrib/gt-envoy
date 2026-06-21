@@ -42,7 +42,7 @@ print("TEST_STRING:", os.environ.get("TEST_STRING"))
 print("TEST_APPEND:", os.environ.get("TEST_APPEND"))
 print("TEST_PREPEND:", os.environ.get("TEST_PREPEND"))
 '''],
-    envFiles=test_file,
+    env_files=test_file,
     capture_output=True,
     stream_output=False
 )

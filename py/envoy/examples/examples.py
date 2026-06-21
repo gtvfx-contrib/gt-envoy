@@ -253,7 +253,7 @@ print(f"DEBUG: {os.environ.get('DEBUG')}")
 print(f"LOG_LEVEL: {os.environ.get('LOG_LEVEL')}")
 print(f"CUSTOM: {os.environ.get('CUSTOM')}")
 """],
-        envFiles=[base_env_file, override_env_file],  # Multiple files merged
+        env_files=[base_env_file, override_env_file],  # Multiple files merged
         env={"CUSTOM": "from_dict"},  # This overrides files
         capture_output=True,
         stream_output=False,
@@ -335,7 +335,7 @@ for p in custom.split(';' if sys.platform == 'win32' else ':'):
     if p:
         print(f"  - {p}")
 """],
-        envFiles=env_file,
+        env_files=env_file,
         capture_output=True,
         stream_output=False,
         inherit_env=False
@@ -397,7 +397,7 @@ import os
 print(f"MY_CUSTOM_PATH: {os.environ.get('MY_CUSTOM_PATH')}")
 print(f"NEW_VAR: {os.environ.get('NEW_VAR')}")
 """],
-        envFiles=[append_file, prepend_file],
+        env_files=[append_file, prepend_file],
         capture_output=True,
         stream_output=False
     )
@@ -432,7 +432,7 @@ print(f"NEW_VAR: {os.environ.get('NEW_VAR')}")
     config2 = WrapperConfig(
         executable="python",
         args=["-c", "import os; print(f'MY_CUSTOM_PATH: {os.environ.get(\"MY_CUSTOM_PATH\")}')"  ],
-        envFiles=[append_op_file, prepend_op_file],
+        env_files=[append_op_file, prepend_op_file],
         capture_output=True,
         stream_output=False
     )
@@ -462,14 +462,14 @@ def example_special_variables():
     
     import json
     
-    # Create a bundle structure with envoyEnv directory
+    # Create a bundle structure with envoy_env directory
     temp_dir = Path(__file__).parent.parent / "test_bundle" / "temp"
     temp_dir.mkdir(exist_ok=True)
     
     # Create bundle directory structure
     bundle_dir = temp_dir / "my_bundle"
     bundle_dir.mkdir(exist_ok=True)
-wrapper_env_dir = bundle_dir / "envoyEnv"
+wrapper_env_dir = bundle_dir / "envoy_env"
     wrapper_env_dir.mkdir(exist_ok=True)
     
     # Create environment file using special variables
@@ -508,7 +508,7 @@ for p in pythonpath.split(';' if sys.platform == 'win32' else ':'):
 print()
 print(f"ENV_FILE_PATH: {os.environ.get('ENV_FILE_PATH')}")
 """],
-        envFiles=env_file,
+        env_files=env_file,
         capture_output=True,
         stream_output=False,
         inherit_env=False
@@ -518,8 +518,8 @@ print(f"ENV_FILE_PATH: {os.environ.get('ENV_FILE_PATH')}")
     result = wrapper.run()
     
     print("Special variables available:")
-    print("  {$__BUNDLE__}      - Bundle root (parent of envoyEnv/)")
-    print("  {$__BUNDLE_ENV__}  - The envoyEnv/ directory")
+    print("  {$__BUNDLE__}      - Bundle root (parent of envoy_env/)")
+    print("  {$__BUNDLE_ENV__}  - The envoy_env/ directory")
     print("  {$__BUNDLE_NAME__} - Bundle directory name")
     print("  {$__FILE__}         - Current env file path")
     print()
