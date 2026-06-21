@@ -527,6 +527,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     parser.add_argument(
+        '--docs',
+        action='store_true',
+        help='Open the envoy documentation in the default browser.',
+    )
+
+    parser.add_argument(
         '--list',
         action='store_true',
         help='List all available commands'
@@ -609,7 +615,21 @@ def main(argv: list[str] | None = None) -> int:
     
     # Setup logging
     setup_logging(args.verbose)
-    
+
+    # --docs: open the documentation site and exit immediately.
+    if args.docs:
+        import webbrowser
+        _DOCS_URL = 'https://gtvfx-contrib.github.io/gt-envoy/'
+        if getattr(sys, 'frozen', False):
+            # Running as a PyInstaller exe: bin/envoy.exe → parent = bin/ → parent = bundle root
+            _bundle_root = Path(sys.executable).parent.parent
+        else:
+            # Running from source or wheel: py/envoy/_cli.py → up 3 levels = bundle root
+            _bundle_root = Path(__file__).parent.parent.parent
+        _local_docs = _bundle_root / 'docs' / 'index.html'
+        webbrowser.open(_local_docs.as_uri() if _local_docs.exists() else _DOCS_URL)
+        return 0
+
     # Initialize command registry
     registry = CommandRegistry()
     bundles = None  # Track discovered bundles for env file resolution
