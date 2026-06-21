@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build:
     name: Build MkDocs site
-    runs-on: ["self-hosted", "X64", "Windows", "synology"]
+    runs-on: ["self-hosted", "Linux", "X64", "synology"]
 
     steps:
       - name: Checkout
@@ -29,14 +29,14 @@ jobs:
           fetch-depth: 0
 
       - name: Install MkDocs dependencies
-        shell: pwsh
         run: pip install mkdocs-material
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Build site
-        shell: pwsh
         run: mkdocs build --clean
 
       - name: Upload Pages artifact
