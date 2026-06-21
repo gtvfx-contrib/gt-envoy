@@ -1,4 +1,4 @@
-﻿"""Tests for CommandRegistry.resolve_environment()."""
+"""Tests for CommandRegistry.resolveEnvironment()."""
 
 import sys
 from pathlib import Path
@@ -14,7 +14,7 @@ from envoy._exceptions import WrapperError
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_registry(*commands: tuple) -> CommandRegistry:
+def _makeRegistry(*commands: tuple) -> CommandRegistry:
     """Build a CommandRegistry from (name, environment_list) tuples.
 
     This bypasses the JSON-loading path so tests don't need real files on disk.
@@ -37,8 +37,8 @@ def test_simple_resolution():
     """Plain file entries (containing a dot) are returned as-is."""
     print("Testing simple environment resolution...")
 
-    registry = _make_registry(("myapp", ["base_env.json", "myapp_env.json"]))
-    result = registry.resolve_environment("myapp")
+    registry = _makeRegistry(("myapp", ["base_env.json", "myapp_env.json"]))
+    result = registry.resolveEnvironment("myapp")
 
     assert result == [
         ("base_env.json", Path("/fake/dir")),
@@ -53,11 +53,11 @@ def test_recursive_resolution_order():
     print("Testing recursive resolution order...")
 
     # "child" references "base" then appends its own file
-    registry = _make_registry(
+    registry = _makeRegistry(
         ("base", ["base_env.json"]),
         ("child", ["base", "child_env.json"]),
     )
-    result = registry.resolve_environment("child")
+    result = registry.resolveEnvironment("child")
 
     assert result == [
         ("base_env.json", Path("/fake/dir")),
@@ -71,12 +71,12 @@ def test_multi_level_recursion_order():
     """Multi-level references are resolved depth-first in declaration order."""
     print("Testing multi-level recursion order...")
 
-    registry = _make_registry(
+    registry = _makeRegistry(
         ("base",  ["base_env.json"]),
         ("mid",   ["base", "mid_env.json"]),
         ("top",   ["mid", "top_env.json"]),
     )
-    result = registry.resolve_environment("top")
+    result = registry.resolveEnvironment("top")
 
     assert result == [
         ("base_env.json", Path("/fake/dir")),
@@ -91,11 +91,11 @@ def test_mixed_files_and_references():
     """File entries and command references can be freely mixed."""
     print("Testing mixed files and command references...")
 
-    registry = _make_registry(
+    registry = _makeRegistry(
         ("base",  ["base_env.json"]),
         ("mixed", ["pre.json", "base", "post.json"]),
     )
-    result = registry.resolve_environment("mixed")
+    result = registry.resolveEnvironment("mixed")
 
     assert result == [
         ("pre.json",      Path("/fake/dir")),
@@ -110,10 +110,10 @@ def test_missing_referenced_command():
     """Referencing a command that does not exist raises WrapperError."""
     print("Testing missing referenced command...")
 
-    registry = _make_registry(("cmd", ["nonexistent"]))
+    registry = _makeRegistry(("cmd", ["nonexistent"]))
 
     try:
-        registry.resolve_environment("cmd")
+        registry.resolveEnvironment("cmd")
         assert False, "Should have raised WrapperError"
     except WrapperError as e:
         assert "nonexistent" in str(e), f"Error message should mention the missing command: {e}"
@@ -125,10 +125,10 @@ def test_direct_missing_command():
     """Resolving a command that does not exist at all raises WrapperError."""
     print("Testing direct missing command...")
 
-    registry = _make_registry()  # empty registry
+    registry = _makeRegistry()  # empty registry
 
     try:
-        registry.resolve_environment("ghost")
+        registry.resolveEnvironment("ghost")
         assert False, "Should have raised WrapperError"
     except WrapperError as e:
         assert "ghost" in str(e), f"Error message should mention the missing command: {e}"
@@ -141,13 +141,13 @@ def test_circular_reference():
     print("Testing circular reference detection...")
 
     # a -> b -> a  (direct cycle)
-    registry = _make_registry(
+    registry = _makeRegistry(
         ("a", ["b"]),
         ("b", ["a"]),
     )
 
     try:
-        registry.resolve_environment("a")
+        registry.resolveEnvironment("a")
         assert False, "Should have raised WrapperError"
     except WrapperError as e:
         assert "circular" in str(e).lower() or "cycle" in str(e).lower(), (
@@ -161,10 +161,10 @@ def test_self_referential_command():
     """A command that references itself raises WrapperError."""
     print("Testing self-referential command...")
 
-    registry = _make_registry(("selfref", ["selfref"]))
+    registry = _makeRegistry(("selfref", ["selfref"]))
 
     try:
-        registry.resolve_environment("selfref")
+        registry.resolveEnvironment("selfref")
         assert False, "Should have raised WrapperError"
     except WrapperError as e:
         assert "selfref" in str(e), f"Error message should mention the command: {e}"
@@ -176,8 +176,8 @@ def test_self_referential_command():
 # Runner
 # ---------------------------------------------------------------------------
 
-def run_all_tests():
-    """Run all resolve_environment tests."""
+def runAllTests():
+    """Run all resolveEnvironment tests."""
     tests = [
         test_simple_resolution,
         test_recursive_resolution_order,
@@ -190,7 +190,7 @@ def run_all_tests():
     ]
 
     print("=" * 60)
-    print("Running CommandRegistry.resolve_environment() Tests")
+    print("Running CommandRegistry.resolveEnvironment() Tests")
     print("=" * 60)
     print()
 
@@ -217,5 +217,5 @@ def run_all_tests():
 
 
 if __name__ == "__main__":
-    success = run_all_tests()
+    success = runAllTests()
     sys.exit(0 if success else 1)

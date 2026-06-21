@@ -1,4 +1,4 @@
-﻿"""Tests for the ApplicationWrapper module."""
+"""Tests for the ApplicationWrapper module."""
 
 import sys
 import os
@@ -12,7 +12,7 @@ from envoy import (
     ApplicationWrapper,
     WrapperConfig,
     ExecutionResult,
-    create_wrapper,
+    createWrapper,
     WrapperError,
     ExecutionError
 )
@@ -69,18 +69,18 @@ def test_pre_post_run():
     
     executed = {"pre": False, "post": False, "result": None}
     
-    def pre_run():
+    def preRun():
         executed["pre"] = True
     
-    def post_run(result: ExecutionResult):
+    def postRun(result: ExecutionResult):
         executed["post"] = True
         executed["result"] = result
     
     config = WrapperConfig(
         executable="python",
         args=["-c", "print('test')"],
-        pre_run=pre_run,
-        post_run=post_run,
+        preRun=preRun,
+        postRun=postRun,
         capture_output=True,
         stream_output=False,
         log_execution=False
@@ -156,21 +156,21 @@ def test_callbacks():
     
     events = {"start": None, "output": [], "error": []}
     
-    def on_start(pid):
+    def onStart(pid):
         events["start"] = pid
     
-    def on_output(line):
+    def onOutput(line):
         events["output"].append(line)
     
-    def on_error(line):
+    def onError(line):
         events["error"].append(line)
     
     config = WrapperConfig(
         executable="python",
         args=["-c", "print('line1'); print('line2'); import sys; print('err1', file=sys.stderr)"],
-        on_start=on_start,
-        on_output=on_output,
-        on_error=on_error,
+        onStart=onStart,
+        onOutput=onOutput,
+        onError=onError,
         capture_output=True,
         stream_output=False,
         log_execution=False
@@ -179,7 +179,7 @@ def test_callbacks():
     wrapper = ApplicationWrapper(config)
     result = wrapper.run()
     
-    assert events["start"] is not None, "on_start should be called"
+    assert events["start"] is not None, "onStart should be called"
     assert events["start"] == result.pid, "PID should match"
     assert len(events["output"]) == 2, "Should capture 2 stdout lines"
     assert "line1" in events["output"][0], "Should capture stdout"
@@ -190,10 +190,10 @@ def test_callbacks():
 
 
 def test_convenience_function():
-    """Test create_wrapper convenience function."""
+    """Test createWrapper convenience function."""
     print("Testing convenience function...")
     
-    wrapper = create_wrapper(
+    wrapper = createWrapper(
         "python",
         "-c",
         "print('hello')",
@@ -236,7 +236,7 @@ def test_working_directory():
     print("  ✅ Working directory test passed")
 
 
-def run_all_tests():
+def runAllTests():
     """Run all tests."""
     tests = [
         test_basic_execution,
@@ -277,5 +277,5 @@ def run_all_tests():
 
 
 if __name__ == "__main__":
-    success = run_all_tests()
+    success = runAllTests()
     sys.exit(0 if success else 1)

@@ -1,4 +1,4 @@
-﻿"""Quick test of environment variable expansion."""
+"""Quick test of environment variable expansion."""
 import sys
 import os
 from pathlib import Path

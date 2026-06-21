@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 from envoy._environment import EnvironmentManager
 
 
-def _write_env_file(tmp_dir: str, data: dict) -> Path:
+def _writeEnvFile(tmp_dir: str, data: dict) -> Path:
     """Write a JSON env file to a temp directory and return its path."""
     path = Path(tmp_dir) / "env.json"
     with open(path, "w", encoding="utf-8") as fh:
@@ -23,9 +23,9 @@ def test_null_top_level_skips():
     print("Testing top-level null value is skipped...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, {"MY_VAR": None})
+        env_file = _writeEnvFile(tmp, {"MY_VAR": None})
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(env_file, base_env={})
+        result = manager.loadEnvFromFiles(env_file, base_env={})
 
     assert "MY_VAR" not in result, (
         "A null value should not set MY_VAR in the environment"
@@ -39,11 +39,11 @@ def test_null_top_level_warns(caplog=None):
     print("Testing top-level null value emits a warning...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, {"MY_VAR": None})
+        env_file = _writeEnvFile(tmp, {"MY_VAR": None})
         manager = EnvironmentManager(inherit_env=False)
 
         with _capture_warnings() as warnings:
-            manager.load_env_from_files(env_file, base_env={})
+            manager.loadEnvFromFiles(env_file, base_env={})
 
     assert any("MY_VAR" in msg for msg in warnings), (
         "A warning should be logged naming the skipped variable"
@@ -60,9 +60,9 @@ def test_null_preserves_existing():
     print("Testing null value preserves existing variable...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, {"MY_VAR": None})
+        env_file = _writeEnvFile(tmp, {"MY_VAR": None})
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(
+        result = manager.loadEnvFromFiles(
             env_file, base_env={"MY_VAR": "original"}
         )
 
@@ -78,9 +78,9 @@ def test_null_with_append_operator():
     print("Testing += with null skips and preserves existing value...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, {"+=MY_VAR": None})
+        env_file = _writeEnvFile(tmp, {"+=MY_VAR": None})
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(
+        result = manager.loadEnvFromFiles(
             env_file, base_env={"MY_VAR": "original"}
         )
 
@@ -96,9 +96,9 @@ def test_null_with_prepend_operator():
     print("Testing ^= with null skips and preserves existing value...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, {"^=MY_VAR": None})
+        env_file = _writeEnvFile(tmp, {"^=MY_VAR": None})
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(
+        result = manager.loadEnvFromFiles(
             env_file, base_env={"MY_VAR": "original"}
         )
 
@@ -114,9 +114,9 @@ def test_null_with_default_operator():
     print("Testing ?= with null does not set the variable...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, {"?=MY_VAR": None})
+        env_file = _writeEnvFile(tmp, {"?=MY_VAR": None})
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(env_file, base_env={})
+        result = manager.loadEnvFromFiles(env_file, base_env={})
 
     assert "MY_VAR" not in result, (
         "?= with null must not set the variable"
@@ -130,16 +130,16 @@ def test_null_in_list_item_skipped():
     print("Testing null item inside list is skipped...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(
+        env_file = _writeEnvFile(
             tmp,
             {"MY_PATH": ["good/path", None, "another/good/path"]},
         )
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(env_file, base_env={})
+        result = manager.loadEnvFromFiles(env_file, base_env={})
 
     value = result.get("MY_PATH", "")
-    assert EnvironmentManager.normalize_path("good/path") in value, "Valid items must still be present"
-    assert EnvironmentManager.normalize_path("another/good/path") in value, "Valid items must still be present"
+    assert EnvironmentManager.normalizePath("good/path") in value, "Valid items must still be present"
+    assert EnvironmentManager.normalizePath("another/good/path") in value, "Valid items must still be present"
     assert "None" not in value, "The null item must not appear as the string 'None'"
 
     print("  ✅ null list item is omitted")
@@ -150,7 +150,7 @@ def test_unresolved_ref_in_list_skipped():
     print("Testing list item with unresolved reference is omitted...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(
+        env_file = _writeEnvFile(
             tmp,
             {
                 "^=PYTHONPATH": [
@@ -160,10 +160,10 @@ def test_unresolved_ref_in_list_skipped():
             },
         )
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(env_file, base_env={})
+        result = manager.loadEnvFromFiles(env_file, base_env={})
 
     value = result.get("PYTHONPATH", "")
-    assert EnvironmentManager.normalize_path("good/path") in value, "Resolved items must be present"
+    assert EnvironmentManager.normalizePath("good/path") in value, "Resolved items must be present"
     sep = ";" if __import__("os").name == "nt" else ":"
     parts = value.split(sep) if value else []
     assert not any("MISSING_VAR" in p for p in parts), (
@@ -178,14 +178,14 @@ def test_unresolved_ref_in_list_warns():
     print("Testing unresolved list item emits a warning...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(
+        env_file = _writeEnvFile(
             tmp,
             {"MY_PATH": ["${MISSING_VAR}/path", "good/path"]},
         )
         manager = EnvironmentManager(inherit_env=False)
 
         with _capture_warnings() as warnings:
-            manager.load_env_from_files(env_file, base_env={})
+            manager.loadEnvFromFiles(env_file, base_env={})
 
     assert any("MISSING_VAR" in msg for msg in warnings), (
         "The warning should name the undefined variable"
@@ -199,16 +199,16 @@ def test_resolved_list_items_kept():
     print("Testing fully resolved list items are all kept...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(
+        env_file = _writeEnvFile(
             tmp,
             {"MY_PATH": ["path/one", "path/two", "path/three"]},
         )
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(env_file, base_env={})
+        result = manager.loadEnvFromFiles(env_file, base_env={})
 
     value = result.get("MY_PATH", "")
     for raw in ("path/one", "path/two", "path/three"):
-        expected = EnvironmentManager.normalize_path(raw)
+        expected = EnvironmentManager.normalizePath(raw)
         assert expected in value, f"Expected '{expected}' to be in the path"
 
     print("  ✅ all resolved list items are retained")
@@ -250,7 +250,7 @@ class _ListHandler(logging.Handler):
 # Runner
 # ---------------------------------------------------------------------------
 
-def run_all_tests():
+def runAllTests():
     """Run all null-value and unresolved-reference tests."""
     tests = [
         test_null_top_level_skips,
@@ -293,5 +293,5 @@ def run_all_tests():
 
 
 if __name__ == "__main__":
-    success = run_all_tests()
+    success = runAllTests()
     sys.exit(0 if success else 1)

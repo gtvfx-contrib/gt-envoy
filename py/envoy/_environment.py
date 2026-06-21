@@ -1,4 +1,4 @@
-﻿"""Environment variable handling for ApplicationWrapper."""
+"""Environment variable handling for ApplicationWrapper."""
 
 import os
 import json
@@ -162,7 +162,7 @@ class EnvironmentManager:
         self.allowlist = allowlist or set()
     
     @staticmethod
-    def expand_env_value(
+    def expandEnvValue(
         value: str, 
         current_env: dict[str, str],
         special_vars: dict[str, str] | None = None
@@ -218,7 +218,7 @@ class EnvironmentManager:
         return pattern.sub(replacer, value)
     
     @staticmethod
-    def normalize_path(path: str) -> str:
+    def normalizePath(path: str) -> str:
         """Normalize Unix-style paths to OS-specific format.
         
         Converts forward slashes to backslashes on Windows.
@@ -237,7 +237,7 @@ class EnvironmentManager:
         return path
     
     @staticmethod
-    def _find_unresolved_refs(
+    def _findUnresolvedRefs(
         value: str,
         current_env: dict[str, str],
         special_vars: dict[str, str] | None = None,
@@ -265,7 +265,7 @@ class EnvironmentManager:
                 unresolved.add(var_name)
         return unresolved
     
-    def process_env_value(
+    def processEnvValue(
         self, 
         value: Any, 
         merged_env: dict[str, str],
@@ -304,11 +304,11 @@ class EnvironmentManager:
         # value is consistent regardless of how slashes appear in JSON or
         # in referenced variables (e.g. APPDATA uses backslashes on Windows
         # while ${__BUNDLE__} is stored with forward slashes internally).
-        expanded_value = self.expand_env_value(str_value, merged_env, special_vars)
-        return self.normalize_path(expanded_value)
+        expanded_value = self.expandEnvValue(str_value, merged_env, special_vars)
+        return self.normalizePath(expanded_value)
     
     @staticmethod
-    def get_special_variables(env_file_path: Path) -> dict[str, str]:
+    def getSpecialVariables(env_file_path: Path) -> dict[str, str]:
         """Calculate special wrapper-internal variables for an environment file.
         
         Special variables (available as ``${NAME}`` in env file values):
@@ -342,7 +342,7 @@ class EnvironmentManager:
         
         # Convert to cross-platform paths (keep forward slashes - will be normalized later)
         # The paths will use forward slashes internally and get normalized
-        # to backslashes on Windows during normalize_path processing
+        # to backslashes on Windows during normalizePath processing
         special_vars = {
             '__FILE__': str(env_file_abs).replace('\\', '/'),
             '__BUNDLE__': str(package_root).replace('\\', '/'),
@@ -352,7 +352,7 @@ class EnvironmentManager:
         
         return special_vars
     
-    def load_env_from_files(
+    def loadEnvFromFiles(
         self,
         env_files: str | Path | list[str | Path] | None,
         base_env: dict[str, str] | None = None,
@@ -507,7 +507,7 @@ class EnvironmentManager:
         # --- Main pass: process each file's entries in order -----------------
         for path, file_data in parsed_files:
             # Calculate special variables for this file
-            special_vars = self.get_special_variables(path)
+            special_vars = self.getSpecialVariables(path)
 
             try:
                 if isinstance(file_data, list):
@@ -599,7 +599,7 @@ class EnvironmentManager:
                                 )
                                 continue
                             item_str = str(item)
-                            unresolved = self._find_unresolved_refs(
+                            unresolved = self._findUnresolvedRefs(
                                 item_str, merged_env, special_vars
                             )
                             if unresolved:
@@ -614,7 +614,7 @@ class EnvironmentManager:
                         value = filtered
 
                     elif isinstance(value, str):
-                        unresolved = self._find_unresolved_refs(
+                        unresolved = self._findUnresolvedRefs(
                             value, merged_env, special_vars
                         )
                         if unresolved:
@@ -625,7 +625,7 @@ class EnvironmentManager:
                             )
 
                     # Process the value (handles lists, normalization, expansion)
-                    processed_value = self.process_env_value(value, merged_env, special_vars)
+                    processed_value = self.processEnvValue(value, merged_env, special_vars)
 
                     value_before = merged_env.get(var_name, '')
                     was_applied = True
@@ -671,7 +671,7 @@ class EnvironmentManager:
         
         return merged_env
     
-    def prepare_environment(
+    def prepareEnvironment(
         self,
         env_files: str | Path | list[str | Path] | None = None,
         env: dict[str, str] | None = None,
@@ -718,7 +718,7 @@ class EnvironmentManager:
         # inside env files see exactly the same variables that will be in scope —
         # no silent leakage of system variables that aren't in base_env.
         allowlist_additions: list[str] = []
-        file_env = self.load_env_from_files(
+        file_env = self.loadEnvFromFiles(
             env_files,
             base_env=result_env,
             trace_var=trace_var,

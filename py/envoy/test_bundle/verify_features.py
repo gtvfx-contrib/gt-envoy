@@ -1,4 +1,4 @@
-﻿"""Quick verification of all features."""
+"""Quick verification of all features."""
 import sys
 import os
 import json

@@ -1,4 +1,4 @@
-﻿"""Test the += and ^= operators."""
+"""Test the += and ^= operators."""
 import sys
 import os
 from pathlib import Path

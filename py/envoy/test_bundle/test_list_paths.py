@@ -1,4 +1,4 @@
-﻿"""Test list-based paths and Unix path normalization."""
+"""Test list-based paths and Unix path normalization."""
 import sys
 import os
 from pathlib import Path

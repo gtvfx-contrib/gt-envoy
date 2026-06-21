@@ -1,4 +1,4 @@
-﻿"""envoy.proc -- Process execution with pre-built command environments.
+"""envoy.proc -- Process execution with pre-built command environments.
 
 This module is the primary Python API for launching managed subprocesses
 through envoy's environment system.
@@ -11,10 +11,10 @@ Usage examples::
     rc = proc.call(['maya', 'myfile.ma'])
 
     # Raise on failure
-    proc.check_call(['nuke', '-x', 'comp.nk'])
+    proc.checkCall(['nuke', '-x', 'comp.nk'])
 
     # Capture output
-    output = proc.check_output(['python', '-c', 'print("hello")'])
+    output = proc.checkOutput(['python', '-c', 'print("hello")'])
 
     # Fire-and-forget (non-blocking)
     p = proc.spawn(['houdini', 'shot.hip'])
@@ -40,8 +40,8 @@ import os
 import subprocess
 from pathlib import Path
 
-from ._commands import CommandDefinition, CommandRegistry, find_commands_file
-from ._discovery import BundleInfo, discover_bundles_from_roots, discover_bundles_auto
+from ._commands import CommandDefinition, CommandRegistry, findCommandsFile
+from ._discovery import BundleInfo, discoverBundlesFromRoots, discoverBundlesAuto
 from ._environment import EnvironmentManager
 from ._exceptions import (
     CalledProcessError,
@@ -75,7 +75,7 @@ DEVNULL = subprocess.DEVNULL
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _is_raw_path(spec: str) -> bool:
+def _isRawPath(spec: str) -> bool:
     """Return ``True`` when *spec* should be treated as a direct executable
     path rather than an envoy command name.
 
@@ -89,7 +89,7 @@ def _is_raw_path(spec: str) -> bool:
     return p.is_absolute() or (os.sep in spec) or ('/' in spec)
 
 
-def _raw_popen(
+def _rawPopen(
     executable: str,
     extra_args: list[str],
     env: dict[str, str],
@@ -113,7 +113,7 @@ def _raw_popen(
     return subprocess.Popen(full_cmd, env=env, **kwargs)
 
 
-def _load_registry(
+def _loadRegistry(
     bundle_roots: list[str] | None = None,
     commands_file: Path | None = None,
 ) -> tuple[CommandRegistry, list[BundleInfo] | None]:
@@ -137,34 +137,34 @@ def _load_registry(
 
     if bundle_roots is not None:
         # Caller supplied explicit roots — use them directly.
-        discovered = discover_bundles_from_roots([str(r) for r in bundle_roots])
+        discovered = discoverBundlesFromRoots([str(r) for r in bundle_roots])
         if discovered:
-            registry.load_from_bundles(discovered)
+            registry.loadFromBundles(discovered)
             bundles = discovered
     else:
         # Fall back to ENVOY_BNDL_ROOTS auto-discovery.
-        discovered = discover_bundles_auto()
+        discovered = discoverBundlesAuto()
         if discovered:
-            registry.load_from_bundles(discovered)
+            registry.loadFromBundles(discovered)
             bundles = discovered
 
     if not registry:
         # Neither bundle path worked — try a plain commands.json.
-        cf = commands_file or find_commands_file()
+        cf = commands_file or findCommandsFile()
         if cf:
-            registry.load_from_file(cf)
+            registry.loadFromFile(cf)
 
     return registry, bundles
 
 
-def _collect_env_files(
+def _collectEnvFiles(
     command_name: str,
     registry: CommandRegistry,
     bundles: list[BundleInfo] | None,
 ) -> list[str | Path]:
     """Build the ordered list of env file paths for *command_name*.
 
-    Mirrors the collection logic inside :func:`~._cli.run_command`.
+    Mirrors the collection logic inside :func:`~._cli.runCommand`.
 
     Raises:
         CommandNotFoundError: Command not registered.
@@ -179,7 +179,7 @@ def _collect_env_files(
         )
 
     try:
-        resolved_env = registry.resolve_environment(command_name)
+        resolved_env = registry.resolveEnvironment(command_name)
     except WrapperError as e:
         raise EnvironmentBuildError(
             f"Failed to resolve environment for '{command_name}': {e}"
@@ -200,7 +200,7 @@ def _collect_env_files(
         # Legacy (single commands.json) mode: build paths from envoy_env dir.
         env_dir = cmd.envoy_env_dir
         if env_dir is None:
-            cf = find_commands_file()
+            cf = findCommandsFile()
             if cf is None:
                 raise EnvironmentBuildError(
                     f"Cannot determine envoy_env directory for '{command_name}'."
@@ -223,7 +223,7 @@ def _collect_env_files(
     return env_files
 
 
-def _prepare_env(
+def _prepareEnv(
     command_name: str,
     registry: CommandRegistry,
     bundles: list[BundleInfo] | None,
@@ -238,7 +238,7 @@ def _prepare_env(
     the executable and alias.  This lets you run an arbitrary executable
     inside a different command's environment::
 
-        _prepare_env('/path/to/krita', registry, bundles,
+        _prepareEnv('/path/to/krita', registry, bundles,
                      inherit_env=False, allowlist=None,
                      env_override='krita')
 
@@ -261,7 +261,7 @@ def _prepare_env(
         )
 
     # Build the CommandDefinition used for execution.
-    if _is_raw_path(command_name):
+    if _isRawPath(command_name):
         # Raw path: bypass registry lookup — wrap the path in a minimal definition.
         cmd = CommandDefinition(
             name=command_name,
@@ -275,12 +275,12 @@ def _prepare_env(
                 f"Command '{command_name}' is not registered."
             )
 
-    env_files = _collect_env_files(env_source, registry, bundles)
+    env_files = _collectEnvFiles(env_source, registry, bundles)
     allowlist_set: set[str] | None = set(allowlist) if allowlist else None
     env_mgr = EnvironmentManager(inherit_env=inherit_env, allowlist=allowlist_set)
 
     try:
-        env = env_mgr.prepare_environment(env_files=env_files)
+        env = env_mgr.prepareEnvironment(env_files=env_files)
     except WrapperError as e:
         raise EnvironmentBuildError(
             f"Failed to prepare environment for '{env_source}': {e}"
@@ -304,12 +304,12 @@ def _popen(
     """
     from ._environment import EnvironmentManager
 
-    expanded = cmd_def.expand_alias(env)
+    expanded = cmd_def.expandAlias(env)
     executable = expanded[0]
     base_args = expanded[1:]
 
     try:
-        resolved = ProcessExecutor.resolve_executable(
+        resolved = ProcessExecutor.resolveExecutable(
             executable, search_path=env.get('PATH')
         )
     except WrapperError as e:
@@ -363,7 +363,7 @@ class Environment:
             env.spawn([str(hip)])
 
         # Capture output from a tool
-        output = Environment('python').check_output(['-c', 'import sys; print(sys.version)'])
+        output = Environment('python').checkOutput(['-c', 'import sys; print(sys.version)'])
 
     """
 
@@ -439,7 +439,7 @@ class Environment:
 
         """
         if self._env is None:
-            if _is_raw_path(self._command) and self._env_override is None:
+            if _isRawPath(self._command) and self._env_override is None:
                 # Direct executable — no registry lookup or env-file loading.
                 allowlist_set: set[str] | None = (
                     set(self._allowlist) if self._allowlist else None
@@ -448,18 +448,18 @@ class Environment:
                     inherit_env=self._inherit_env,
                     allowlist=allowlist_set,
                 )
-                self._env = env_mgr.prepare_environment(env_files=[])
+                self._env = env_mgr.prepareEnvironment(env_files=[])
                 self._cmd_def = CommandDefinition(
                     name=self._command,
                     environment=[],
                     alias=[self._command],
                 )
             else:
-                registry, bundles = _load_registry(
+                registry, bundles = _loadRegistry(
                     bundle_roots=self._bundle_roots,
                     commands_file=self._commands_file,
                 )
-                self._env, self._cmd_def = _prepare_env(
+                self._env, self._cmd_def = _prepareEnv(
                     self._command, registry, bundles,
                     self._inherit_env, self._allowlist,
                     env_override=self._env_override,
@@ -483,8 +483,8 @@ class Environment:
         """
         self.build()
         assert self._cmd_def is not None and self._env is not None
-        if _is_raw_path(self._command) and self._env_override is None:
-            return _raw_popen(self._command, list(args or []), self._env, **kwargs)
+        if _isRawPath(self._command) and self._env_override is None:
+            return _rawPopen(self._command, list(args or []), self._env, **kwargs)
         return _popen(self._cmd_def, list(args or []), self._env, **kwargs)
 
     def call(self, args: list[str] | None = None, **kwargs) -> int:
@@ -499,21 +499,21 @@ class Environment:
 
         Raises:
             ValueError: If ``stdout`` or ``stderr`` is :data:`PIPE`.
-                Use :meth:`check_output` or :meth:`spawn` when you need to
+                Use :meth:`checkOutput` or :meth:`spawn` when you need to
                 capture a stream.
 
         """
         if kwargs.get('stdout') is PIPE or kwargs.get('stderr') is PIPE:
             raise ValueError(
                 "'call' does not support PIPE redirection for stdout/stderr. "
-                "Use 'spawn' for async capture or 'check_output' for "
+                "Use 'spawn' for async capture or 'checkOutput' for "
                 "synchronous capture."
             )
         proc = self.spawn(args, **kwargs)
         proc.wait()
         return proc.returncode
 
-    def check_call(self, args: list[str] | None = None, **kwargs) -> int:
+    def checkCall(self, args: list[str] | None = None, **kwargs) -> int:
         """Run the command and raise :exc:`CalledProcessError` on failure.
 
         Args:
@@ -533,7 +533,7 @@ class Environment:
             raise CalledProcessError(rc, exe)
         return rc
 
-    def check_output(
+    def checkOutput(
         self,
         args: list[str] | None = None,
         **kwargs,
@@ -562,7 +562,7 @@ class Environment:
         input_ = kwargs.pop('input', None)  # noqa: A001
         if 'stdout' in kwargs:
             raise ValueError(
-                "'stdout' argument not allowed in check_output; "
+                "'stdout' argument not allowed in checkOutput; "
                 "it will be overridden."
             )
         if input_ is not None and 'stdin' in kwargs:
@@ -630,7 +630,7 @@ def call(
     if kwargs.get('stdout') is PIPE or kwargs.get('stderr') is PIPE:
         raise ValueError(
             "'call' does not support PIPE redirection for stdout/stderr. "
-            "Use 'spawn' for async capture or 'check_output' for "
+            "Use 'spawn' for async capture or 'checkOutput' for "
             "synchronous capture."
         )
     return Environment(
@@ -685,7 +685,7 @@ def spawn(
     ).spawn(cmd[1:], **kwargs)
 
 
-def check_call(
+def checkCall(
     cmd: list[str],
     *,
     inherit_env: bool = False,
@@ -714,7 +714,7 @@ def check_call(
         CalledProcessError: If the process exits with a non-zero status.
 
     See also:
-        :func:`subprocess.check_call`
+        :func:`subprocess.checkCall`
 
     """
     rc = call(
@@ -731,7 +731,7 @@ def check_call(
     return rc
 
 
-def check_output(
+def checkOutput(
     cmd: list[str],
     *,
     inherit_env: bool = False,
@@ -768,7 +768,7 @@ def check_output(
             ``stdin`` are provided.
 
     See also:
-        :func:`subprocess.check_output`
+        :func:`subprocess.checkOutput`
 
     """
     if not cmd:
@@ -780,4 +780,4 @@ def check_output(
         bundle_roots=bundle_roots,
         commands_file=commands_file,
         env_override=env_override,
-    ).check_output(cmd[1:], **kwargs)
+    ).checkOutput(cmd[1:], **kwargs)

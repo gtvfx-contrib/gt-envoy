@@ -11,7 +11,7 @@ Covers:
 - Cross-file: allowlist declared in one file makes the var visible to
   operators in the same or earlier files (pre-pass runs across all files).
 - ``allowlist_out`` parameter collects all declared var names.
-- ``prepare_environment`` appends declared var names to ``ENVOY_ALLOWLIST``
+- ``prepareEnvironment`` appends declared var names to ``ENVOY_ALLOWLIST``
   in the returned subprocess env.
 """
 import json
@@ -30,7 +30,7 @@ from envoy._environment import EnvironmentManager
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _write_env_file(tmp_dir: str | Path, filename: str, data: dict) -> Path:
+def _writeEnvFile(tmp_dir: str | Path, filename: str, data: dict) -> Path:
     """Write a JSON env file and return its path."""
     path = Path(tmp_dir) / filename
     with open(path, "w", encoding="utf-8") as fh:
@@ -39,7 +39,7 @@ def _write_env_file(tmp_dir: str | Path, filename: str, data: dict) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# Tests — load_env_from_files (unit)
+# Tests — loadEnvFromFiles (unit)
 # ---------------------------------------------------------------------------
 
 def test_allowlist_seeds_var_from_os_environ():
@@ -49,12 +49,12 @@ def test_allowlist_seeds_var_from_os_environ():
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["_ENVOY_TEST_ALLW_SEED"] = "host_value"
         try:
-            env_file = _write_env_file(tmp, "env.json", {
+            env_file = _writeEnvFile(tmp, "env.json", {
                 "environment": {},
                 "environment_allowlist": ["_ENVOY_TEST_ALLW_SEED"],
             })
             manager = EnvironmentManager(inherit_env=False)
-            result = manager.load_env_from_files(env_file, base_env={})
+            result = manager.loadEnvFromFiles(env_file, base_env={})
         finally:
             del os.environ["_ENVOY_TEST_ALLW_SEED"]
 
@@ -72,12 +72,12 @@ def test_allowlist_skips_var_absent_from_os_environ():
     os.environ.pop("_ENVOY_TEST_ALLW_ABSENT", None)
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, "env.json", {
+        env_file = _writeEnvFile(tmp, "env.json", {
             "environment": {},
             "environment_allowlist": ["_ENVOY_TEST_ALLW_ABSENT"],
         })
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(env_file, base_env={})
+        result = manager.loadEnvFromFiles(env_file, base_env={})
 
     assert "_ENVOY_TEST_ALLW_ABSENT" not in result, (
         "Var absent from os.environ should not appear in merged_env"
@@ -92,12 +92,12 @@ def test_allowlist_does_not_overwrite_base_env():
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["_ENVOY_TEST_ALLW_BASE"] = "host_value"
         try:
-            env_file = _write_env_file(tmp, "env.json", {
+            env_file = _writeEnvFile(tmp, "env.json", {
                 "environment": {},
                 "environment_allowlist": ["_ENVOY_TEST_ALLW_BASE"],
             })
             manager = EnvironmentManager(inherit_env=False)
-            result = manager.load_env_from_files(
+            result = manager.loadEnvFromFiles(
                 env_file,
                 base_env={"_ENVOY_TEST_ALLW_BASE": "base_env_value"},
             )
@@ -114,20 +114,20 @@ def test_allowlist_var_available_for_append_operator():
     """Var seeded via environment_allowlist is visible to += in the same file."""
     print("Testing environment_allowlist var is available for += operator...")
 
-    host_val = EnvironmentManager.normalize_path("/host/bin")
-    bundle_val = EnvironmentManager.normalize_path("/bundle/bin")
+    host_val = EnvironmentManager.normalizePath("/host/bin")
+    bundle_val = EnvironmentManager.normalizePath("/bundle/bin")
 
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["_ENVOY_TEST_ALLW_PATH"] = host_val
         try:
-            env_file = _write_env_file(tmp, "env.json", {
+            env_file = _writeEnvFile(tmp, "env.json", {
                 "environment": {
                     "+=_ENVOY_TEST_ALLW_PATH": "/bundle/bin",
                 },
                 "environment_allowlist": ["_ENVOY_TEST_ALLW_PATH"],
             })
             manager = EnvironmentManager(inherit_env=False)
-            result = manager.load_env_from_files(env_file, base_env={})
+            result = manager.loadEnvFromFiles(env_file, base_env={})
         finally:
             del os.environ["_ENVOY_TEST_ALLW_PATH"]
 
@@ -144,25 +144,25 @@ def test_allowlist_cross_file_visible_to_prepend():
     print("Testing cross-file: allowlist in file B visible to ^= in file A...")
 
     path_sep = ";" if os.name == "nt" else ":"
-    host_val = EnvironmentManager.normalize_path("/host/bin")
-    bundle_val = EnvironmentManager.normalize_path("/bundle/bin")
+    host_val = EnvironmentManager.normalizePath("/host/bin")
+    bundle_val = EnvironmentManager.normalizePath("/bundle/bin")
 
     with tempfile.TemporaryDirectory() as tmp:
         os.environ["_ENVOY_TEST_ALLW_CROSS"] = host_val
         try:
             # File A: uses ^= (would be a no-op if var isn't seeded yet)
-            file_a = _write_env_file(tmp, "file_a.json", {
+            file_a = _writeEnvFile(tmp, "file_a.json", {
                 "environment": {
                     "^=_ENVOY_TEST_ALLW_CROSS": "/bundle/bin",
                 },
             })
             # File B: declares the allowlist (processed in pre-pass before file A's entries)
-            file_b = _write_env_file(tmp, "file_b.json", {
+            file_b = _writeEnvFile(tmp, "file_b.json", {
                 "environment": {},
                 "environment_allowlist": ["_ENVOY_TEST_ALLW_CROSS"],
             })
             manager = EnvironmentManager(inherit_env=False)
-            result = manager.load_env_from_files([file_a, file_b], base_env={})
+            result = manager.loadEnvFromFiles([file_a, file_b], base_env={})
         finally:
             del os.environ["_ENVOY_TEST_ALLW_CROSS"]
 
@@ -179,13 +179,13 @@ def test_allowlist_out_collects_declared_names():
     print("Testing allowlist_out collects declared var names...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, "env.json", {
+        env_file = _writeEnvFile(tmp, "env.json", {
             "environment": {},
             "environment_allowlist": ["VAR_A", "VAR_B", "VAR_C"],
         })
         manager = EnvironmentManager(inherit_env=False)
         collected: list[str] = []
-        manager.load_env_from_files(env_file, base_env={}, allowlist_out=collected)
+        manager.loadEnvFromFiles(env_file, base_env={}, allowlist_out=collected)
 
     assert set(collected) == {"VAR_A", "VAR_B", "VAR_C"}, (
         f"Expected {{VAR_A, VAR_B, VAR_C}}, got {set(collected)}"
@@ -194,15 +194,15 @@ def test_allowlist_out_collects_declared_names():
 
 
 # ---------------------------------------------------------------------------
-# Tests — prepare_environment (integration)
+# Tests — prepareEnvironment (integration)
 # ---------------------------------------------------------------------------
 
 def test_prepare_environment_appends_to_envoy_allowlist():
-    """prepare_environment appends environment_allowlist var names to ENVOY_ALLOWLIST."""
-    print("Testing prepare_environment appends to ENVOY_ALLOWLIST...")
+    """prepareEnvironment appends environment_allowlist var names to ENVOY_ALLOWLIST."""
+    print("Testing prepareEnvironment appends to ENVOY_ALLOWLIST...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, "env.json", {
+        env_file = _writeEnvFile(tmp, "env.json", {
             "environment": {},
             "environment_allowlist": ["_ENVOY_TEST_ALLW_INSPECT"],
         })
@@ -210,7 +210,7 @@ def test_prepare_environment_appends_to_envoy_allowlist():
         original_allowlist = os.environ.pop("ENVOY_ALLOWLIST", None)
         try:
             manager = EnvironmentManager(inherit_env=False)
-            result = manager.prepare_environment(env_files=[env_file])
+            result = manager.prepareEnvironment(env_files=[env_file])
         finally:
             if original_allowlist is not None:
                 os.environ["ENVOY_ALLOWLIST"] = original_allowlist
@@ -228,7 +228,7 @@ def test_prepare_environment_merges_with_existing_envoy_allowlist():
     print("Testing ENVOY_ALLOWLIST merge with existing value...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, "env.json", {
+        env_file = _writeEnvFile(tmp, "env.json", {
             "environment": {},
             "environment_allowlist": ["_ENVOY_TEST_ALLW_NEW"],
         })
@@ -236,7 +236,7 @@ def test_prepare_environment_merges_with_existing_envoy_allowlist():
         os.environ["ENVOY_ALLOWLIST"] = "EXISTING_VAR"
         try:
             manager = EnvironmentManager(inherit_env=False, allowlist={"EXISTING_VAR"})
-            result = manager.prepare_environment(env_files=[env_file])
+            result = manager.prepareEnvironment(env_files=[env_file])
         finally:
             if original_allowlist is not None:
                 os.environ["ENVOY_ALLOWLIST"] = original_allowlist

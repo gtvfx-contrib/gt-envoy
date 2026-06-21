@@ -1,4 +1,4 @@
-﻿"""Test special wrapper variables."""
+"""Test special wrapper variables."""
 import sys
 import os
 from pathlib import Path
