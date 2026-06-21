@@ -112,6 +112,34 @@ en --bundles-config R:/studio/bundles.json --list
 en -bc R:/studio/bundles.json python_dev script.py
 ```
 
+### Environment variables in config paths
+
+Path strings inside a bundle config file support `${VARNAME}` expansion.
+Each token is resolved against the current process environment at load time,
+making configs portable across machines or deployment roots:
+
+```json
+{
+    "bundles": [
+        "${STUDIO_PIPELINE_ROOT}/envoy/0.2.1",
+        "${STUDIO_PIPELINE_ROOT}/globals/1.0.0",
+        "${STUDIO_PIPELINE_ROOT}/pythoncore/2.1.0",
+        "R:/fallback/myapp"
+    ]
+}
+```
+
+When envoy loads this config it replaces each `${VAR}` with the matching
+environment variable value before resolving the path.
+
+**Undefined variables** — if a referenced variable is not set in the
+environment, envoy logs a warning (including the variable name and the config
+file it came from) and **skips** that bundle entry.  The remaining entries
+are still loaded normally.
+
+!!! tip
+    This is the same `${VARNAME}` syntax used in `envoy_env/*.json` files.
+
 ## Method 3 — Local Fallback
 
 If no bundles are found via the above methods, Envoy walks up from the current directory looking for `envoy_env/commands.json`. This allows running from inside a single-bundle project without any setup.

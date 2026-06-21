@@ -22,6 +22,10 @@ from ._environment import EnvironmentManager, TraceAllowlistEvent, TraceStepEven
 from ._executor import ProcessExecutor
 from ._models import WrapperConfig
 from ._exceptions import WrapperError
+from ._user_config import UserConfig, KNOWN_SETTINGS
+from ._config_registry import (
+    isConfigName, resolveNamedConfig, listNamedConfigs, CFG_ROOTS_VAR,
+)
 
 
 log = logging.getLogger(__name__)
@@ -505,6 +509,133 @@ def trace_command(
     return 0
 
 
+# ---------------------------------------------------------------------------
+# User config handlers
+# ---------------------------------------------------------------------------
+
+def handleSetConfig(raw: str) -> int:
+    """Handle ``--set-config KEY=VALUE`` or ``--set-config KEY=`` (clear).
+
+    Args:
+        raw: The raw ``KEY=VALUE`` string from the command line.
+
+    Returns:
+        Exit code (0 on success, 1 on error).
+
+    """
+    if '=' not in raw:
+        print(
+            f"Error: --set-config requires KEY=VALUE format "
+            f"(use KEY= to clear a setting)",
+            file=sys.stderr,
+        )
+        return 1
+
+    key, _, value = raw.partition('=')
+    key = key.strip()
+
+    cfg = UserConfig.load()
+
+    if value == '':
+        if cfg.unset(key):
+            cfg.save()
+            print(f"Cleared: {key}")
+        else:
+            print(f"Nothing to clear: {key!r} was not set")
+        return 0
+
+    try:
+        cfg.set(key, value)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    cfg.save()
+    print(f"Saved: {key} = {value!r}")
+    print(f"Config: {cfg.path}")
+    return 0
+
+
+def handleGetConfig(key: str | None) -> int:
+    """Handle ``--get-config [KEY]``.
+
+    Args:
+        key: Specific setting to show, or ``None`` / empty string to show all.
+
+    Returns:
+        Exit code.
+
+    """
+    cfg = UserConfig.load()
+
+    if key:
+        value = cfg.get(key)
+        if value is None:
+            print(f"{key}: <not set>")
+        else:
+            print(f"{key} = {value!r}")
+        return 0
+
+    settings = cfg.items()
+    if not settings:
+        print("No config settings are set.")
+        print(f"Config: {cfg.path}")
+        return 0
+
+    print(f"Config: {cfg.path}")
+    print()
+    for setting_key in sorted(settings):
+        print(f"  {setting_key} = {settings[setting_key]!r}")
+    return 0
+
+
+def handleListConfigs() -> int:
+    """Handle ``--list-configs``.
+
+    Prints all known configurable settings with their descriptions, then lists
+    any named configs available from ``ENVOY_CFG_ROOTS``.
+
+    Returns:
+        Exit code (always 0).
+
+    """
+    cfg = UserConfig.load()
+
+    print("Configurable settings:")
+    print()
+    for setting_key, meta in sorted(KNOWN_SETTINGS.items()):
+        current = cfg.get(setting_key)
+        status = f"(current: {current!r})" if current is not None else "(not set)"
+        choices_str = f"  Choices: {', '.join(meta['choices'])}" if meta.get('choices') else ""
+        print(f"  {setting_key}  {status}")
+        print(f"    {meta['description']}")
+        if choices_str:
+            print(f"   {choices_str}")
+        print()
+
+    print(f"Config file: {cfg.path}")
+    print()
+    print("Usage:  envoy --set-config KEY=VALUE")
+    print("        envoy --set-config KEY=       (clear a setting)")
+
+    # Show available named configs when ENVOY_CFG_ROOTS is set.
+    named = listNamedConfigs()
+    if named:
+        print()
+        print(f"Available named configs ({CFG_ROOTS_VAR}):")
+        print()
+        for entry in named:
+            print(f"  {entry.name:<20}  version: {entry.version}")
+            print(f"    {entry.path}")
+        print()
+        print("Usage:  envoy --set-config bundles_config=<name>")
+    elif os.environ.get(CFG_ROOTS_VAR):
+        print()
+        print(f"No named configs found in {CFG_ROOTS_VAR}.")
+
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point.
     
@@ -561,7 +692,43 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help='Path to bundles config file (auto-discovers from ENVOY_BNDL_ROOTS if not specified)'
     )
-    
+
+    parser.add_argument(
+        '--set-config', '-sc',
+        metavar='KEY=VALUE',
+        help=(
+            'Set a user config value and save it. '
+            'Use KEY= (empty value) to clear a setting. '
+            'Example: --set-config bundles_config=/path/to/bundles.json'
+        ),
+    )
+
+    parser.add_argument(
+        '--get-config', '-gc',
+        metavar='KEY',
+        nargs='?',
+        const='',
+        help=(
+            'Print one or all user config values and exit. '
+            'Omit KEY to print all settings.'
+        ),
+    )
+
+    parser.add_argument(
+        '--list-configs', '-lc',
+        action='store_true',
+        help='List all known configurable settings with their descriptions and exit.',
+    )
+
+    parser.add_argument(
+        '--ignore-config', '-ic',
+        action='store_true',
+        help=(
+            'Bypass the user config for this invocation. '
+            'Auto-discovery via ENVOY_BNDL_ROOTS proceeds as if no user config is set.'
+        ),
+    )
+
     parser.add_argument(
         '--env', '-e',
         metavar='ENV_COMMAND',
@@ -612,7 +779,17 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:]
     
     args = parser.parse_args(argv)
-    
+
+    # --list-configs / --set-config / --get-config: config-only operations, exit early.
+    if args.list_configs:
+        return handleListConfigs()
+
+    if args.set_config is not None:
+        return handleSetConfig(args.set_config)
+
+    if args.get_config is not None:
+        return handleGetConfig(args.get_config or None)
+
     # Setup logging
     setup_logging(args.verbose)
 
@@ -630,15 +807,66 @@ def main(argv: list[str] | None = None) -> int:
         webbrowser.open(_local_docs.as_uri() if _local_docs.exists() else _DOCS_URL)
         return 0
 
+    # Load user config (used unless --ignore-config is set).
+    user_cfg = UserConfig.load()
+
     # Initialize command registry
     registry = CommandRegistry()
     bundles = None  # Track discovered bundles for env file resolution
-    
-    # Determine command loading strategy
-    if args.bundles_config:
+
+    # Apply default verbosity from user config (CLI --verbose always wins).
+    if not args.verbose and not args.ignore_config:
+        cfg_verbosity = user_cfg.get('verbosity')
+        if cfg_verbosity == 'verbose':
+            setup_logging(verbose=True)
+
+    # Determine command loading strategy.
+    #
+    # Priority:
+    #   1. --bundles-config CLI flag  (may be a path or a named config)
+    #   2. user config bundles_config (unless --ignore-config)
+    #   3. auto-discovery via ENVOY_BNDL_ROOTS
+    #   4. local commands.json fallback
+    effective_bundles_config: Path | None = None
+
+    # Resolve the raw bundles-config value (path or named config) to a Path.
+    def _resolveConfigValue(raw: str | Path) -> Path | None:
+        """Resolve a bundles-config value — path or named config — to a Path."""
+        value = str(raw)
+        if isConfigName(value):
+            resolved = resolveNamedConfig(value)
+            if resolved is None:
+                print(
+                    f"Error: Named config {value!r} not found in {CFG_ROOTS_VAR}. "
+                    f"Run 'envoy --list-configs' to see available configs.",
+                    file=sys.stderr,
+                )
+                return None
+            log.debug("Resolved named config %r to: %s", value, resolved)
+            return resolved
+        return Path(value)
+
+    if args.bundles_config is not None:
+        raw_value = str(args.bundles_config)
+        if isConfigName(raw_value):
+            effective_bundles_config = _resolveConfigValue(raw_value)
+            if effective_bundles_config is None:
+                return 1
+        else:
+            effective_bundles_config = args.bundles_config
+
+    if effective_bundles_config is None and not args.ignore_config:
+        stored = user_cfg.get('bundles_config')
+        if stored:
+            effective_bundles_config = _resolveConfigValue(stored)
+            if effective_bundles_config is None:
+                return 1
+            log.debug("Using bundles_config from user config: %s", effective_bundles_config)
+
+    if effective_bundles_config:
         # Load from bundles config file
         try:
-            discovered_bundles = get_bundles(config_file=args.bundles_config)
+            discovered_bundles = get_bundles(config_file=effective_bundles_config)
             if discovered_bundles:
                 log.info(f"Discovered {len(discovered_bundles)} bundle(s) from config file")
                 registry.load_from_bundles(discovered_bundles)
@@ -668,7 +896,7 @@ def main(argv: list[str] | None = None) -> int:
                 bundles = discovered_bundles
         except WrapperError as e:
             log.debug(f"Bundle auto-discovery failed: {e}")
-        
+
         # Fall back to local commands.json if no bundles found
         if len(registry) == 0:
             commands_file = find_commands_file()

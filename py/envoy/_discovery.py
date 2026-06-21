@@ -41,8 +41,58 @@ BUNDLE_MARKER_FILE: str = '.bundle'
 
 _NAMESPACE_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{1,19}$')
 
-
 _BNDLID_RE = re.compile(r'^([A-Za-z][A-Za-z0-9_]{1,19}):([A-Za-z][A-Za-z0-9_-]*)$')
+
+#: Matches ``${VARNAME}`` references in bundle config path strings.
+_BUNDLE_PATH_VAR_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+
+
+def _expandBundlePath(raw: str, config_file: Path) -> str | None:
+    """Expand ``${VARNAME}`` references in a bundle path string.
+
+    Resolves each ``${VARNAME}`` token against :data:`os.environ`.  If any
+    referenced variable is undefined, a warning is logged for each missing
+    variable and ``None`` is returned so the caller can skip the entry.
+
+    Args:
+        raw: Raw path string from a bundle config file, potentially containing
+            ``${VARNAME}`` tokens.
+        config_file: Path to the config file being processed (used in warning
+            messages so the user knows where the undefined reference came from).
+
+    Returns:
+        The fully expanded string, or ``None`` if any variable was undefined.
+
+    Example::
+
+        os.environ['STUDIO_ROOT'] = 'R:/studio'
+        result = _expandBundlePath('${STUDIO_ROOT}/envoy/0.2.1', Path('bundles.json'))
+        # 'R:/studio/envoy/0.2.1'
+
+    """
+    unresolved: list[str] = []
+
+    def _replacer(match: re.Match) -> str:
+        var_name = match.group(1)
+        val = os.environ.get(var_name)
+        if val is None:
+            unresolved.append(var_name)
+            return ''
+        return val
+
+    result = _BUNDLE_PATH_VAR_RE.sub(_replacer, raw)
+
+    if unresolved:
+        for var_name in unresolved:
+            logger.warning(
+                "Bundle config %s: path %r references undefined variable ${%s} — skipping",
+                config_file,
+                raw,
+                var_name,
+            )
+        return None
+
+    return result
 
 
 def _is_bndlid(spec: str) -> bool:
@@ -416,8 +466,8 @@ class Bundle:
 class BundleConfig:
     """An envoy bundle configuration file.
 
-    A bundle config is a JSON file that declares which bundles envoy should use — the file passed to the CLI
-    via ``--bundles-config``/``-bc``.
+    A bundle config is a JSON file that declares which bundles envoy should use
+    — the file passed to the CLI via ``--bundles-config``/``-bc``.
 
     **Current format** — flat list of filesystem paths (all checkout mode)::
 
@@ -438,9 +488,11 @@ class BundleConfig:
         }
 
     In the versioned model each bundle entry resolves to a built output
-directory tagged with the requested version.  The
-        ``checkout:`` prefix will preserve the current path-based behaviour
-        for in-development bundles.
+    directory tagged with the requested version.  The ``checkout:`` prefix
+    will preserve the current path-based behaviour for in-development bundles.
+
+    Instances are usually created via the constructor (from a path) or via one
+    of the factory classmethods :meth:`from_name` and :meth:`current`.
 
     Args:
         path: Path to the bundle config JSON file.
@@ -448,12 +500,23 @@ directory tagged with the requested version.  The
     Raises:
         ValueError: If *path* does not exist.
 
-    Example::
+    Examples::
 
+        # Load from an explicit path
         cfg = BundleConfig('/studio/envoy_bundles.json')
         for bundle in cfg.bundles:
             print(bundle.name, bundle.version, bundle.is_checkout)
         print(cfg.commands)   # merged command list across all bundles
+
+        # Load from a named config slot (resolved via ENVOY_CFG_ROOTS)
+        cfg = BundleConfig.from_name('studio')
+        print(cfg.name)         # 'studio'
+        print(cfg.cfg_version)  # '2026-06-21T10-13-00'
+
+        # Load whatever the user has configured
+        cfg = BundleConfig.current()
+        if cfg is not None:
+            print(cfg.commands)
 
     """
 
@@ -463,6 +526,145 @@ directory tagged with the requested version.  The
             raise ValueError(f"BundleConfig path does not exist: {p}")
         self._path = p
         self._bundles: list[Bundle] | None = None
+        self._name: str | None = None
+        self._cfg_version: str | None = None
+
+    # ------------------------------------------------------------------
+    # Internal factory (preserves name/version metadata)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _from_named(cls, path: Path, name: str, version: str) -> 'BundleConfig':
+        """Construct a BundleConfig already resolved from a named config slot.
+
+        Args:
+            path: Absolute path to the resolved config JSON file.
+            name: The config slot name (e.g. ``'studio'``).
+            version: The version timestamp string.
+
+        Returns:
+            A fully initialised :class:`BundleConfig` with name/version set.
+
+        """
+        obj = cls.__new__(cls)
+        obj._path = path
+        obj._bundles = None
+        obj._name = name
+        obj._cfg_version = version
+        return obj
+
+    # ------------------------------------------------------------------
+    # Factory classmethods
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_name(cls, name: str) -> 'BundleConfig':
+        """Load a bundle config by named config slot.
+
+        Resolves *name* to the latest published version via
+        ``ENVOY_CFG_ROOTS``.  The first matching root wins (same precedence
+        as the CLI ``--bundles-config`` flag).
+
+        Args:
+            name: Config slot name (e.g. ``'studio'``, ``'production'``).
+
+        Returns:
+            :class:`BundleConfig` instance with :attr:`name` and
+            :attr:`cfg_version` populated.
+
+        Raises:
+            ValueError: If *name* cannot be resolved via ``ENVOY_CFG_ROOTS``
+                (slot not found or ``ENVOY_CFG_ROOTS`` is not set).
+
+        Example::
+
+            cfg = BundleConfig.from_name('studio')
+            print(cfg.name)         # 'studio'
+            print(cfg.cfg_version)  # '2026-06-21T10-13-00'
+            print(cfg.path)         # /studio/envoy/configs/studio/2026-...json
+            print(cfg.commands)
+
+        """
+        from ._config_registry import resolveNamedConfig
+        resolved = resolveNamedConfig(name)
+        if resolved is None:
+            raise ValueError(
+                f"Named config {name!r} not found in ENVOY_CFG_ROOTS. "
+                "Check that ENVOY_CFG_ROOTS is set and the config has been published."
+            )
+        version = resolved.stem
+        return cls._from_named(resolved, name=name, version=version)
+
+    @classmethod
+    def current(
+        cls,
+        *,
+        ignore_user_config: bool = False,
+    ) -> 'BundleConfig | None':
+        """Return the active bundle config as configured by the user.
+
+        Reads the ``bundles_config`` setting from the persistent user config
+        file and resolves it to a :class:`BundleConfig` instance.  Returns
+        ``None`` when no ``bundles_config`` is set.
+
+        Resolution logic:
+
+        1. If *ignore_user_config* is ``True``, return ``None`` immediately.
+        2. Load the user config from disk.
+        3. Read the ``bundles_config`` setting.
+        4. If the value looks like a named config slot (no path separators),
+           resolve it via :func:`~._config_registry.resolveNamedConfig`.
+        5. Otherwise, treat the value as a filesystem path.
+        6. Return ``None`` if no setting is present.
+
+        Args:
+            ignore_user_config: When ``True``, bypass the user config entirely
+                and return ``None``.  Mirrors the ``--ignore-config`` CLI flag.
+
+        Returns:
+            The resolved :class:`BundleConfig`, or ``None`` if no
+            ``bundles_config`` is configured.
+
+        Raises:
+            ValueError: If the configured value resolves to a file that does
+                not exist, or a named config slot that cannot be found.
+
+        Example::
+
+            cfg = BundleConfig.current()
+            if cfg is not None:
+                for bundle in cfg.bundles:
+                    print(bundle.bndlid)
+            else:
+                print("No bundle config set — using auto-discovery")
+
+        """
+        if ignore_user_config:
+            return None
+
+        from ._user_config import UserConfig
+        from ._config_registry import isConfigName, resolveNamedConfig
+
+        user_cfg = UserConfig.load()
+        raw = user_cfg.get('bundles_config')
+        if not raw:
+            return None
+
+        if isConfigName(raw):
+            resolved = resolveNamedConfig(raw)
+            if resolved is None:
+                raise ValueError(
+                    f"Named config {raw!r} (from user config) not found in "
+                    "ENVOY_CFG_ROOTS."
+                )
+            version = resolved.stem
+            return cls._from_named(resolved, name=raw, version=version)
+
+        return cls(raw)
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
 
     @property
     def path(self) -> Path:
@@ -470,10 +672,33 @@ directory tagged with the requested version.  The
         return self._path
 
     @property
+    def name(self) -> str | None:
+        """Named config slot this config was loaded from, or ``None``.
+
+        Populated when the instance was created via :meth:`from_name` or
+        :meth:`current` (when the user config holds a slot name rather than a
+        path).  ``None`` for instances created directly from a path.
+
+        """
+        return self._name
+
+    @property
+    def cfg_version(self) -> str | None:
+        """Version timestamp string if loaded from a named config slot, else ``None``.
+
+        Format matches the filenames written by ``engit publish-config``:
+        ``'2026-06-21T10-13-00'``.  ``None`` for instances created directly
+        from a path.
+
+        """
+        return self._cfg_version
+
+    @property
     def bundles(self) -> list[Bundle]:
         """List of :class:`Bundle` objects declared in this config.
 
         Loaded and cached on first access.
+
         """
         if self._bundles is None:
             infos = load_bundles_from_config(self._path)
@@ -489,6 +714,8 @@ directory tagged with the requested version.  The
         return sorted(seen)
 
     def __repr__(self) -> str:
+        if self._name:
+            return f"BundleConfig(name={self._name!r}, path={self._path})"
         return f"BundleConfig(path={self._path})"
 
     def __str__(self) -> str:
@@ -799,8 +1026,16 @@ def load_bundles_from_config(config_file: Path) -> list[BundleInfo]:
     
     bundles = []
     for path_str in bundle_paths:
-        path = Path(path_str).resolve()
-        
+        if not isinstance(path_str, str):
+            logger.warning("Bundle config %s: non-string entry %r — skipping", config_file, path_str)
+            continue
+
+        expanded = _expandBundlePath(path_str, config_file)
+        if expanded is None:
+            continue
+
+        path = Path(expanded).resolve()
+
         if not validate_bundle(path):
             logger.warning(f"Invalid bundle in config: {path}")
             continue

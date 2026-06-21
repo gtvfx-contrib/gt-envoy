@@ -47,6 +47,7 @@ nav:
   - Environment Files: env-files.md
   - Bundle Discovery: bundle-discovery.md
   - Environment Modes: environment-modes.md
+  - User Configuration: user-config.md
   - CLI Reference:
     - envoy: cli-reference/envoy.md
     - engit: cli-reference/engit.md
