@@ -50,9 +50,11 @@ def _defaultConfigPath() -> Path:
 
 #: Absolute path to the user config file.  Can be overridden for testing via
 #: the ``ENVOY_USER_CONFIG`` environment variable.
-USER_CONFIG_PATH: Path = Path(
-    os.environ.get('ENVOY_USER_CONFIG', '')
-) or _defaultConfigPath()
+USER_CONFIG_PATH: Path = (
+    Path(os.environ['ENVOY_USER_CONFIG'])
+    if os.environ.get('ENVOY_USER_CONFIG')
+    else _defaultConfigPath()
+)
 
 
 # ---------------------------------------------------------------------------
@@ -124,13 +126,18 @@ class UserConfig:
 
         Args:
             path: Override the config file path.  Defaults to
-                :data:`USER_CONFIG_PATH`.
+                :data:`USER_CONFIG_PATH` (or the value of the
+                ``ENVOY_USER_CONFIG`` environment variable if set at call
+                time, enabling test isolation without re-importing the module).
 
         Returns:
             Loaded :class:`UserConfig` instance.
 
         """
-        config_path = path if path is not None else USER_CONFIG_PATH
+        if path is None:
+            env_override = os.environ.get('ENVOY_USER_CONFIG')
+            path = Path(env_override) if env_override else USER_CONFIG_PATH
+        config_path = path
         if config_path.is_file():
             try:
                 raw = json.loads(config_path.read_text(encoding='utf-8'))

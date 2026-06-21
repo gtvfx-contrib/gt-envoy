@@ -200,3 +200,103 @@ The user config file is plain JSON:
 ```
 
 You can edit it directly in any text editor — envoy reads it on every invocation.
+
+## Python API
+
+All user-config and named-config functionality is available in the `envoy`
+Python package, making it easy to read or manipulate configuration
+programmatically.
+
+### `UserConfig`
+
+```python
+import envoy
+
+# Load the current user config (never raises; returns empty config if absent)
+cfg = envoy.loadUserConfig()
+print(cfg.get('bundles_config'))   # 'studio' or None
+
+# Modify and save
+cfg.set('bundles_config', 'studio')
+cfg.set('verbosity', 'verbose')
+cfg.save()
+
+# Inspect all stored settings
+print(cfg.items())  # {'bundles_config': 'studio', 'verbosity': 'verbose'}
+
+# Remove a setting
+cfg.unset('verbosity')
+cfg.save()
+```
+
+The config file path is exposed as `envoy.USER_CONFIG_PATH` and the registry
+of valid settings as `envoy.KNOWN_SETTINGS`.
+
+### `BundleConfig`
+
+`BundleConfig` can now be constructed from a named config slot or from the
+current user configuration, in addition to an explicit path.
+
+```python
+import envoy
+
+# ── From an explicit path ──────────────────────────────────────────────────
+cfg = envoy.BundleConfig('R:/studio/envoy/studio_bundles.json')
+for bundle in cfg.bundles:
+    print(bundle.bndlid, bundle.version)
+
+# ── From a named config slot (resolved via ENVOY_CFG_ROOTS) ───────────────
+cfg = envoy.BundleConfig.from_name('studio')
+print(cfg.name)         # 'studio'
+print(cfg.cfg_version)  # '2026-06-21T10-13-00'
+print(cfg.path)         # /studio/envoy/configs/studio/2026-...json
+print(cfg.commands)     # merged command list
+
+# ── From whatever the user has configured ─────────────────────────────────
+cfg = envoy.BundleConfig.current()
+if cfg is not None:
+    print(cfg.commands)
+else:
+    print("No bundle config set — use ENVOY_BNDL_ROOTS auto-discovery")
+
+# Convenience alias
+cfg = envoy.getCurrentBundleConfig()
+
+# Skip the user config for this call (mirrors --ignore-config)
+cfg = envoy.BundleConfig.current(ignore_user_config=True)
+```
+
+### Named config registry
+
+```python
+import envoy
+
+# Check whether a string is a config name or a path
+envoy.isConfigName('studio')          # True
+envoy.isConfigName('/path/to/f.json') # False
+
+# Resolve a name to the latest published path
+path = envoy.resolveNamedConfig('studio')
+print(path)  # Path('/studio/envoy/configs/studio/2026-06-22T09-00-00.json')
+
+# List all available configs
+for entry in envoy.listNamedConfigs():
+    print(entry.name, entry.version, entry.path)
+
+# All published versions for one name (newest first)
+for version, path in envoy.listConfigVersions('studio'):
+    print(version, path)
+
+# Publish a new version programmatically
+from pathlib import Path
+envoy.publishConfig(
+    cfg_root=Path('R:/studio/envoy/configs'),
+    name='studio',
+    source_path=Path('R:/my/bundles.json'),
+)
+```
+
+The config root environment variable name is available as `envoy.CFG_ROOTS_VAR`
+(`'ENVOY_CFG_ROOTS'`).  Named config entries are instances of
+`envoy.NamedConfigEntry` — a dataclass with `.name`, `.version`, `.path`, and
+`.cfg_root` attributes.

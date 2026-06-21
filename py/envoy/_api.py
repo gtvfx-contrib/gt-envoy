@@ -12,6 +12,7 @@ import platform
 from pathlib import Path
 
 from ._environment import _CORE_ENV_VARS, _ENVOY_ENV_VARS
+from ._user_config import UserConfig, USER_CONFIG_PATH, KNOWN_SETTINGS
 
 
 # ---------------------------------------------------------------------------
@@ -184,3 +185,65 @@ def set_api_verbosity(level: int | str) -> None:
 
     """
     logging.getLogger('envoy').setLevel(level)
+
+
+def loadUserConfig(path: Path | None = None) -> UserConfig:
+    """Load the persistent user config from disk.
+
+    Convenience wrapper around :meth:`~._user_config.UserConfig.load`.
+    Returns an empty (default) config when the file does not exist or cannot
+    be parsed — never raises on a missing or corrupt file.
+
+    Args:
+        path: Override the config file path.  Defaults to
+            :data:`~._user_config.USER_CONFIG_PATH`.
+
+    Returns:
+        Loaded :class:`~._user_config.UserConfig` instance.
+
+    Example::
+
+        cfg = envoy.loadUserConfig()
+        print(cfg.get('bundles_config'))  # None if not set
+
+        cfg.set('bundles_config', 'studio')
+        cfg.save()
+
+    """
+    return UserConfig.load(path=path)
+
+
+def getCurrentBundleConfig(
+    *,
+    ignore_user_config: bool = False,
+) -> 'BundleConfig | None':
+    """Return the active bundle config as configured by the user.
+
+    Convenience wrapper around :meth:`~._discovery.BundleConfig.current`.
+    Reads the ``bundles_config`` setting from the persistent user config and
+    resolves it to a :class:`~._discovery.BundleConfig` instance.  Returns
+    ``None`` when no ``bundles_config`` is set.
+
+    Args:
+        ignore_user_config: When ``True``, bypass the user config entirely and
+            return ``None``.  Mirrors the ``--ignore-config`` CLI flag.
+
+    Returns:
+        The resolved :class:`~._discovery.BundleConfig`, or ``None`` if no
+        ``bundles_config`` is configured.
+
+    Raises:
+        ValueError: If the configured value resolves to a file that does not
+            exist, or a named config slot that cannot be found.
+
+    Example::
+
+        cfg = envoy.getCurrentBundleConfig()
+        if cfg is not None:
+            print(cfg.commands)
+        else:
+            print("No bundle config set — using auto-discovery")
+
+    """
+    from ._discovery import BundleConfig
+    return BundleConfig.current(ignore_user_config=ignore_user_config)

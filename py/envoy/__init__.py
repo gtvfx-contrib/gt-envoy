@@ -62,6 +62,20 @@ __all__ = [
     'BundleConfig',
     'BundleInfo',
 
+    # ---- User config ----
+    'UserConfig',
+    'USER_CONFIG_PATH',
+    'KNOWN_SETTINGS',
+
+    # ---- Named config registry ----
+    'NamedConfigEntry',
+    'CFG_ROOTS_VAR',
+    'isConfigName',
+    'resolveNamedConfig',
+    'listNamedConfigs',
+    'listConfigVersions',
+    'publishConfig',
+
     # ---- Exceptions ----
     'EnvoyError',
     'WrapperError',
@@ -78,6 +92,8 @@ __all__ = [
     'get_allowlist',
     'set_api_verbosity',
     'trace_environment',
+    'loadUserConfig',
+    'getCurrentBundleConfig',
 
     # ---- Trace event types ----
     'TraceAllowlistEvent',
@@ -151,6 +167,20 @@ from ._api import (
     get_allowlist,
     set_api_verbosity,
     trace_environment,
+    loadUserConfig,
+    getCurrentBundleConfig,
+    UserConfig,
+    USER_CONFIG_PATH,
+    KNOWN_SETTINGS,
+)
+from ._config_registry import (
+    NamedConfigEntry,
+    CFG_ROOTS_VAR,
+    isConfigName,
+    resolveNamedConfig,
+    listNamedConfigs,
+    listConfigVersions,
+    publishConfig,
 )
 from ._environment import TraceAllowlistEvent, TraceStepEvent
 from ._cli import main as cli_main
