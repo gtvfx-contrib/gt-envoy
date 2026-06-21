@@ -28,6 +28,18 @@ on:
         type: string
         required: false
         default: ''
+      prerelease:
+        description: >
+          Controls the GitHub release prerelease flag.
+          'auto' (default): detects from the tag name — suffixes matching
+          alpha, beta, rc, preview, or dev are marked as prerelease; all
+          other tags (including ext-style -envoy.N suffixes) are treated as
+          production releases.
+          'true': force prerelease regardless of tag name.
+          'false': force production regardless of tag name.
+        type: string
+        required: false
+        default: 'auto'
       runner:
         description: >
           JSON array of runner labels (e.g. '["self-hosted","Windows","X64"]').
@@ -105,8 +117,24 @@ jobs:
 
           Write-Host "Published zip: $zipPath"
 
+      - name: Resolve release type
+        id: release_type
+        shell: pwsh
+        run: |
+          $tag   = "${{ github.ref_name }}"
+          $input = '${{ inputs.prerelease }}'
+          if ($input -eq 'auto') {
+              $isPrerelease = ($tag -match '-(alpha|beta|rc|preview|dev)(\.\d+)*$').ToString().ToLower()
+          } else {
+              $isPrerelease = $input
+          }
+          Write-Host "Tag: $tag  →  is_prerelease=$isPrerelease"
+          echo "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.zip
           fail_on_unmatched_files: true
+          prerelease: ${{ steps.release_type.outputs.is_prerelease }}
+          make_latest: ${{ steps.release_type.outputs.is_prerelease == 'false' }}
