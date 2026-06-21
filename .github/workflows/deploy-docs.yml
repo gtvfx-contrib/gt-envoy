@@ -9,11 +9,17 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  deploy:
-    name: Build and deploy MkDocs site
+  build:
+    name: Build MkDocs site
     runs-on: ["self-hosted", "X64", "Windows", "synology"]
 
     steps:
@@ -24,10 +30,29 @@ jobs:
 
       - name: Install MkDocs dependencies
         shell: pwsh
-        run: |
-          pip install mkdocs-material
+        run: pip install mkdocs-material
 
-      - name: Deploy to GitHub Pages
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Build site
         shell: pwsh
-        run: |
-          mkdocs gh-deploy --force --clean
+        run: mkdocs build --clean
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/
+
+  deploy:
+    name: Deploy to GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+    needs: build
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
