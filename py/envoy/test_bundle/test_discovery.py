@@ -1,10 +1,10 @@
-﻿"""Test bundle discovery functionality."""
+"""Test bundle discovery functionality."""
 
 from pathlib import Path
 from envoy._discovery import (
-    validate_bundle,
-    load_bundles_from_config,
-    get_bundles
+    validateBundle,
+    loadBundlesFromConfig,
+    getBundles
 )
 
 def test_validation():
@@ -13,8 +13,8 @@ def test_validation():
     
     examples_path = Path(__file__).parent / "examples"
     print(f"Checking: {examples_path}")
-    print(f"  Is valid bundle: {validate_bundle(examples_path)}")
-    print(f"  Has envoy_env: {(examples_path / 'envoy_env').is_dir()}")
+    print(f"  Is valid bundle: {validateBundle(examples_path)}")
+    print(f"  Has envoyEnv: {(examples_path / 'envoyEnv').is_dir()}")
     print()
 
 def test_config_loading():
@@ -27,7 +27,7 @@ def test_config_loading():
     
     if config_file.exists():
         try:
-            bundles = load_bundles_from_config(config_file)
+            bundles = loadBundlesFromConfig(config_file)
             print(f"  Loaded {len(bundles)} bundle(s)")
             for bundle in bundles:
                 print(f"    - {bundle}")
@@ -46,7 +46,7 @@ def test_auto_discovery():
     print(f"ENVOY_BNDL_ROOTS: {parent_dir}")
     
     try:
-        bundles = get_bundles()
+        bundles = getBundles()
         print(f"  Auto-discovered {len(bundles)} bundle(s)")
         for bundle in bundles:
             print(f"    - {bundle}")

@@ -7,7 +7,7 @@ from gt.app.wrapper import (
     ApplicationWrapper,
     WrapperConfig,
     ExecutionResult,
-    create_wrapper
+    createWrapper
 )
 
 
@@ -38,18 +38,18 @@ def example_with_environment():
     print("ENVIRONMENT VARIABLES EXAMPLE")
     print("=" * 60)
     
-    def pre_run():
+    def preRun():
         print("Setting up environment...")
     
-    def post_run(result: ExecutionResult):
+    def postRun(result: ExecutionResult):
         print(f"Cleanup complete. Exit code: {result.return_code}")
     
     config = WrapperConfig(
         executable="python",
         args=["-c", "import os; print(f'MY_VAR={os.environ.get(\"MY_VAR\")}')"   ],
         env={"MY_VAR": "custom_value"},
-        pre_run=pre_run,
-        post_run=post_run,
+        preRun=preRun,
+        postRun=postRun,
         capture_output=True,
         stream_output=False
     )
@@ -88,21 +88,21 @@ def example_with_callbacks():
     print("CALLBACKS EXAMPLE")
     print("=" * 60)
     
-    def on_start(pid: int):
+    def onStart(pid: int):
         print(f"[CALLBACK] Process started with PID: {pid}")
     
-    def on_output(line: str):
+    def onOutput(line: str):
         print(f"[OUT] {line}")
     
-    def on_error(line: str):
+    def onError(line: str):
         print(f"[ERR] {line}")
     
     config = WrapperConfig(
         executable="python",
         args=["-c", "print('Line 1'); print('Line 2'); import sys; print('Error!', file=sys.stderr)"],
-        on_start=on_start,
-        on_output=on_output,
-        on_error=on_error,
+        onStart=onStart,
+        onOutput=onOutput,
+        onError=onError,
         stream_output=False,  # We're handling output with callbacks
         capture_output=True
     )
@@ -133,13 +133,13 @@ def example_context_manager():
 
 
 def example_convenience_function():
-    """Example using the convenience create_wrapper function."""
+    """Example using the convenience createWrapper function."""
     print("=" * 60)
     print("CONVENIENCE FUNCTION EXAMPLE")
     print("=" * 60)
     
     # Simple one-liner wrapper creation
-    wrapper = create_wrapper(
+    wrapper = createWrapper(
         "python",
         "-c",
         "print('Hello from wrapper!')",
@@ -158,13 +158,13 @@ def example_error_handling():
     print("ERROR HANDLING EXAMPLE")
     print("=" * 60)
     
-    def pre_run():
+    def preRun():
         print("Pre-run check...")
         # Simulate pre-run validation
         if not os.path.exists("some_required_file.txt"):
             print("Warning: Required file not found, but continuing...")
     
-    def post_run(result: ExecutionResult):
+    def postRun(result: ExecutionResult):
         if result.success:
             print("Post-run: Execution successful")
         else:
@@ -173,8 +173,8 @@ def example_error_handling():
     config = WrapperConfig(
         executable="python",
         args=["-c", "import sys; sys.exit(1)"],  # Will exit with error
-        pre_run=pre_run,
-        post_run=post_run,
+        preRun=preRun,
+        postRun=postRun,
         raise_on_error=False,  # Don't raise exception
         continue_on_pre_run_error=True
     )
@@ -253,7 +253,7 @@ print(f"DEBUG: {os.environ.get('DEBUG')}")
 print(f"LOG_LEVEL: {os.environ.get('LOG_LEVEL')}")
 print(f"CUSTOM: {os.environ.get('CUSTOM')}")
 """],
-        env_files=[base_env_file, override_env_file],  # Multiple files merged
+        envFiles=[base_env_file, override_env_file],  # Multiple files merged
         env={"CUSTOM": "from_dict"},  # This overrides files
         capture_output=True,
         stream_output=False,
@@ -335,7 +335,7 @@ for p in custom.split(';' if sys.platform == 'win32' else ':'):
     if p:
         print(f"  - {p}")
 """],
-        env_files=env_file,
+        envFiles=env_file,
         capture_output=True,
         stream_output=False,
         inherit_env=False
@@ -397,7 +397,7 @@ import os
 print(f"MY_CUSTOM_PATH: {os.environ.get('MY_CUSTOM_PATH')}")
 print(f"NEW_VAR: {os.environ.get('NEW_VAR')}")
 """],
-        env_files=[append_file, prepend_file],
+        envFiles=[append_file, prepend_file],
         capture_output=True,
         stream_output=False
     )
@@ -432,7 +432,7 @@ print(f"NEW_VAR: {os.environ.get('NEW_VAR')}")
     config2 = WrapperConfig(
         executable="python",
         args=["-c", "import os; print(f'MY_CUSTOM_PATH: {os.environ.get(\"MY_CUSTOM_PATH\")}')"  ],
-        env_files=[append_op_file, prepend_op_file],
+        envFiles=[append_op_file, prepend_op_file],
         capture_output=True,
         stream_output=False
     )
@@ -462,14 +462,14 @@ def example_special_variables():
     
     import json
     
-    # Create a bundle structure with envoy_env directory
+    # Create a bundle structure with envoyEnv directory
     temp_dir = Path(__file__).parent.parent / "test_bundle" / "temp"
     temp_dir.mkdir(exist_ok=True)
     
     # Create bundle directory structure
     bundle_dir = temp_dir / "my_bundle"
     bundle_dir.mkdir(exist_ok=True)
-wrapper_env_dir = bundle_dir / "envoy_env"
+wrapper_env_dir = bundle_dir / "envoyEnv"
     wrapper_env_dir.mkdir(exist_ok=True)
     
     # Create environment file using special variables
@@ -508,7 +508,7 @@ for p in pythonpath.split(';' if sys.platform == 'win32' else ':'):
 print()
 print(f"ENV_FILE_PATH: {os.environ.get('ENV_FILE_PATH')}")
 """],
-        env_files=env_file,
+        envFiles=env_file,
         capture_output=True,
         stream_output=False,
         inherit_env=False
@@ -518,8 +518,8 @@ print(f"ENV_FILE_PATH: {os.environ.get('ENV_FILE_PATH')}")
     result = wrapper.run()
     
     print("Special variables available:")
-    print("  {$__BUNDLE__}      - Bundle root (parent of envoy_env/)")
-    print("  {$__BUNDLE_ENV__}  - The envoy_env/ directory")
+    print("  {$__BUNDLE__}      - Bundle root (parent of envoyEnv/)")
+    print("  {$__BUNDLE_ENV__}  - The envoyEnv/ directory")
     print("  {$__BUNDLE_NAME__} - Bundle directory name")
     print("  {$__FILE__}         - Current env file path")
     print()
@@ -562,7 +562,7 @@ def example_real_world_scenario():
             print(f"❌ Build failed after {duration:.2f}s")
             print(f"   - Exit code: {result.return_code}")
     
-    def on_output(line: str):
+    def onOutput(line: str):
         # Filter and format build output
         if "error" in line.lower():
             print(f"   ❌ {line}")
@@ -582,11 +582,11 @@ time.sleep(0.5)
 print('Build complete!')
 """],
         env={"BUILD_TYPE": "release", "VERBOSE": "1"},
-        pre_run=pre_build,
-        post_run=post_build,
-        on_output=on_output,
+        preRun=pre_build,
+        postRun=post_build,
+        onOutput=onOutput,
         timeout=30.0,
-        stream_output=False,  # Using custom on_output callback
+        stream_output=False,  # Using custom onOutput callback
         raise_on_error=True
     )
     

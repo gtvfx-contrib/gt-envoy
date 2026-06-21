@@ -1,4 +1,4 @@
-﻿"""
+"""
 envoy -- Environment orchestration for managed application execution.
 
 Provides environment isolation, bundle-based discovery, and process launch
@@ -14,7 +14,7 @@ Quickstart (Python API)::
     import envoy.proc as proc
 
     # Inspect the prepared environment for a command
-    env_dict = envoy.get_environment('maya')
+    env_dict = envoy.getEnvironment('maya')
 
     # Launch once
     proc.call(['maya', 'myfile.ma'])
@@ -38,7 +38,7 @@ Quickstart (Python API)::
 
 Submodules:
     proc       -- process execution (Environment class and free functions)
-    testing    -- test helpers (patch_bundle_roots, patch_commands_file)
+    testing    -- test helpers (patchBundleRoots, patchCommandsFile)
     exceptions -- all envoy exception classes
 """
 
@@ -88,10 +88,10 @@ __all__ = [
     'ValidationError',
 
     # ---- Top-level API functions ----
-    'get_environment',
-    'get_allowlist',
-    'set_api_verbosity',
-    'trace_environment',
+    'getEnvironment',
+    'getAllowlist',
+    'setApiVerbosity',
+    'traceEnvironment',
     'loadUserConfig',
     'getCurrentBundleConfig',
 
@@ -100,14 +100,14 @@ __all__ = [
     'TraceStepEvent',
 
     # ---- Utility functions ----
-    'create_wrapper',
-    'find_commands_file',
+    'createWrapper',
+    'findCommandsFile',
     'cli_main',
 
     # ---- Bundle discovery ----
-    'get_bundles',
-    'discover_bundles_auto',
-    'load_bundles_from_config',
+    'getBundles',
+    'discoverBundlesAuto',
+    'loadBundlesFromConfig',
 
     # ---- Submodules ----
     'proc',
@@ -143,12 +143,12 @@ from ._models import (
 )
 from ._wrapper import (
     ApplicationWrapper,
-    create_wrapper
+    createWrapper
 )
 from ._commands import (
     CommandDefinition,
     CommandRegistry,
-    find_commands_file
+    findCommandsFile
 )
 from ._discovery import (
     BundleInfo,
@@ -156,17 +156,17 @@ from ._discovery import (
     BundleConfig,
     BUNDLE_CHECKOUT,
     BUNDLE_DEFAULT_NAMESPACE,
-    get_bundles,
-    discover_bundles_auto,
-    load_bundles_from_config
+    getBundles,
+    discoverBundlesAuto,
+    loadBundlesFromConfig
 )
 from ._api import (
     OPERATING_SYSTEM,
     SUPPORTED_OPERATING_SYSTEMS,
-    get_environment,
-    get_allowlist,
-    set_api_verbosity,
-    trace_environment,
+    getEnvironment,
+    getAllowlist,
+    setApiVerbosity,
+    traceEnvironment,
     loadUserConfig,
     getCurrentBundleConfig,
     UserConfig,
@@ -195,5 +195,5 @@ from . import exceptions # noqa: E402
 #: Public alias for :class:`~._commands.CommandDefinition`.
 #:
 #: Exposes ``.name``, ``.alias``, ``.bundle``, ``.environment``,
-#: ``.executable``, and ``.base_args``.
+#: ``.executable``, and ``.baseArgs``.
 Command = CommandDefinition

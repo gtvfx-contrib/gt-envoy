@@ -1,4 +1,4 @@
-﻿"""Command loading and management for CLI wrapper."""
+"""Command loading and management for CLI wrapper."""
 
 import json
 import logging
@@ -66,7 +66,7 @@ class CommandDefinition:
         return self.name
     
     @property
-    def base_args(self) -> list[str]:
+    def baseArgs(self) -> list[str]:
         """Get the base arguments for this command.
         
         Returns:
@@ -77,7 +77,7 @@ class CommandDefinition:
             return self.alias[1:]
         return []
 
-    def expand_alias(self, env: dict[str, str] | None = None) -> list[str]:
+    def expandAlias(self, env: dict[str, str] | None = None) -> list[str]:
         """Return the alias with ``${__BUNDLE__}`` and env-var references expanded.
 
         Special variables (``${__BUNDLE__}``, ``${__BUNDLE_ENV__}``,
@@ -104,8 +104,8 @@ class CommandDefinition:
             '__BUNDLE_NAME__': self.envoy_env_dir.parent.name,
         }
         return [
-            EnvironmentManager.normalize_path(
-                EnvironmentManager.expand_env_value(part, env or {}, special_vars)
+            EnvironmentManager.normalizePath(
+                EnvironmentManager.expandEnvValue(part, env or {}, special_vars)
             )
             for part in raw
         ]
@@ -130,9 +130,9 @@ class CommandRegistry:
         self._commands: dict[str, CommandDefinition] = {}
         self._bundle_sources: dict[str, str] = {}  # cmd_name -> bundle bndlid
         if commands_file:
-            self.load_from_file(commands_file)
+            self.loadFromFile(commands_file)
     
-    def load_from_file(self, commands_file: Path, bundle_name: str | None = None) -> None:
+    def loadFromFile(self, commands_file: Path, bundle_name: str | None = None) -> None:
         """Load commands from a JSON file.
         
         Args:
@@ -209,7 +209,7 @@ class CommandRegistry:
         except Exception as e:
             raise WrapperError(f"Error reading commands file {commands_file}: {e}") from e
     
-    def resolve_environment(
+    def resolveEnvironment(
         self,
         command_name: str,
         _seen: frozenset[str] | None = None,
@@ -265,26 +265,26 @@ class CommandRegistry:
             # An entry with no dot is treated as a command name reference;
             # anything with a dot (e.g. "python_env.json") is a plain file.
             if '.' not in Path(entry).name:
-                result.extend(self.resolve_environment(entry, _seen=_seen))
+                result.extend(self.resolveEnvironment(entry, _seen=_seen))
             else:
                 result.append((entry, cmd.envoy_env_dir))
 
         return result
 
-    def load_from_bundles(self, bundles: list) -> None:
+    def loadFromBundles(self, bundles: list) -> None:
         """Load commands from multiple bundles.
         
         Args:
             bundles: List of BundleInfo (or Bundle) objects from discovery.
-                Each entry must expose ``.bndlid``, ``.envoy_env``, and
+                Each entry must expose ``.bndlid``, ``.envoyEnv``, and
                 ``.name`` attributes.
             
         """
         for bundle in bundles:
-            commands_file = bundle.envoy_env / "commands.json"
+            commands_file = bundle.envoyEnv / "commands.json"
             if commands_file.exists():
                 try:
-                    self.load_from_file(commands_file, bundle_name=bundle.bndlid)
+                    self.loadFromFile(commands_file, bundle_name=bundle.bndlid)
                 except WrapperError as e:
                     log.warning(f"Failed to load commands from bundle {bundle.bndlid}: {e}")
     
@@ -300,7 +300,7 @@ class CommandRegistry:
         """
         return self._commands.get(command_name)
     
-    def list_commands(self) -> list[str]:
+    def listCommands(self) -> list[str]:
         """Get list of all available command names.
         
         Returns:
@@ -326,16 +326,16 @@ class CommandRegistry:
         return len(self._commands)
 
 
-def find_commands_file(start_path: Path | None = None) -> Path | None:
-    """Find commands.json by searching up the directory tree for envoy_env/.
+def findCommandsFile(start_path: Path | None = None) -> Path | None:
+    """Find commands.json by searching up the directory tree for envoyEnv/.
 
     Resolution order:
 
     1. ``ENVOY_COMMANDS_FILE`` environment variable — if set, that path is
-       returned directly (used by :func:`~envoy.testing.patch_commands_file`
+       returned directly (used by :func:`~envoy.testing.patchCommandsFile`
        in tests).
     2. Upward directory walk from *start_path* (or cwd) looking for
-       ``envoy_env/commands.json``.
+       ``envoyEnv/commands.json``.
 
     Args:
         start_path: Starting directory (defaults to cwd).
@@ -344,7 +344,7 @@ def find_commands_file(start_path: Path | None = None) -> Path | None:
         Path to commands.json if found, None otherwise.
         
     """
-    # 1. Honour the override env var set by envoy_testing.patch_commands_file.
+    # 1. Honour the override env var set by envoy_testing.patchCommandsFile.
     env_override = os.environ.get('ENVOY_COMMANDS_FILE')
     if env_override:
         p = Path(env_override).resolve()
@@ -362,7 +362,7 @@ def find_commands_file(start_path: Path | None = None) -> Path | None:
     current = start_path.resolve()
 
     for parent in [current] + list(current.parents):
-        wrapper_env_dir = parent / "envoy_env"
+        wrapper_env_dir = parent / "envoyEnv"
         if wrapper_env_dir.is_dir():
             commands_file = wrapper_env_dir / "commands.json"
             if commands_file.exists():

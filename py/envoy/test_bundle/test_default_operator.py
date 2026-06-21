@@ -1,4 +1,4 @@
-﻿"""Tests for the ?= (default) operator."""
+"""Tests for the ?= (default) operator."""
 import sys
 import os
 import json
@@ -12,7 +12,7 @@ from envoy._environment import EnvironmentManager
 from envoy import WrapperConfig, ApplicationWrapper
 
 
-def _write_env_file(tmp_dir: str, data: dict) -> Path:
+def _writeEnvFile(tmp_dir: str, data: dict) -> Path:
     """Write a JSON env file to a temp directory and return its path."""
     path = Path(tmp_dir) / "env.json"
     with open(path, "w", encoding="utf-8") as fh:
@@ -25,10 +25,10 @@ def test_default_operator_sets_when_absent():
     print("Testing ?= sets variable when absent...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, {"?=MY_VAR": "default_value"})
+        env_file = _writeEnvFile(tmp, {"?=MY_VAR": "default_value"})
 
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(env_file, base_env={})
+        result = manager.loadEnvFromFiles(env_file, base_env={})
 
     assert result.get("MY_VAR") == "default_value", (
         "?= should set MY_VAR when it is not present in merged_env"
@@ -42,10 +42,10 @@ def test_default_operator_skips_when_present():
     print("Testing ?= skips variable when already present...")
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, {"?=MY_VAR": "default_value"})
+        env_file = _writeEnvFile(tmp, {"?=MY_VAR": "default_value"})
 
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.load_env_from_files(
+        result = manager.loadEnvFromFiles(
             env_file, base_env={"MY_VAR": "existing_value"}
         )
 
@@ -64,14 +64,14 @@ def test_default_operator_inherit_env_mode():
     os.environ["ENVOY_TEST_DEFAULT_OP"] = "system_value"
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            env_file = _write_env_file(
+            env_file = _writeEnvFile(
                 tmp, {"?=ENVOY_TEST_DEFAULT_OP": "file_default"}
             )
 
             # inherit_env=True seeds merged_env with the full os.environ, so
             # ENVOY_TEST_DEFAULT_OP is already present before the file is processed.
             manager = EnvironmentManager(inherit_env=True)
-            result = manager.load_env_from_files(
+            result = manager.loadEnvFromFiles(
                 env_file, base_env=dict(os.environ)
             )
 
@@ -93,24 +93,24 @@ def test_default_operator_closed_mode_allowlisted():
     os.environ["ENVOY_TEST_DEFAULT_OP"] = "allowlisted_value"
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            env_file = _write_env_file(
+            env_file = _writeEnvFile(
                 tmp, {"?=ENVOY_TEST_DEFAULT_OP": "file_default"}
             )
 
             # Closed mode with ENVOY_TEST_DEFAULT_OP in the allowlist:
-            # prepare_environment seeds merged_env with that var before
+            # prepareEnvironment seeds merged_env with that var before
             # processing files, so ?= must leave it alone.
             manager = EnvironmentManager(
                 inherit_env=False,
                 allowlist={"ENVOY_TEST_DEFAULT_OP"},
             )
-            # Simulate what prepare_environment does: seed allowlisted vars first.
+            # Simulate what prepareEnvironment does: seed allowlisted vars first.
             base = {}
             for var in manager.allowlist:
                 if var in os.environ:
                     base[var] = os.environ[var]
 
-            result = manager.load_env_from_files(env_file, base_env=base)
+            result = manager.loadEnvFromFiles(env_file, base_env=base)
 
         assert result.get("ENVOY_TEST_DEFAULT_OP") == "allowlisted_value", (
             "In closed mode ?= must not override a variable that was seeded "
@@ -130,14 +130,14 @@ def test_default_operator_closed_mode_not_allowlisted():
     os.environ["ENVOY_TEST_DEFAULT_OP"] = "system_value"
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            env_file = _write_env_file(
+            env_file = _writeEnvFile(
                 tmp, {"?=ENVOY_TEST_DEFAULT_OP": "file_default"}
             )
 
             # Closed mode with an EMPTY allowlist: the system variable is not
             # seeded into merged_env, so ?= should apply the file default.
             manager = EnvironmentManager(inherit_env=False, allowlist=set())
-            result = manager.load_env_from_files(env_file, base_env={})
+            result = manager.loadEnvFromFiles(env_file, base_env={})
 
         assert result.get("ENVOY_TEST_DEFAULT_OP") == "file_default", (
             "In closed mode without allowlisting, ?= must apply the file "
@@ -157,7 +157,7 @@ def test_default_operator_via_wrapper():
     os.environ.pop("ENVOY_TEST_E2E_DEFAULT", None)
 
     with tempfile.TemporaryDirectory() as tmp:
-        env_file = _write_env_file(tmp, {"?=ENVOY_TEST_E2E_DEFAULT": "e2e_default"})
+        env_file = _writeEnvFile(tmp, {"?=ENVOY_TEST_E2E_DEFAULT": "e2e_default"})
 
         config = WrapperConfig(
             executable="python",
@@ -165,7 +165,7 @@ def test_default_operator_via_wrapper():
                 "-c",
                 "import os; print(os.environ.get('ENVOY_TEST_E2E_DEFAULT', 'MISSING'))",
             ],
-            env_files=str(env_file),
+            envFiles=str(env_file),
             capture_output=True,
             stream_output=False,
             log_execution=False,
@@ -182,7 +182,7 @@ def test_default_operator_via_wrapper():
     print("  ✅ ?= end-to-end test passed")
 
 
-def run_all_tests():
+def runAllTests():
     """Run all tests."""
     tests = [
         test_default_operator_sets_when_absent,
@@ -221,5 +221,5 @@ def run_all_tests():
 
 
 if __name__ == "__main__":
-    success = run_all_tests()
+    success = runAllTests()
     sys.exit(0 if success else 1)

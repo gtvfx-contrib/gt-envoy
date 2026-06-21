@@ -1,4 +1,4 @@
-﻿"""Quick verification of all features."""
+"""Quick verification of all features."""
 import sys
 import os
 import json
@@ -42,7 +42,7 @@ print("TEST_STRING:", os.environ.get("TEST_STRING"))
 print("TEST_APPEND:", os.environ.get("TEST_APPEND"))
 print("TEST_PREPEND:", os.environ.get("TEST_PREPEND"))
 '''],
-    env_files=test_file,
+    envFiles=test_file,
     capture_output=True,
     stream_output=False
 )

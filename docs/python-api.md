@@ -108,12 +108,12 @@ proc.call(['python', 'script.py'], environment=env)
 proc.call(['python', 'script.py', '--arg', 'value'], environment=env)
 ```
 
-### `proc.check_output`
+### `proc.checkOutput`
 
 Run a command and capture its stdout:
 
 ```python
-output = proc.check_output(['python', '-c', 'print(42)'], environment=env)
+output = proc.checkOutput(['python', '-c', 'print(42)'], environment=env)
 print(output)  # b'42\n'
 ```
 
@@ -138,7 +138,7 @@ envoy.BUNDLE_DEFAULT_NAMESPACE  # 'gt'
 ## Verbosity
 
 ```python
-envoy.set_api_verbosity('DEBUG')   # 'DEBUG', 'INFO', 'WARNING', 'ERROR'
+envoy.setApiVerbosity('DEBUG')   # 'DEBUG', 'INFO', 'WARNING', 'ERROR'
 ```
 
 ## Full Example
@@ -147,7 +147,7 @@ envoy.set_api_verbosity('DEBUG')   # 'DEBUG', 'INFO', 'WARNING', 'ERROR'
 import envoy
 import envoy.proc as proc
 
-envoy.set_api_verbosity('INFO')
+envoy.setApiVerbosity('INFO')
 
 # Inspect available bundles
 cfg = envoy.BundleConfig(r'R:/studio/bundles.json')
@@ -158,7 +158,7 @@ for b in cfg.bundles:
 
 # Run a command
 env = proc.Environment('python_dev', config=cfg)
-result = proc.check_output(
+result = proc.checkOutput(
     ['python', '-c', 'import sys; print(sys.version)'],
     environment=env,
 )

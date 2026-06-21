@@ -31,7 +31,7 @@ SUPPORTED_OPERATING_SYSTEMS: tuple[str, ...] = ('Windows', 'Linux', 'Darwin')
 # Top-level API functions
 # ---------------------------------------------------------------------------
 
-def get_environment(
+def getEnvironment(
     command: str,
     *,
     inherit_env: bool = False,
@@ -63,7 +63,7 @@ def get_environment(
 
     Example::
 
-        env = envoy.get_environment('maya')
+        env = envoy.getEnvironment('maya')
         print(env.get('MAYA_VERSION'))
 
     """
@@ -77,7 +77,7 @@ def get_environment(
     ).build()
 
 
-def get_allowlist(extra: list[str] | None = None) -> frozenset[str]:
+def getAllowlist(extra: list[str] | None = None) -> frozenset[str]:
     """Return the default set of system variable names that envoy seeds in
     closed mode.
 
@@ -94,7 +94,7 @@ def get_allowlist(extra: list[str] | None = None) -> frozenset[str]:
     Example::
 
         # See what's always seeded on this platform
-        for var in sorted(envoy.get_allowlist()):
+        for var in sorted(envoy.getAllowlist()):
             print(var)
 
     """
@@ -102,7 +102,7 @@ def get_allowlist(extra: list[str] | None = None) -> frozenset[str]:
     if extra:
         return base | frozenset(extra)
     return base
-def trace_environment(
+def traceEnvironment(
     command: str,
     var: str,
     *,
@@ -139,34 +139,34 @@ def trace_environment(
 
     Example::
 
-        env, events = envoy.trace_environment('unreal', 'UE_PYTHONPATH')
+        env, events = envoy.traceEnvironment('unreal', 'UE_PYTHONPATH')
         for ev in events:
             print(ev)
 
     """
-    from .proc import _load_registry, _collect_env_files
+    from .proc import _loadRegistry, _collectEnvFiles
     from ._environment import EnvironmentManager
 
-    registry, bundles = _load_registry(
+    registry, bundles = _loadRegistry(
         bundle_roots=bundle_roots,
         commands_file=commands_file,
     )
-    env_files = _collect_env_files(command, registry, bundles)
+    envFiles = _collectEnvFiles(command, registry, bundles)
 
     trace_events: list = []
     env_mgr = EnvironmentManager(
         inherit_env=inherit_env,
         allowlist=set(allowlist) if allowlist else None,
     )
-    final_env = env_mgr.prepare_environment(
-        env_files=env_files,
+    final_env = env_mgr.prepareEnvironment(
+        envFiles=envFiles,
         trace_var=var,
         trace_out=trace_events,
     )
     return final_env, trace_events
 
 
-def set_api_verbosity(level: int | str) -> None:
+def setApiVerbosity(level: int | str) -> None:
     """Set the logging verbosity for the ``envoy`` logger.
 
     Pass a :mod:`logging` level
@@ -181,7 +181,7 @@ def set_api_verbosity(level: int | str) -> None:
         import logging
         import envoy as envoy
 
-        envoy.set_api_verbosity(logging.DEBUG)
+        envoy.setApiVerbosity(logging.DEBUG)
 
     """
     logging.getLogger('envoy').setLevel(level)

@@ -1,4 +1,4 @@
-﻿"""Environment variable handling for ApplicationWrapper."""
+"""Environment variable handling for ApplicationWrapper."""
 
 import os
 import json
@@ -162,7 +162,7 @@ class EnvironmentManager:
         self.allowlist = allowlist or set()
     
     @staticmethod
-    def expand_env_value(
+    def expandEnvValue(
         value: str, 
         current_env: dict[str, str],
         special_vars: dict[str, str] | None = None
@@ -174,8 +174,8 @@ class EnvironmentManager:
         backward compatibility.
         
         Special variables:
-            ${__BUNDLE__}      - Root directory of the bundle (parent of envoy_env/)
-            ${__BUNDLE_ENV__}  - The envoy_env/ directory itself
+            ${__BUNDLE__}      - Root directory of the bundle (parent of envoyEnv/)
+            ${__BUNDLE_ENV__}  - The envoyEnv/ directory itself
             ${__BUNDLE_NAME__} - Name of the bundle (directory name)
             ${__FILE__}        - Current environment JSON file being processed
         
@@ -218,7 +218,7 @@ class EnvironmentManager:
         return pattern.sub(replacer, value)
     
     @staticmethod
-    def normalize_path(path: str) -> str:
+    def normalizePath(path: str) -> str:
         """Normalize Unix-style paths to OS-specific format.
         
         Converts forward slashes to backslashes on Windows.
@@ -237,7 +237,7 @@ class EnvironmentManager:
         return path
     
     @staticmethod
-    def _find_unresolved_refs(
+    def _findUnresolvedRefs(
         value: str,
         current_env: dict[str, str],
         special_vars: dict[str, str] | None = None,
@@ -265,7 +265,7 @@ class EnvironmentManager:
                 unresolved.add(var_name)
         return unresolved
     
-    def process_env_value(
+    def processEnvValue(
         self, 
         value: Any, 
         merged_env: dict[str, str],
@@ -304,16 +304,16 @@ class EnvironmentManager:
         # value is consistent regardless of how slashes appear in JSON or
         # in referenced variables (e.g. APPDATA uses backslashes on Windows
         # while ${__BUNDLE__} is stored with forward slashes internally).
-        expanded_value = self.expand_env_value(str_value, merged_env, special_vars)
-        return self.normalize_path(expanded_value)
+        expanded_value = self.expandEnvValue(str_value, merged_env, special_vars)
+        return self.normalizePath(expanded_value)
     
     @staticmethod
-    def get_special_variables(env_file_path: Path) -> dict[str, str]:
+    def getSpecialVariables(env_file_path: Path) -> dict[str, str]:
         """Calculate special wrapper-internal variables for an environment file.
         
         Special variables (available as ``${NAME}`` in env file values):
-            __BUNDLE__      - Root directory of the bundle (parent of envoy_env/)
-            __BUNDLE_ENV__  - The envoy_env/ directory itself
+            __BUNDLE__      - Root directory of the bundle (parent of envoyEnv/)
+            __BUNDLE_ENV__  - The envoyEnv/ directory itself
             __BUNDLE_NAME__ - Name of the bundle (directory name)
             __FILE__        - Path to the current environment JSON file
             
@@ -323,26 +323,26 @@ class EnvironmentManager:
         """
         env_file_abs = env_file_path.resolve()
         
-        # Try to find the envoy_env/ directory by walking up the path
+        # Try to find the envoyEnv/ directory by walking up the path
         current = env_file_abs.parent
         package_env_dir = None
         package_root = None
         
-        # Look for 'envoy_env' directory in the path
+        # Look for 'envoyEnv' directory in the path
         for parent in [current] + list(current.parents):
-            if parent.name == 'envoy_env':
+            if parent.name == 'envoyEnv':
                 package_env_dir = parent
                 package_root = parent.parent
                 break
         
-        # If no envoy_env/ directory found, use file's parent as bundle root
+        # If no envoyEnv/ directory found, use file's parent as bundle root
         if package_root is None:
             package_root = env_file_abs.parent
             package_env_dir = package_root
         
         # Convert to cross-platform paths (keep forward slashes - will be normalized later)
         # The paths will use forward slashes internally and get normalized
-        # to backslashes on Windows during normalize_path processing
+        # to backslashes on Windows during normalizePath processing
         special_vars = {
             '__FILE__': str(env_file_abs).replace('\\', '/'),
             '__BUNDLE__': str(package_root).replace('\\', '/'),
@@ -352,9 +352,9 @@ class EnvironmentManager:
         
         return special_vars
     
-    def load_env_from_files(
+    def loadEnvFromFiles(
         self,
-        env_files: str | Path | list[str | Path] | None,
+        envFiles: str | Path | list[str | Path] | None,
         base_env: dict[str, str] | None = None,
         trace_var: str | None = None,
         trace_out: list | None = None,
@@ -425,13 +425,13 @@ class EnvironmentManager:
             current expansion behaviour).
 
         Special wrapper variables available in ``${...}`` expansion:
-            ``${__BUNDLE__}``      — bundle root directory (parent of ``envoy_env/``)
-            ``${__BUNDLE_ENV__}``  — the ``envoy_env/`` directory itself
+            ``${__BUNDLE__}``      — bundle root directory (parent of ``envoyEnv/``)
+            ``${__BUNDLE_ENV__}``  — the ``envoyEnv/`` directory itself
             ``${__BUNDLE_NAME__}`` — bundle directory name
             ``${__FILE__}``        — current environment JSON file path
         
         Args:
-            env_files: Single file path or list of file paths to load
+            envFiles: Single file path or list of file paths to load
             base_env: Variables already in scope before any file is processed.
                 Used for ${VARNAME} expansion (with {$VARNAME} as a legacy alias) and as the starting point for +=
                 and ^= operators.  Should be os.environ.copy() in inherit-env
@@ -452,12 +452,12 @@ class EnvironmentManager:
             WrapperError: If file cannot be read or parsed
 
         """
-        if not env_files:
+        if not envFiles:
             return dict(base_env) if base_env else {}
         
         # Normalize to list
-        if isinstance(env_files, (str, Path)):
-            env_files = [env_files]
+        if isinstance(envFiles, (str, Path)):
+            envFiles = [envFiles]
         
         # Determine path separator based on OS
         path_sep = ';' if os.name == 'nt' else ':'
@@ -473,7 +473,7 @@ class EnvironmentManager:
         # This means a var declared in a later file's allowlist is already
         # visible to += / ^= operators in earlier files.
         parsed_files: list[tuple[Path, Any]] = []
-        for file_path in env_files:
+        for file_path in envFiles:
             path = Path(file_path)
             if not path.exists():
                 raise WrapperError(f"Environment file not found: {path}")
@@ -507,7 +507,7 @@ class EnvironmentManager:
         # --- Main pass: process each file's entries in order -----------------
         for path, file_data in parsed_files:
             # Calculate special variables for this file
-            special_vars = self.get_special_variables(path)
+            special_vars = self.getSpecialVariables(path)
 
             try:
                 if isinstance(file_data, list):
@@ -599,7 +599,7 @@ class EnvironmentManager:
                                 )
                                 continue
                             item_str = str(item)
-                            unresolved = self._find_unresolved_refs(
+                            unresolved = self._findUnresolvedRefs(
                                 item_str, merged_env, special_vars
                             )
                             if unresolved:
@@ -614,7 +614,7 @@ class EnvironmentManager:
                         value = filtered
 
                     elif isinstance(value, str):
-                        unresolved = self._find_unresolved_refs(
+                        unresolved = self._findUnresolvedRefs(
                             value, merged_env, special_vars
                         )
                         if unresolved:
@@ -625,7 +625,7 @@ class EnvironmentManager:
                             )
 
                     # Process the value (handles lists, normalization, expansion)
-                    processed_value = self.process_env_value(value, merged_env, special_vars)
+                    processed_value = self.processEnvValue(value, merged_env, special_vars)
 
                     value_before = merged_env.get(var_name, '')
                     was_applied = True
@@ -671,9 +671,9 @@ class EnvironmentManager:
         
         return merged_env
     
-    def prepare_environment(
+    def prepareEnvironment(
         self,
-        env_files: str | Path | list[str | Path] | None = None,
+        envFiles: str | Path | list[str | Path] | None = None,
         env: dict[str, str] | None = None,
         trace_var: str | None = None,
         trace_out: list | None = None,
@@ -692,7 +692,7 @@ class EnvironmentManager:
             to propagate them from the host environment.
         
         Args:
-            env_files: JSON file(s) to load environment from
+            envFiles: JSON file(s) to load environment from
             env: Explicit environment variables to add/override
             
         Returns:
@@ -718,8 +718,8 @@ class EnvironmentManager:
         # inside env files see exactly the same variables that will be in scope —
         # no silent leakage of system variables that aren't in base_env.
         allowlist_additions: list[str] = []
-        file_env = self.load_env_from_files(
-            env_files,
+        file_env = self.loadEnvFromFiles(
+            envFiles,
             base_env=result_env,
             trace_var=trace_var,
             trace_out=trace_out,

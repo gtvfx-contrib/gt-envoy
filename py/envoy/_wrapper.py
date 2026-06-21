@@ -24,8 +24,8 @@ class ApplicationWrapper:
         >>> config = WrapperConfig(
         ...     executable="python",
         ...     args=["script.py", "--verbose"],
-        ...     pre_run=lambda: print("Starting..."),
-        ...     post_run=lambda result: print(f"Done: {result}")
+        ...     preRun=lambda: print("Starting..."),
+        ...     postRun=lambda result: print(f"Done: {result}")
         ... )
         >>> wrapper = ApplicationWrapper(config)
         >>> result = wrapper.run()
@@ -52,15 +52,15 @@ class ApplicationWrapper:
         )
         self._executor = ProcessExecutor(
             stream_output=config.stream_output,
-            on_output=config.on_output,
-            on_error=config.on_error
+            onOutput=config.onOutput,
+            onError=config.onError
         )
         
         # Setup logging
         if config.log_execution:
-            self._setup_logging()
+            self._setupLogging()
     
-    def _setup_logging(self):
+    def _setupLogging(self):
         """Configure logging for wrapper execution.
         
         """
@@ -73,44 +73,44 @@ class ApplicationWrapper:
             log.addHandler(handler)
         log.setLevel(self.config.log_level)
     
-    def _handle_signal(self, signum, frame):
+    def _handleSignal(self, signum, frame):
         """Handle interrupt signals."""
         log.warning(f"Received signal {signum}, terminating process...")
         self._interrupted = True
         if self._process:
-            self._executor.terminate_process(self._process)
+            self._executor.terminateProcess(self._process)
     
     @contextmanager
-    def _signal_handler_context(self):
+    def _signalHandlerContext(self):
         """Context manager for signal handling."""
-        self._original_sigint_handler = signal.signal(signal.SIGINT, self._handle_signal)
+        self._original_sigint_handler = signal.signal(signal.SIGINT, self._handleSignal)
         try:
             yield
         finally:
             signal.signal(signal.SIGINT, self._original_sigint_handler)
     
-    def _execute_pre_run(self):
+    def _executePreRun(self):
         """Execute pre-run operations."""
-        if not self.config.pre_run:
+        if not self.config.preRun:
             return
         
         try:
             log.info("Executing pre-run operations...")
-            self.config.pre_run()
+            self.config.preRun()
             log.info("Pre-run operations completed")
         except Exception as e:
             log.error(f"Pre-run operation failed: {e}")
             if not self.config.continue_on_pre_run_error:
                 raise PreRunError(f"Pre-run operation failed: {e}") from e
     
-    def _execute_post_run(self, result: ExecutionResult):
+    def _executePostRun(self, result: ExecutionResult):
         """Execute post-run operations."""
-        if not self.config.post_run:
+        if not self.config.postRun:
             return
         
         try:
             log.info("Executing post-run operations...")
-            self.config.post_run(result)
+            self.config.postRun(result)
             log.info("Post-run operations completed")
         except Exception as e:
             log.error(f"Post-run operation failed: {e}")
@@ -135,16 +135,16 @@ class ApplicationWrapper:
         
         try:
             # Pre-run operations
-            self._execute_pre_run()
+            self._executePreRun()
             
             # Build the subprocess environment first so that executable
             # resolution uses the subprocess PATH rather than the envoy
             # process PATH (critical in closed-environment mode).
-            env = self._env_manager.prepare_environment(
-                env_files=self.config.env_files,
+            env = self._env_manager.prepareEnvironment(
+                envFiles=self.config.envFiles,
                 env=self.config.env
             )
-            command = self._executor.prepare_command(
+            command = self._executor.prepareCommand(
                 self.config.executable,
                 self.config.args,
                 search_path=env.get('PATH'),
@@ -169,29 +169,29 @@ class ApplicationWrapper:
                 process_kwargs['stderr'] = subprocess.PIPE
             
             # Execute with signal handling
-            with self._signal_handler_context():
+            with self._signalHandlerContext():
                 self._process = subprocess.Popen(command, **process_kwargs)
                 result.pid = self._process.pid
                 
                 # Notify on start
-                if self.config.on_start:
+                if self.config.onStart:
                     try:
-                        self.config.on_start(result.pid)
+                        self.config.onStart(result.pid)
                     except Exception as e:
-                        log.warning(f"on_start callback error: {e}")
+                        log.warning(f"onStart callback error: {e}")
                 
                 log.info(f"Process started with PID: {result.pid}")
                 
                 # Handle output
                 if self.config.capture_output or self.config.stream_output:
                     try:
-                        stdout, stderr = self._executor.stream_process_output(self._process)
+                        stdout, stderr = self._executor.streamProcessOutput(self._process)
                         result.stdout = stdout if stdout else None
                         result.stderr = stderr if stderr else None
                         return_code = self._process.wait(timeout=self.config.timeout)
                     except subprocess.TimeoutExpired:
                         log.error(f"Process timed out after {self.config.timeout}s")
-                        self._executor.terminate_process(self._process)
+                        self._executor.terminateProcess(self._process)
                         result.timed_out = True
                         return_code = -1
                 else:
@@ -199,7 +199,7 @@ class ApplicationWrapper:
                         return_code = self._process.wait(timeout=self.config.timeout)
                     except subprocess.TimeoutExpired:
                         log.error(f"Process timed out after {self.config.timeout}s")
-                        self._executor.terminate_process(self._process)
+                        self._executor.terminateProcess(self._process)
                         result.timed_out = True
                         return_code = -1
                 
@@ -225,7 +225,7 @@ class ApplicationWrapper:
             
             # Post-run operations (always execute if configured)
             try:
-                self._execute_post_run(result)
+                self._executePostRun(result)
             except PostRunError:
                 if not self.config.continue_on_post_run_error:
                     raise
@@ -256,16 +256,16 @@ class ApplicationWrapper:
         
         """
         if self._process:
-            self._executor.terminate_process(self._process)
+            self._executor.terminateProcess(self._process)
 
 
-def create_wrapper(
+def createWrapper(
     executable: str | Path,
     *args: str,
     env: dict[str, str] | None = None,
-    env_files: str | Path | list[str | Path] | None = None,
-    pre_run: Callable[[], None] | None = None,
-    post_run: Callable[[ExecutionResult], None] | None = None,
+    envFiles: str | Path | list[str | Path] | None = None,
+    preRun: Callable[[], None] | None = None,
+    postRun: Callable[[ExecutionResult], None] | None = None,
     **kwargs
 ) -> ApplicationWrapper:
     """Convenience function to create an ApplicationWrapper.
@@ -274,18 +274,18 @@ def create_wrapper(
         executable: Path to executable or command name
         *args: Command-line arguments
         env: Environment variables to add/update
-        env_files: JSON file(s) containing environment variables
-        pre_run: Pre-run callback
-        post_run: Post-run callback
+        envFiles: JSON file(s) containing environment variables
+        preRun: Pre-run callback
+        postRun: Post-run callback
         **kwargs: Additional WrapperConfig parameters
         
     Returns:
         Configured ApplicationWrapper instance
         
     Example:
-        >>> wrapper = create_wrapper(
+        >>> wrapper = createWrapper(
         ...     "python", "script.py", "--verbose",
-        ...     env_files="config/env.json",
+        ...     envFiles="config/env.json",
         ...     timeout=60
         ... )
         >>> result = wrapper.run()
@@ -295,9 +295,9 @@ def create_wrapper(
         executable=executable,
         args=list(args),
         env=env,
-        env_files=env_files,
-        pre_run=pre_run,
-        post_run=post_run,
+        envFiles=envFiles,
+        preRun=preRun,
+        postRun=postRun,
         **kwargs
     )
     return ApplicationWrapper(config)

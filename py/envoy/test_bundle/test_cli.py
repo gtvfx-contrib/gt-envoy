@@ -1,4 +1,4 @@
-﻿"""Tests for the CLI module."""
+"""Tests for the CLI module."""
 
 import json
 import sys
@@ -11,10 +11,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
 from envoy._commands import CommandRegistry
-from envoy._cli import show_command_info, show_which
+from envoy._cli import showCommandInfo, showWhich
 
 
-def _make_registry(commands: dict) -> CommandRegistry:
+def _makeRegistry(commands: dict) -> CommandRegistry:
     """Create a CommandRegistry from a dict of command definitions."""
     with tempfile.TemporaryDirectory() as tmpdir:
         f = Path(tmpdir) / "commands.json"
@@ -24,7 +24,7 @@ def _make_registry(commands: dict) -> CommandRegistry:
 
 
 def test_show_command_info_resolves_inherited_environment(capsys):
-    """show_command_info should display the fully resolved env file list."""
+    """showCommandInfo should display the fully resolved env file list."""
     with tempfile.TemporaryDirectory() as tmpdir:
         cmds = {
             "base": {"environment": ["base_env.json"]},
@@ -34,7 +34,7 @@ def test_show_command_info_resolves_inherited_environment(capsys):
         f.write_text(json.dumps(cmds))
         registry = CommandRegistry(f)
 
-    rc = show_command_info(registry, "derived")
+    rc = showCommandInfo(registry, "derived")
     captured = capsys.readouterr()
 
     assert rc == 0
@@ -47,7 +47,7 @@ def test_show_command_info_resolves_inherited_environment(capsys):
 
 
 def test_show_command_info_wrappererror_returns_1(capsys):
-    """show_command_info should return 1 and print to stderr on WrapperError."""
+    """showCommandInfo should return 1 and print to stderr on WrapperError."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # "broken" references a command that does not exist
         cmds = {"broken": {"environment": ["nonexistent_cmd"]}}
@@ -55,7 +55,7 @@ def test_show_command_info_wrappererror_returns_1(capsys):
         f.write_text(json.dumps(cmds))
         registry = CommandRegistry(f)
 
-    rc = show_command_info(registry, "broken")
+    rc = showCommandInfo(registry, "broken")
     captured = capsys.readouterr()
 
     assert rc == 1
@@ -64,7 +64,7 @@ def test_show_command_info_wrappererror_returns_1(capsys):
 
 
 def test_show_which_alias_prints_source_file(capsys):
-    """show_which for an alias command should print the commands.json path."""
+    """showWhich for an alias command should print the commands.json path."""
     with tempfile.TemporaryDirectory() as tmpdir:
         cmds = {
             "python": {"environment": [], "alias": ["python"]},
@@ -73,7 +73,7 @@ def test_show_which_alias_prints_source_file(capsys):
         f.write_text(json.dumps(cmds))
         registry = CommandRegistry(f)
 
-    rc = show_which(registry, "python")
+    rc = showWhich(registry, "python")
     captured = capsys.readouterr()
 
     assert rc == 0
@@ -82,14 +82,14 @@ def test_show_which_alias_prints_source_file(capsys):
 
 
 def test_show_which_unknown_command_returns_1(capsys):
-    """show_which should return 1 when the command is not found."""
+    """showWhich should return 1 when the command is not found."""
     with tempfile.TemporaryDirectory() as tmpdir:
         cmds = {"python": {"environment": [], "alias": ["python"]}}
         f = Path(tmpdir) / "commands.json"
         f.write_text(json.dumps(cmds))
         registry = CommandRegistry(f)
 
-    rc = show_which(registry, "nonexistent")
+    rc = showWhich(registry, "nonexistent")
     captured = capsys.readouterr()
 
     assert rc == 1

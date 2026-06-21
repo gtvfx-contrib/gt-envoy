@@ -1,4 +1,4 @@
-﻿"""Bundle discovery for wrapper environments.
+"""Bundle discovery for wrapper environments.
 
 Supports two methods of discovering bundles:
 1. Auto-discovery: Search directories specified in ENVOY_BNDL_ROOTS for git repositories
@@ -35,8 +35,8 @@ BUNDLE_DEFAULT_NAMESPACE: str = 'gt'
 
 #: Name of the marker file written by ``engit publish`` / ``bundle-publish.yml``
 #: at the root of every production bundle.  Serves as a discovery anchor for
-#: :func:`find_bundle_roots` so that deployed (non-git) bundles are found by
-#: :func:`discover_bundles_from_roots` without requiring a ``.git/`` directory.
+#: :func:`findBundleRoots` so that deployed (non-git) bundles are found by
+#: :func:`discoverBundlesFromRoots` without requiring a ``.git/`` directory.
 BUNDLE_MARKER_FILE: str = '.bundle'
 
 _NAMESPACE_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{1,19}$')
@@ -95,7 +95,7 @@ def _expandBundlePath(raw: str, config_file: Path) -> str | None:
     return result
 
 
-def _is_bndlid(spec: str) -> bool:
+def _isBndlid(spec: str) -> bool:
     """Return ``True`` if *spec* looks like a bundle ID (``'<ns>:<name>'``).
 
     Requires the namespace to be at least 2 characters so that Windows drive
@@ -105,7 +105,7 @@ def _is_bndlid(spec: str) -> bool:
     return bool(_BNDLID_RE.match(spec))
 
 
-def _resolve_bndlid(bndlid: str) -> Path:
+def _resolveBndlid(bndlid: str) -> Path:
     """Resolve a bundle ID to a filesystem path via ``ENVOY_BNDL_ROOTS``.
 
     Resolution strategy:
@@ -114,7 +114,7 @@ def _resolve_bndlid(bndlid: str) -> Path:
        ``<root>/<namespace>/<name>`` directly.  This is O(roots) and covers
        the standard directory convention.
     2. **Scan fallback** — if the fast path finds nothing, run a full
-       :func:`discover_bundles_from_roots` scan and match by
+       :func:`discoverBundlesFromRoots` scan and match by
        :attr:`~BundleInfo.bndlid`.
 
     Args:
@@ -129,7 +129,7 @@ def _resolve_bndlid(bndlid: str) -> Path:
 
     Example::
 
-        path = _resolve_bndlid('gt:pythoncore')
+        path = _resolveBndlid('gt:pythoncore')
         # → Path('R:/repo/gtvfx-contrib/gt/pythoncore')
 
     """
@@ -149,13 +149,13 @@ def _resolve_bndlid(bndlid: str) -> Path:
     # 1. Fast path: <root>/<namespace>/<name>
     for root in roots:
         candidate = (root / namespace / name).resolve()
-        if candidate.is_dir() and (candidate / 'envoy_env').is_dir():
+        if candidate.is_dir() and (candidate / 'envoyEnv').is_dir():
             logger.debug("Resolved %s via fast path: %s", bndlid, candidate)
             return candidate
 
     # 2. Scan fallback
     logger.debug("Fast path missed %s, falling back to full scan", bndlid)
-    infos = discover_bundles_from_roots([str(r) for r in roots])
+    infos = discoverBundlesFromRoots([str(r) for r in roots])
     for info in infos:
         if info.bndlid == bndlid:
             logger.debug("Resolved %s via scan: %s", bndlid, info.root)
@@ -167,7 +167,7 @@ def _resolve_bndlid(bndlid: str) -> Path:
     )
 
 
-def _infer_namespace(bundle_root: Path) -> str:
+def _inferNamespace(bundle_root: Path) -> str:
     """Infer a bundle namespace from its parent directory name.
 
     Follows the convention ``<bundle_roots>/<namespace>/<bundle_name>`` —
@@ -211,8 +211,8 @@ class BundleInfo:
         self.root = root
         self.name = name
         self.namespace = namespace
-        self.envoy_env = root / "envoy_env"
-        self.env_files: dict[str, Path] = self._index_env_files()
+        self.envoyEnv = root / "envoyEnv"
+        self.envFiles: dict[str, Path] = self._indexEnvFiles()
 
     @property
     def bndlid(self) -> str:
@@ -226,16 +226,16 @@ class BundleInfo:
         """
         return f"{self.namespace}:{self.name}"
 
-    def _index_env_files(self) -> dict[str, Path]:
-        """Scan envoy_env/ once and index all JSON files by filename.
+    def _indexEnvFiles(self) -> dict[str, Path]:
+        """Scan envoyEnv/ once and index all JSON files by filename.
         
         Returns:
             Dict mapping filename to absolute Path
         
         """
-        if not self.envoy_env.is_dir():
+        if not self.envoyEnv.is_dir():
             return {}
-        return {f.name: f for f in self.envoy_env.glob('*.json')}
+        return {f.name: f for f in self.envoyEnv.glob('*.json')}
         
     def __repr__(self):
         return f"BundleInfo(bndlid={self.bndlid!r}, root={self.root})"
@@ -252,14 +252,14 @@ class Bundle:
     """A discovered envoy bundle.
 
     A bundle is a directory (or, in the future,
-    a versioned built directory) that contains an ``envoy_env/`` subdirectory
+    a versioned built directory) that contains an ``envoyEnv/`` subdirectory
     with a ``commands.json`` and one or more environment JSON files.
 
     **Current behaviour (checkout mode)**
 
     All bundles are constructed from a filesystem path that points directly to
     a live git repository on disk.  :attr:`version` always returns
-    :data:`BUNDLE_CHECKOUT` and :attr:`is_production` is always ``False``.
+    :data:`BUNDLE_CHECKOUT` and :attr:`isProduction` is always ``False``.
 
     **Planned versioned behaviour (future)**
 
@@ -270,7 +270,7 @@ class Bundle:
         bundle = Bundle('gt:pythoncore')
         assert bundle.bndlid == 'gt:pythoncore'
         assert bundle.version == 'checkout'
-        assert bundle.is_checkout is True
+        assert bundle.isCheckout is True
 
         # By filesystem path (current):
         bundle = Bundle('/repo/gtvfx-contrib/gt/pythoncore')
@@ -283,7 +283,7 @@ class Bundle:
         # Production — future, resolved from the built-bundle registry:
         bundle = Bundle('gt:pythoncore', version='1.2.3')   # not yet implemented
         bundle = Bundle('gt:pythoncore', version='latest')  # not yet implemented
-        assert bundle.is_production is True
+        assert bundle.isProduction is True
 
     A production bundle is the result of ``git tag`` → build-to-directory
     process; the :class:`BundleConfig` file will pin these versions (see its docstring
@@ -305,14 +305,14 @@ class Bundle:
         WrapperError: If *spec* is a bundle ID and cannot be resolved via
             ``ENVOY_BNDL_ROOTS``.
         ValueError: If the resolved or supplied path does not exist or lacks
-            an ``envoy_env/`` subdirectory.
+            an ``envoyEnv/`` subdirectory.
 
     Example::
 
         # Resolve by bundle ID (requires ENVOY_BNDL_ROOTS):
         bundle = Bundle('gt:pythoncore')
         print(bundle.bndlid)       # 'gt:pythoncore'
-        print(bundle.is_checkout)  # True
+        print(bundle.isCheckout)  # True
 
         # Construct from a filesystem path:
         bundle = Bundle('/repo/gtvfx-contrib/gt/pythoncore')
@@ -320,7 +320,7 @@ class Bundle:
         print(bundle.namespace)    # 'gt'
         print(bundle.bndlid)       # 'gt:pythoncore'
         print(bundle.version)      # 'checkout'
-        print(bundle.is_checkout)  # True
+        print(bundle.isCheckout)  # True
         print(bundle.commands)     # ['python_dev', ...]
 
     """
@@ -328,22 +328,22 @@ class Bundle:
     def __init__(self, spec: str | Path, namespace: str | None = None) -> None:
         # Detect bndlid form: 'gt:pythoncore' — has ':' and ≥2-char namespace
         # so that Windows drive letters ('C:', 'R:') are never matched.
-        if isinstance(spec, str) and _is_bndlid(spec):
+        if isinstance(spec, str) and _isBndlid(spec):
             m = _BNDLID_RE.match(spec)
             inferred_ns = m.group(1)  # type: ignore[union-attr]
-            root = _resolve_bndlid(spec)
+            root = _resolveBndlid(spec)
             ns = inferred_ns
         else:
             root = Path(spec).resolve()
             if not root.is_dir():
                 raise ValueError(f"Bundle path does not exist: {root}")
-            if not (root / 'envoy_env').is_dir():
-                raise ValueError(f"Not a valid bundle (no envoy_env/): {root}")
-            ns = namespace if namespace is not None else _infer_namespace(root)
+            if not (root / 'envoyEnv').is_dir():
+                raise ValueError(f"Not a valid bundle (no envoyEnv/): {root}")
+            ns = namespace if namespace is not None else _inferNamespace(root)
         self._info = BundleInfo(root=root, name=root.name, namespace=ns)
 
     @classmethod
-    def _from_info(cls, info: 'BundleInfo') -> 'Bundle':
+    def _fromInfo(cls, info: 'BundleInfo') -> 'Bundle':
         """Construct from an internal :class:`BundleInfo` (no re-validation)."""
         obj = object.__new__(cls)
         obj._info = info
@@ -404,7 +404,7 @@ class Bundle:
         return BUNDLE_CHECKOUT
 
     @property
-    def is_production(self) -> bool:
+    def isProduction(self) -> bool:
         """``True`` if this bundle is a built, versioned release directory.
 
         Returns ``True`` when a ``.bundle`` marker file is present at the
@@ -415,14 +415,14 @@ class Bundle:
         return (self._info.root / BUNDLE_MARKER_FILE).is_file()
 
     @property
-    def is_checkout(self) -> bool:
+    def isCheckout(self) -> bool:
         """``True`` if this bundle is a live git-repository checkout.
 
-        This is the inverse of :attr:`is_production`.  ``True`` when no
+        This is the inverse of :attr:`isProduction`.  ``True`` when no
         ``.bundle`` marker file is present at the bundle root.
 
         """
-        return not self.is_production
+        return not self.isProduction
 
     @property
     def path(self) -> Path:
@@ -430,14 +430,14 @@ class Bundle:
         return self._info.root
 
     @property
-    def envoy_env(self) -> Path:
-        """Absolute path to the ``envoy_env/`` subdirectory."""
-        return self._info.envoy_env
+    def envoyEnv(self) -> Path:
+        """Absolute path to the ``envoyEnv/`` subdirectory."""
+        return self._info.envoyEnv
 
     @property
-    def env_files(self) -> dict[str, Path]:
+    def envFiles(self) -> dict[str, Path]:
         """Mapping of JSON filename → absolute path for all env files."""
-        return dict(self._info.env_files)
+        return dict(self._info.envFiles)
 
     @property
     def commands(self) -> list[str]:
@@ -446,7 +446,7 @@ class Bundle:
         Returns an empty list if the file is absent or cannot be parsed.
 
         """
-        commands_file = self._info.envoy_env / 'commands.json'
+        commands_file = self._info.envoyEnv / 'commands.json'
         if not commands_file.exists():
             return []
         try:
@@ -492,7 +492,7 @@ class BundleConfig:
     will preserve the current path-based behaviour for in-development bundles.
 
     Instances are usually created via the constructor (from a path) or via one
-    of the factory classmethods :meth:`from_name` and :meth:`current`.
+    of the factory classmethods :meth:`fromName` and :meth:`current`.
 
     Args:
         path: Path to the bundle config JSON file.
@@ -505,13 +505,13 @@ class BundleConfig:
         # Load from an explicit path
         cfg = BundleConfig('/studio/envoy_bundles.json')
         for bundle in cfg.bundles:
-            print(bundle.name, bundle.version, bundle.is_checkout)
+            print(bundle.name, bundle.version, bundle.isCheckout)
         print(cfg.commands)   # merged command list across all bundles
 
         # Load from a named config slot (resolved via ENVOY_CFG_ROOTS)
-        cfg = BundleConfig.from_name('studio')
+        cfg = BundleConfig.fromName('studio')
         print(cfg.name)         # 'studio'
-        print(cfg.cfg_version)  # '2026-06-21T10-13-00'
+        print(cfg.cfgVersion)  # '2026-06-21T10-13-00'
 
         # Load whatever the user has configured
         cfg = BundleConfig.current()
@@ -534,7 +534,7 @@ class BundleConfig:
     # ------------------------------------------------------------------
 
     @classmethod
-    def _from_named(cls, path: Path, name: str, version: str) -> 'BundleConfig':
+    def _fromNamed(cls, path: Path, name: str, version: str) -> 'BundleConfig':
         """Construct a BundleConfig already resolved from a named config slot.
 
         Args:
@@ -558,7 +558,7 @@ class BundleConfig:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_name(cls, name: str) -> 'BundleConfig':
+    def fromName(cls, name: str) -> 'BundleConfig':
         """Load a bundle config by named config slot.
 
         Resolves *name* to the latest published version via
@@ -570,7 +570,7 @@ class BundleConfig:
 
         Returns:
             :class:`BundleConfig` instance with :attr:`name` and
-            :attr:`cfg_version` populated.
+            :attr:`cfgVersion` populated.
 
         Raises:
             ValueError: If *name* cannot be resolved via ``ENVOY_CFG_ROOTS``
@@ -578,9 +578,9 @@ class BundleConfig:
 
         Example::
 
-            cfg = BundleConfig.from_name('studio')
+            cfg = BundleConfig.fromName('studio')
             print(cfg.name)         # 'studio'
-            print(cfg.cfg_version)  # '2026-06-21T10-13-00'
+            print(cfg.cfgVersion)  # '2026-06-21T10-13-00'
             print(cfg.path)         # /studio/envoy/configs/studio/2026-...json
             print(cfg.commands)
 
@@ -593,7 +593,7 @@ class BundleConfig:
                 "Check that ENVOY_CFG_ROOTS is set and the config has been published."
             )
         version = resolved.stem
-        return cls._from_named(resolved, name=name, version=version)
+        return cls._fromNamed(resolved, name=name, version=version)
 
     @classmethod
     def current(
@@ -658,7 +658,7 @@ class BundleConfig:
                     "ENVOY_CFG_ROOTS."
                 )
             version = resolved.stem
-            return cls._from_named(resolved, name=raw, version=version)
+            return cls._fromNamed(resolved, name=raw, version=version)
 
         return cls(raw)
 
@@ -675,7 +675,7 @@ class BundleConfig:
     def name(self) -> str | None:
         """Named config slot this config was loaded from, or ``None``.
 
-        Populated when the instance was created via :meth:`from_name` or
+        Populated when the instance was created via :meth:`fromName` or
         :meth:`current` (when the user config holds a slot name rather than a
         path).  ``None`` for instances created directly from a path.
 
@@ -683,7 +683,7 @@ class BundleConfig:
         return self._name
 
     @property
-    def cfg_version(self) -> str | None:
+    def cfgVersion(self) -> str | None:
         """Version timestamp string if loaded from a named config slot, else ``None``.
 
         Format matches the filenames written by ``engit publish-config``:
@@ -701,8 +701,8 @@ class BundleConfig:
 
         """
         if self._bundles is None:
-            infos = load_bundles_from_config(self._path)
-            self._bundles = [Bundle._from_info(info) for info in infos]
+            infos = loadBundlesFromConfig(self._path)
+            self._bundles = [Bundle._fromInfo(info) for info in infos]
         return self._bundles
 
     @property
@@ -722,7 +722,7 @@ class BundleConfig:
         return repr(self)
 
 
-def is_git_repo(path: Path) -> bool:
+def isGitRepo(path: Path) -> bool:
     """Check if a directory is a git repository.
 
     Args:
@@ -735,7 +735,7 @@ def is_git_repo(path: Path) -> bool:
     return (path / ".git").is_dir()
 
 
-def is_published_bundle(path: Path) -> bool:
+def isPublishedBundle(path: Path) -> bool:
     """Check if a directory is a published bundle (has a ``.bundle`` marker).
 
     Args:
@@ -748,23 +748,23 @@ def is_published_bundle(path: Path) -> bool:
     return (path / BUNDLE_MARKER_FILE).is_file()
 
 
-def has_envoy_env(path: Path) -> bool:
-    """Check if a directory has an envoy_env subdirectory.
+def hasEnvoyEnv(path: Path) -> bool:
+    """Check if a directory has an envoyEnv subdirectory.
 
     Args:
         path: Path to check.
 
     Returns:
-        True if path contains an envoy_env directory.
+        True if path contains an envoyEnv directory.
 
     """
-    return (path / "envoy_env").is_dir()
+    return (path / "envoyEnv").is_dir()
 
 
-def validate_bundle(path: Path) -> bool:
+def validateBundle(path: Path) -> bool:
     """Validate that a path is a valid envoy bundle.
 
-    A valid bundle must be a directory with an ``envoy_env/`` subdirectory.
+    A valid bundle must be a directory with an ``envoyEnv/`` subdirectory.
 
     Args:
         path: Path to validate.
@@ -773,10 +773,10 @@ def validate_bundle(path: Path) -> bool:
         True if path is a valid bundle.
 
     """
-    return path.is_dir() and has_envoy_env(path)
+    return path.is_dir() and hasEnvoyEnv(path)
 
 
-def find_bundle_roots(root_dir: Path, max_depth: int = 5) -> list[Path]:
+def findBundleRoots(root_dir: Path, max_depth: int = 5) -> list[Path]:
     """Recursively find bundle roots under a root directory.
 
     A bundle root is any directory that contains either a ``.git/`` directory
@@ -796,30 +796,30 @@ def find_bundle_roots(root_dir: Path, max_depth: int = 5) -> list[Path]:
         logger.warning("Root directory does not exist: %s", root_dir)
         return bundle_roots
 
-    def search_dir(path: Path, depth: int = 0) -> None:
+    def searchDir(path: Path, depth: int = 0) -> None:
         if depth > max_depth:
             return
         try:
-            if is_git_repo(path) or is_published_bundle(path):
+            if isGitRepo(path) or isPublishedBundle(path):
                 bundle_roots.append(path)
                 return
             for item in path.iterdir():
                 if item.is_dir() and not item.name.startswith('.'):
-                    search_dir(item, depth + 1)
+                    searchDir(item, depth + 1)
         except PermissionError:
             logger.debug("Permission denied: %s", path)
         except Exception as exc:
             logger.debug("Error searching %s: %s", path, exc)
 
-    search_dir(root_dir)
+    searchDir(root_dir)
     return bundle_roots
 
 
-def find_git_repos(root_dir: Path, max_depth: int = 5) -> list[Path]:
+def findGitRepos(root_dir: Path, max_depth: int = 5) -> list[Path]:
     """Recursively find git repositories under a root directory.
 
     .. deprecated::
-        Use :func:`find_bundle_roots` instead — it also detects published
+        Use :func:`findBundleRoots` instead — it also detects published
         bundles that have a ``.bundle`` marker but no ``.git/`` directory.
 
     Args:
@@ -836,26 +836,26 @@ def find_git_repos(root_dir: Path, max_depth: int = 5) -> list[Path]:
         logger.warning("Root directory does not exist: %s", root_dir)
         return repos
 
-    def search_dir(path: Path, depth: int = 0) -> None:
+    def searchDir(path: Path, depth: int = 0) -> None:
         if depth > max_depth:
             return
         try:
-            if is_git_repo(path):
+            if isGitRepo(path):
                 repos.append(path)
                 return
             for item in path.iterdir():
                 if item.is_dir() and not item.name.startswith('.'):
-                    search_dir(item, depth + 1)
+                    searchDir(item, depth + 1)
         except PermissionError:
             logger.debug("Permission denied: %s", path)
         except Exception as exc:
             logger.debug("Error searching %s: %s", path, exc)
 
-    search_dir(root_dir)
+    searchDir(root_dir)
     return repos
 
 
-def discover_bundles_from_roots(root_dirs: list[str]) -> list[BundleInfo]:
+def discoverBundlesFromRoots(root_dirs: list[str]) -> list[BundleInfo]:
     """Discover bundles in specified root directories.
 
     Searches for git repositories and published bundles (with a ``.bundle``
@@ -874,11 +874,11 @@ def discover_bundles_from_roots(root_dirs: list[str]) -> list[BundleInfo]:
         root = Path(root_str).resolve()
         logger.debug("Searching for bundles in: %s", root)
 
-        candidates = find_bundle_roots(root)
+        candidates = findBundleRoots(root)
         logger.debug("Found %d bundle candidate(s) in %s", len(candidates), root)
 
         for candidate_path in candidates:
-            if validate_bundle(candidate_path):
+            if validateBundle(candidate_path):
                 name, namespace = _nameAndNamespace(candidate_path)
                 bundle = BundleInfo(
                     root=candidate_path,
@@ -901,7 +901,7 @@ def _nameAndNamespace(bundle_root: Path) -> tuple[str, str]:
     directory name is a version string (e.g. ``v1.0.0``).
 
     For checkout bundles (have ``.git/`` but no ``.bundle``), falls back to the
-    directory name and :func:`_infer_namespace`.
+    directory name and :func:`_inferNamespace`.
 
     Args:
         bundle_root: Absolute path to the bundle root directory.
@@ -919,13 +919,13 @@ def _nameAndNamespace(bundle_root: Path) -> tuple[str, str]:
                 namespace, name = bndlid.split(':', 1)
                 return name, namespace
             name = data.get('name') or bundle_root.name
-            return name, _infer_namespace(bundle_root)
+            return name, _inferNamespace(bundle_root)
         except (OSError, json.JSONDecodeError, ValueError):
             pass
-    return bundle_root.name, _infer_namespace(bundle_root)
+    return bundle_root.name, _inferNamespace(bundle_root)
 
 
-def discover_bundles_auto() -> list[BundleInfo]:
+def discoverBundlesAuto() -> list[BundleInfo]:
     """Auto-discover bundles using ENVOY_BNDL_ROOTS environment variable.
 
     When ``ENVOY_BUNDLES_CONFIG`` is set (and the file exists), that pre-built
@@ -952,7 +952,7 @@ def discover_bundles_auto() -> list[BundleInfo]:
                 "Using pre-built bundle list from ENVOY_BUNDLES_CONFIG: %s",
                 config_path,
             )
-            return load_bundles_from_config(config_path)
+            return loadBundlesFromConfig(config_path)
         else:
             logger.warning(
                 "ENVOY_BUNDLES_CONFIG is set but file not found: %s — "
@@ -975,10 +975,10 @@ def discover_bundles_auto() -> list[BundleInfo]:
         return []
     
     logger.info("Auto-discovering bundles from %d root(s)", len(root_dirs))
-    return discover_bundles_from_roots(root_dirs)
+    return discoverBundlesFromRoots(root_dirs)
 
 
-def load_bundles_from_config(config_file: Path) -> list[BundleInfo]:
+def loadBundlesFromConfig(config_file: Path) -> list[BundleInfo]:
     """Load bundle paths from a configuration file.
     
     Config file format (JSON):
@@ -1036,14 +1036,14 @@ def load_bundles_from_config(config_file: Path) -> list[BundleInfo]:
 
         path = Path(expanded).resolve()
 
-        if not validate_bundle(path):
+        if not validateBundle(path):
             logger.warning(f"Invalid bundle in config: {path}")
             continue
         
         bundle = BundleInfo(
             root=path,
             name=path.name,
-            namespace=_infer_namespace(path),
+            namespace=_inferNamespace(path),
         )
         bundles.append(bundle)
         logger.info(f"Loaded bundle from config: {bundle}")
@@ -1051,7 +1051,7 @@ def load_bundles_from_config(config_file: Path) -> list[BundleInfo]:
     return bundles
 
 
-def get_bundles(config_file: Path | None = None) -> list[BundleInfo]:
+def getBundles(config_file: Path | None = None) -> list[BundleInfo]:
     """Get all bundles using config file or auto-discovery.
     
     If config_file is provided, only bundles from the config are used.
@@ -1066,13 +1066,13 @@ def get_bundles(config_file: Path | None = None) -> list[BundleInfo]:
     """
     if config_file:
         logger.info(f"Using bundle config file: {config_file}")
-        return load_bundles_from_config(config_file)
+        return loadBundlesFromConfig(config_file)
     else:
         logger.debug("No config file, attempting auto-discovery")
-        return discover_bundles_auto()
+        return discoverBundlesAuto()
 
 
-def get_bundle_env_files(bundles: list[BundleInfo]) -> dict[str, list[Path]]:
+def getBundleEnvFiles(bundles: list[BundleInfo]) -> dict[str, list[Path]]:
     """Get all environment files from discovered bundles.
     
     Returns a mapping of bundle names to their environment JSON files.
@@ -1084,27 +1084,27 @@ def get_bundle_env_files(bundles: list[BundleInfo]) -> dict[str, list[Path]]:
         Dict mapping bundle name to list of environment file paths
     
     """
-    env_files = {}
+    envFiles = {}
     
     for bundle in bundles:
         files = []
-        wrapper_env = bundle.envoy_env
+        wrapper_env = bundle.envoyEnv
         
         if wrapper_env.is_dir():
-            # Find all .json files in envoy_env
+            # Find all .json files in envoyEnv
             for json_file in wrapper_env.glob("*.json"):
                 # Skip commands.json as it's handled separately
                 if json_file.name != "commands.json":
                     files.append(json_file)
         
         if files:
-            env_files[bundle.name] = files
+            envFiles[bundle.name] = files
             logger.debug(f"Bundle {bundle.name}: {len(files)} environment file(s)")
     
-    return env_files
+    return envFiles
 
 
-def get_bundle_commands_files(bundles: list[BundleInfo]) -> dict[str, Path]:
+def getBundleCommandsFiles(bundles: list[BundleInfo]) -> dict[str, Path]:
     """Get commands.json files from discovered bundles.
     
     Returns a mapping of bundle names to their commands.json files.
@@ -1119,7 +1119,7 @@ def get_bundle_commands_files(bundles: list[BundleInfo]) -> dict[str, Path]:
     commands_files = {}
     
     for bundle in bundles:
-        commands_file = bundle.envoy_env / "commands.json"
+        commands_file = bundle.envoyEnv / "commands.json"
         
         if commands_file.is_file():
             commands_files[bundle.name] = commands_file

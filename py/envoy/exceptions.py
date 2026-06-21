@@ -1,4 +1,4 @@
-﻿"""envoy.exceptions -- Public exception module.
+"""envoy.exceptions -- Public exception module.
 
 All envoy exceptions are accessible here.  The most commonly needed class,
 :class:`CalledProcessError`, is also available on :mod:`envoy.proc` and is
@@ -14,7 +14,7 @@ Usage::
     from envoy.exceptions import EnvoyError, CalledProcessError
 
     try:
-        proc.check_call(['maya', 'bad_scene.ma'])
+        proc.checkCall(['maya', 'bad_scene.ma'])
     except CalledProcessError as e:
         print(f'Process exited {e.returncode}')
     except EnvoyError as e:

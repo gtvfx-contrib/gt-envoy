@@ -36,7 +36,7 @@ class WrapperConfig:
     
     # Environment
     env: dict[str, str] | None = None
-    env_files: str | Path | list[str | Path] | None = None  # JSON file(s) with environment variables
+    envFiles: str | Path | list[str | Path] | None = None  # JSON file(s) with environment variables
     inherit_env: bool = False
     env_allowlist: set[str] | None = None  # System vars to inherit in closed mode
     
@@ -52,11 +52,11 @@ class WrapperConfig:
     shell: bool = False
     
     # Callbacks
-    pre_run: Callable[[], None] | None = None
-    post_run: Callable[['ExecutionResult'], None] | None = None
-    on_start: Callable[[int], None] | None = None  # Receives PID
-    on_output: Callable[[str], None] | None = None  # Receives output line
-    on_error: Callable[[str], None] | None = None  # Receives error line
+    preRun: Callable[[], None] | None = None
+    postRun: Callable[['ExecutionResult'], None] | None = None
+    onStart: Callable[[int], None] | None = None  # Receives PID
+    onOutput: Callable[[str], None] | None = None  # Receives output line
+    onError: Callable[[str], None] | None = None  # Receives error line
     
     # Error handling
     raise_on_error: bool = True

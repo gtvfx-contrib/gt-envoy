@@ -1,4 +1,4 @@
-﻿"""Test special wrapper variables."""
+"""Test special wrapper variables."""
 import sys
 import os
 from pathlib import Path
@@ -28,7 +28,7 @@ print(f"TEST_PATH (with append): {os.environ.get('TEST_PATH')}")
 print()
 print(f"SIMPLE_VAR: {os.environ.get('SIMPLE_VAR')}")
 '''],
-    env_files='gt/app/wrapper/test_package/env/test.json',
+    envFiles='gt/app/wrapper/test_package/env/test.json',
     capture_output=True,
     stream_output=False
 )

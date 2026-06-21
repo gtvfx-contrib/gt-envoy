@@ -1,4 +1,4 @@
-﻿"""Test list-based paths and Unix path normalization."""
+"""Test list-based paths and Unix path normalization."""
 import sys
 import os
 from pathlib import Path
@@ -24,7 +24,7 @@ print("PRIORITY_PATH:", os.environ.get("PRIORITY_PATH"))
 print()
 print("SIMPLE_VAR:", os.environ.get("SIMPLE_VAR"))
 '''],
-    env_files='gt/app/wrapper/test_list_paths.json',
+    envFiles='gt/app/wrapper/test_list_paths.json',
     capture_output=True,
     stream_output=False
 )

@@ -29,23 +29,23 @@ class ProcessExecutor:
     def __init__(
         self,
         stream_output: bool = True,
-        on_output: Callable[[str], None] | None = None,
-        on_error: Callable[[str], None] | None = None
+        onOutput: Callable[[str], None] | None = None,
+        onError: Callable[[str], None] | None = None
     ):
         """Initialize the process executor.
         
         Args:
             stream_output: Whether to stream output to stdout/stderr
-            on_output: Callback for stdout lines
-            on_error: Callback for stderr lines
+            onOutput: Callback for stdout lines
+            onError: Callback for stderr lines
             
         """
         self.stream_output = stream_output
-        self.on_output = on_output
-        self.on_error = on_error
+        self.onOutput = onOutput
+        self.onError = onError
     
     @staticmethod
-    def resolve_executable(executable: str | Path, search_path: str | None = None) -> str:
+    def resolveExecutable(executable: str | Path, search_path: str | None = None) -> str:
         """Resolve executable path, checking PATH if necessary.
         
         Args:
@@ -76,7 +76,7 @@ class ProcessExecutor:
         
         raise WrapperError(f"Executable '{exe}' not found in PATH")
     
-    def prepare_command(
+    def prepareCommand(
         self, 
         executable: str | Path, 
         args: list[str],
@@ -95,7 +95,7 @@ class ProcessExecutor:
             List of command components
             
         """
-        exe = self.resolve_executable(executable, search_path=search_path)
+        exe = self.resolveExecutable(executable, search_path=search_path)
         cmd = [exe] + list(args)
         # On Windows, batch files cannot be executed directly by CreateProcess;
         # they must be launched via cmd.exe.  This also avoids %~dp0 expansion
@@ -104,7 +104,7 @@ class ProcessExecutor:
             cmd = ['cmd', '/c'] + cmd
         return cmd
     
-    def stream_process_output(self, process: subprocess.Popen) -> tuple[str, str]:
+    def streamProcessOutput(self, process: subprocess.Popen) -> tuple[str, str]:
         """Stream output from process in real-time.
         
         Args:
@@ -128,11 +128,11 @@ class ProcessExecutor:
                 if self.stream_output:
                     print(decoded, file=sys.stdout, flush=True)
                 
-                if self.on_output:
+                if self.onOutput:
                     try:
-                        self.on_output(decoded)
+                        self.onOutput(decoded)
                     except Exception as e:
-                        log.warning(f"on_output callback error: {e}")
+                        log.warning(f"onOutput callback error: {e}")
         
         # Read stderr
         if process.stderr:
@@ -145,16 +145,16 @@ class ProcessExecutor:
                 if self.stream_output:
                     print(decoded, file=sys.stderr, flush=True)
                 
-                if self.on_error:
+                if self.onError:
                     try:
-                        self.on_error(decoded)
+                        self.onError(decoded)
                     except Exception as e:
-                        log.warning(f"on_error callback error: {e}")
+                        log.warning(f"onError callback error: {e}")
         
         return '\n'.join(stdout_lines), '\n'.join(stderr_lines)
     
     @staticmethod
-    def terminate_process(process: subprocess.Popen | None) -> None:
+    def terminateProcess(process: subprocess.Popen | None) -> None:
         """Terminate a running process gracefully.
         
         Attempts graceful termination first, then forces kill if needed.
