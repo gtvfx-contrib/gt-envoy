@@ -102,6 +102,8 @@ def getAllowlist(extra: list[str] | None = None) -> frozenset[str]:
     if extra:
         return base | frozenset(extra)
     return base
+
+
 def traceEnvironment(
     command: str,
     var: str,
