@@ -45,7 +45,7 @@ jobs:
     runs-on: ${{ fromJson(inputs.runner) }}
 
     steps:
-      - name: Checkout
+      - name: Checkout bundle
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -53,17 +53,57 @@ jobs:
       - name: Build publish zip
         shell: pwsh
         run: |
-          $excludeArgs = @()
-          if ('${{ inputs.extra_excludes }}' -ne '') {
-              foreach ($pat in '${{ inputs.extra_excludes }}'.Split(' ')) {
-                  $pat = $pat.Trim()
-                  if ($pat) { $excludeArgs += '--exclude'; $excludeArgs += $pat }
-              }
-          }
-          $distDir = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          $version    = "${{ github.ref_name }}"
+          $workspace  = $env:GITHUB_WORKSPACE
+          $bundleName = Split-Path -Leaf $workspace
+          $distDir    = Join-Path $workspace 'dist'
           New-Item -ItemType Directory -Path $distDir -Force | Out-Null
-          $engitArgs = @('publish', '--zip', '--output', $distDir) + $excludeArgs
-          engit @engitArgs
+
+          # Patterns excluded by default (matched against each path component).
+          $excludeDirs  = [System.Collections.Generic.HashSet[string]]@(
+              '.git', '.gitignore', '.github', 'build', 'dist',
+              '.pytest_cache', '__pycache__'
+          )
+          $excludeGlobs = @('*.pyc', '*.pyo', '*.pyd')
+
+          # Merge extra excludes from workflow input.
+          $extras = '${{ inputs.extra_excludes }}' -split '\s+' | Where-Object { $_ }
+          foreach ($x in $extras) { $excludeDirs.Add($x) | Out-Null }
+
+          $sep = [IO.Path]::DirectorySeparatorChar
+
+          # Collect files, pruning excluded path components.
+          $files = Get-ChildItem -Path $workspace -Recurse -File | Where-Object {
+              $rel   = $_.FullName.Substring($workspace.Length).TrimStart($sep)
+              $parts = $rel -split [regex]::Escape($sep)
+              $skip  = $false
+              foreach ($part in $parts) {
+                  if ($excludeDirs.Contains($part)) { $skip = $true; break }
+                  foreach ($glob in $excludeGlobs) {
+                      if ($part -like $glob) { $skip = $true; break }
+                  }
+                  if ($skip) { break }
+              }
+              -not $skip
+          }
+
+          # Write versioned zip: <bundle>/<version>/<relative-path>
+          $zipPath = Join-Path $distDir "$bundleName-$version.zip"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
+          try {
+              foreach ($file in $files) {
+                  $rel     = $file.FullName.Substring($workspace.Length).TrimStart($sep)
+                  $arcName = ("$bundleName/$version/$rel").Replace('\', '/')
+                  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                      $zip, $file.FullName, $arcName, 'Optimal'
+                  ) | Out-Null
+              }
+          } finally {
+              $zip.Dispose()
+          }
+
+          Write-Host "Published zip: $zipPath"
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
