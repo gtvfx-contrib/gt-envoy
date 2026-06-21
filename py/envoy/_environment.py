@@ -172,6 +172,13 @@ class EnvironmentManager:
         Supports ``${VARNAME}`` syntax to reference existing environment
         variables.  The legacy ``{$VARNAME}`` form is also accepted for
         backward compatibility.
+
+        Optional references (``${?VARNAME}``) are also expanded: if the
+        variable is defined the value is substituted; if undefined the
+        reference expands to an empty string — identical to the required
+        form.  Warning suppression and silent-skip logic for optional refs
+        is handled by the caller via :meth:`_findUndefinedOptionalRefs`;
+        this method only performs the textual substitution.
         
         Special variables:
             ${__BUNDLE__}      - Root directory of the bundle (parent of envoy_env/)
@@ -188,7 +195,7 @@ class EnvironmentManager:
         references produce empty strings rather than leaking system values.
         
         Args:
-            value: String potentially containing ${VARNAME} references
+            value: String potentially containing ${VARNAME} or ${?VARNAME} references
             current_env: Current environment dictionary being built
             special_vars: Special wrapper-internal variables (optional)
             
@@ -196,23 +203,25 @@ class EnvironmentManager:
             Expanded string value
             
         """
-        # Primary form: ${VARNAME}  (POSIX/shell standard)
-        # Back-compat:  {$VARNAME}  (legacy envoy form)
-        pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\$([A-Za-z_][A-Za-z0-9_]*)\}')
+        # Primary form:  ${VARNAME}   (required reference)
+        # Optional form: ${?VARNAME}  (optional reference — strip '?' for lookup)
+        # Back-compat:   {$VARNAME}   (legacy envoy form)
+        pattern = re.compile(
+            r'\$\{(\??)([A-Za-z_][A-Za-z0-9_]*)\}|\{\$([A-Za-z_][A-Za-z0-9_]*)\}'
+        )
         
         def replacer(match):
-            # Group 1 = ${VAR} style (canonical), group 2 = {$VAR} style (back-compat)
-            var_name = match.group(1) or match.group(2)
-            
-            # Check special variables first (highest priority)
+            if match.group(3):
+                # Back-compat {$VAR} style
+                var_name = match.group(3)
+            else:
+                # ${VAR} or ${?VAR} style — group 2 is the name (group 1 is '?' or '')
+                var_name = match.group(2)
+
             if special_vars and var_name in special_vars:
                 return special_vars[var_name]
-            
-            # Check current_env second
             if var_name in current_env:
                 return current_env[var_name]
-            
-            # Unresolved — return empty string (never read from os.environ here).
             return ''
         
         return pattern.sub(replacer, value)
@@ -242,11 +251,15 @@ class EnvironmentManager:
         current_env: dict[str, str],
         special_vars: dict[str, str] | None = None,
     ) -> set[str]:
-        """Return the set of variable names in ``${VAR}`` references that are not defined.
+        """Return the set of **required** variable names that are not defined.
 
-        Scans the string for ``${VARNAME}`` (and legacy ``{$VARNAME}``) patterns and
-        returns the names of any that are absent from both ``special_vars`` and
-        ``current_env``.
+        Scans the string for ``${VARNAME}`` (and legacy ``{$VARNAME}``) patterns
+        and returns the names of any that are absent from both ``special_vars``
+        and ``current_env``.
+
+        Optional references (``${?VARNAME}``) are intentionally excluded — they
+        are never treated as unresolved.  Use :meth:`_findUndefinedOptionalRefs`
+        to check those separately.
 
         Args:
             value: String potentially containing ``${VARNAME}`` references.
@@ -254,16 +267,50 @@ class EnvironmentManager:
             special_vars: Special wrapper-internal variables (optional).
 
         Returns:
-            Set of variable names that could not be resolved.
+            Set of required variable names that could not be resolved.
 
         """
-        pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\$([A-Za-z_][A-Za-z0-9_]*)\}')
+        # Only match required refs ${VAR}, not optional ${?VAR}
+        pattern = re.compile(
+            r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\$([A-Za-z_][A-Za-z0-9_]*)\}'
+        )
         unresolved: set[str] = set()
         for match in pattern.finditer(value):
             var_name = match.group(1) or match.group(2)
             if (not special_vars or var_name not in special_vars) and var_name not in current_env:
                 unresolved.add(var_name)
         return unresolved
+
+    @staticmethod
+    def _findUndefinedOptionalRefs(
+        value: str,
+        current_env: dict[str, str],
+        special_vars: dict[str, str] | None = None,
+    ) -> set[str]:
+        """Return the set of **optional** variable names (``${?VAR}``) that are not defined.
+
+        Scans the string for ``${?VARNAME}`` patterns and returns the names of
+        any that are absent from both ``special_vars`` and ``current_env``.
+
+        When this set is non-empty, the caller should silently skip the containing
+        item or entry rather than including a malformed value or emitting a warning.
+
+        Args:
+            value: String potentially containing ``${?VARNAME}`` references.
+            current_env: Current environment dictionary being built.
+            special_vars: Special wrapper-internal variables (optional).
+
+        Returns:
+            Set of optional variable names that are not currently defined.
+
+        """
+        pattern = re.compile(r'\$\{\?([A-Za-z_][A-Za-z0-9_]*)\}')
+        undefined: set[str] = set()
+        for match in pattern.finditer(value):
+            var_name = match.group(1)
+            if (not special_vars or var_name not in special_vars) and var_name not in current_env:
+                undefined.add(var_name)
+        return undefined
     
     def processEnvValue(
         self, 
@@ -588,7 +635,7 @@ class EnvironmentManager:
                         continue
 
                     # For list values, filter out null items and items whose
-                    # ${VAR} references cannot be resolved, warning for each one.
+                    # variable references cannot be resolved.
                     if isinstance(value, list):
                         filtered: list = []
                         for item in value:
@@ -599,6 +646,15 @@ class EnvironmentManager:
                                 )
                                 continue
                             item_str = str(item)
+                            # Optional refs (${?VAR}) — silently drop if undefined;
+                            # check these first so an undefined optional ref never
+                            # triggers a required-ref warning.
+                            opt_undefined = self._findUndefinedOptionalRefs(
+                                item_str, merged_env, special_vars
+                            )
+                            if opt_undefined:
+                                continue
+                            # Required refs (${VAR}) — warn and drop if undefined.
                             unresolved = self._findUnresolvedRefs(
                                 item_str, merged_env, special_vars
                             )
@@ -614,6 +670,13 @@ class EnvironmentManager:
                         value = filtered
 
                     elif isinstance(value, str):
+                        # Optional refs — silently skip the entire entry if undefined.
+                        opt_undefined = self._findUndefinedOptionalRefs(
+                            value, merged_env, special_vars
+                        )
+                        if opt_undefined:
+                            continue
+                        # Required refs — warn (entry is still applied).
                         unresolved = self._findUnresolvedRefs(
                             value, merged_env, special_vars
                         )

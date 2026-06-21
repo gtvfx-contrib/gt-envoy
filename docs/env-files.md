@@ -67,12 +67,64 @@ When a list item resolves to `null` or contains an unresolved `${VAR}` reference
 }
 ```
 
-If `ENVOY_SITE_PACKAGES` is not defined, only that entry is skipped:
+If `ENVOY_SITE_PACKAGES` is not defined, only that entry is skipped and a warning is emitted.
 
+### Optional Variable References (`${?VAR}`)
+
+Prefix the variable name inside `${}` with `?` to mark a reference as **optional**. If the variable is not defined at expansion time, the item or entry is **silently dropped** — no warning is emitted:
+
+```json
+{
+    "^=PYTHONPATH": [
+        "${?ENVOY_SITE_PACKAGES}/Python311/site-packages",
+        "R:/always/included"
+    ]
+}
 ```
-WARNING: List item '${ENVOY_SITE_PACKAGES}' in 'PYTHONPATH' (python_env.json)
-         contains unresolved references: ENVOY_SITE_PACKAGES — skipping item.
+
+- If `ENVOY_SITE_PACKAGES` **is** set: the item expands normally and is included.
+- If `ENVOY_SITE_PACKAGES` **is not** set: the item is silently dropped. No warning.
+
+This also applies to scalar values. If the optional variable is undefined, the entire assignment is silently skipped:
+
+```json
+{
+    "MY_SITE_DIR": "${?ENVOY_SITE_PACKAGES}/Python311"
+}
 ```
+
+If `ENVOY_SITE_PACKAGES` is not set, `MY_SITE_DIR` will not be present in the environment at all.
+
+!!! note "Optional references act as a conditional gate"
+    The `?` prefix turns the entire list item (or scalar entry) into a conditional: the item
+    is only included if the referenced variable is defined. This is distinct from the required
+    form `${VAR}`, which always emits a warning when undefined.
+
+**Combining optional and required references:**
+
+If a list item contains both `${?OPT}` and `${REQ}`, and `OPT` is undefined, the item is
+silently dropped regardless of whether `REQ` is defined. The optional ref fires first.
+
+**Using `environment_allowlist` with optional references:**
+
+The most common pattern is to declare the variable in `environment_allowlist`. This seeds the
+variable from the calling environment before any `environment` entries are processed, ensuring
+it is available at expansion time:
+
+```json
+{
+    "environment": {
+        "^=PYTHONPATH": [
+            "${?ENVOY_SITE_PACKAGES}/Python311/site-packages",
+            "${?ENVOY_SITE_PACKAGES}/Python311/Scripts"
+        ]
+    },
+    "environment_allowlist": ["ENVOY_SITE_PACKAGES"]
+}
+```
+
+If `ENVOY_SITE_PACKAGES` is set in the calling environment, both entries are included.
+If it is not set, both are silently omitted.
 
 ## Variable Expansion
 
@@ -151,15 +203,19 @@ Later files override earlier ones for plain assignment (`=`). Append/prepend ope
 
 ```json
 {
-    "PYTHONPATH": [
-        "${__BUNDLE__}/py",
-        "${ENVOY_SITE_PACKAGES}",
-        "R:/shared/libs/py"
-    ]
+    "environment": {
+        "^=PYTHONPATH": [
+            "${__BUNDLE__}/py",
+            "${?ENVOY_SITE_PACKAGES}/Python311/site-packages",
+            "R:/shared/libs/py"
+        ]
+    },
+    "environment_allowlist": ["ENVOY_SITE_PACKAGES"]
 }
 ```
 
-If `ENVOY_SITE_PACKAGES` is not set, the entry is silently skipped.
+If `ENVOY_SITE_PACKAGES` is not set in the calling environment, the optional entry is
+silently omitted. The other paths are always included.
 
 ### Default / fallback variable
 

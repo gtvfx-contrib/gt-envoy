@@ -214,9 +214,164 @@ def test_resolved_list_items_kept():
     print("  ✅ all resolved list items are retained")
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def test_optional_ref_in_list_defined_included():
+    """${?VAR} in a list item where VAR is defined — item must be included."""
+    print("Testing ${?VAR} list item is included when VAR is defined...")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = _writeEnvFile(
+            tmp,
+            {
+                "environment": {
+                    "^=MYPATH": [
+                        "${?SITE_PKGS}/Python311/site-packages",
+                        "C:/always/included",
+                    ]
+                },
+                "environment_allowlist": ["SITE_PKGS"],
+            },
+        )
+        import os
+        os.environ["SITE_PKGS"] = "R:/pkgs"
+        try:
+            manager = EnvironmentManager(inherit_env=False)
+            result = manager.prepareEnvironment(env_files=[env_file])
+        finally:
+            del os.environ["SITE_PKGS"]
+
+    value = result.get("MYPATH", "")
+    assert EnvironmentManager.normalizePath("R:/pkgs/Python311/site-packages") in value, (
+        f"Optional item should be included when VAR is defined, got: {value!r}"
+    )
+    assert EnvironmentManager.normalizePath("C:/always/included") in value
+
+    print("  ✅ ${?VAR} list item included when VAR is defined")
+
+
+def test_optional_ref_in_list_undefined_silently_dropped():
+    """${?VAR} in a list item where VAR is not defined — item silently dropped, no warning."""
+    print("Testing ${?VAR} list item is silently dropped when VAR is undefined...")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = _writeEnvFile(
+            tmp,
+            {
+                "environment": {
+                    "^=MYPATH": [
+                        "${?SITE_PKGS}/Python311/site-packages",
+                        "C:/always/included",
+                    ]
+                },
+                "environment_allowlist": ["SITE_PKGS"],
+            },
+        )
+        import os
+        os.environ.pop("SITE_PKGS", None)
+        manager = EnvironmentManager(inherit_env=False)
+
+        with _capture_warnings() as warnings:
+            result = manager.prepareEnvironment(env_files=[env_file])
+
+    value = result.get("MYPATH", "")
+    assert EnvironmentManager.normalizePath("C:/always/included") in value, (
+        "Non-optional items should still be present"
+    )
+    assert "SITE_PKGS" not in value, "The optional item should not appear in the result"
+    assert not any("SITE_PKGS" in msg for msg in warnings), (
+        f"No warning should be emitted for an undefined ${'{?SITE_PKGS}'} ref, got: {warnings}"
+    )
+
+    print("  ✅ ${?VAR} list item silently dropped when VAR is undefined")
+
+
+def test_optional_ref_scalar_undefined_silently_skipped():
+    """${?VAR} in a scalar value where VAR is undefined — entire entry silently skipped."""
+    print("Testing ${?VAR} scalar entry is silently skipped when VAR is undefined...")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = _writeEnvFile(
+            tmp,
+            {
+                "environment": {
+                    "MY_SITE": "${?SITE_PKGS}/path",
+                    "ALWAYS_SET": "value",
+                },
+                "environment_allowlist": ["SITE_PKGS"],
+            },
+        )
+        import os
+        os.environ.pop("SITE_PKGS", None)
+        manager = EnvironmentManager(inherit_env=False)
+
+        with _capture_warnings() as warnings:
+            result = manager.prepareEnvironment(env_files=[env_file])
+
+    assert "MY_SITE" not in result, (
+        "Entry with undefined optional ref should be absent from result"
+    )
+    assert result.get("ALWAYS_SET") == "value"
+    assert not any("SITE_PKGS" in msg for msg in warnings), (
+        "No warning should be emitted for an optional ref"
+    )
+
+    print("  ✅ ${?VAR} scalar entry silently skipped when VAR is undefined")
+
+
+def test_optional_ref_undefined_takes_priority_over_required_unresolved():
+    """If ${?OPT} is undefined, item is silently dropped even if ${REQ} is also undefined."""
+    print("Testing optional undefined takes priority over required unresolved (no double-warn)...")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = _writeEnvFile(
+            tmp,
+            {
+                "^=MYPATH": [
+                    "${?OPTIONAL_GATE}/${REQUIRED_MISSING}/sub",
+                    "good/path",
+                ]
+            },
+        )
+        manager = EnvironmentManager(inherit_env=False)
+
+        with _capture_warnings() as warnings:
+            result = manager.loadEnvFromFiles(env_file, base_env={})
+
+    value = result.get("MYPATH", "")
+    assert EnvironmentManager.normalizePath("good/path") in value
+    assert "OPTIONAL_GATE" not in value
+    assert "REQUIRED_MISSING" not in value
+    assert not any("OPTIONAL_GATE" in msg for msg in warnings), (
+        "No warning for the optional gate variable"
+    )
+    assert not any("REQUIRED_MISSING" in msg for msg in warnings), (
+        "No warning when optional gate already caused silent drop"
+    )
+
+    print("  ✅ optional undefined gate silently drops item (no double-warning)")
+
+
+def test_required_ref_still_warns_without_optional():
+    """${VAR} (no ?) where VAR is undefined still emits a warning (regression check)."""
+    print("Testing required ${VAR} still warns when undefined (regression)...")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        env_file = _writeEnvFile(
+            tmp,
+            {"MY_PATH": ["${MISSING_VAR}/path", "good/path"]},
+        )
+        manager = EnvironmentManager(inherit_env=False)
+
+        with _capture_warnings() as warnings:
+            manager.loadEnvFromFiles(env_file, base_env={})
+
+    assert any("MISSING_VAR" in msg for msg in warnings), (
+        "Required unresolved refs should still emit a warning"
+    )
+
+    print("  ✅ required ${VAR} still warns when undefined")
+
+
+
 
 class _capture_warnings:
     """Context manager that captures log.warning messages from envoy._environment."""
@@ -263,6 +418,11 @@ def runAllTests():
         test_unresolved_ref_in_list_skipped,
         test_unresolved_ref_in_list_warns,
         test_resolved_list_items_kept,
+        test_optional_ref_in_list_defined_included,
+        test_optional_ref_in_list_undefined_silently_dropped,
+        test_optional_ref_scalar_undefined_silently_skipped,
+        test_optional_ref_undefined_takes_priority_over_required_unresolved,
+        test_required_ref_still_warns_without_optional,
     ]
 
     print("=" * 60)
