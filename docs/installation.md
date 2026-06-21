@@ -2,11 +2,10 @@
 
 Each GitHub Release ships the following artefacts. Choose the one that matches your use case.
 
-## Full Bundle (Recommended)
+## Full Bundle [CLI + Python API] (Recommended)
 
-Download `envoy-v<version>.zip` from the latest [GitHub Release](https://github.com/gtvfx-contrib/gt-envoy/releases), extract it, and register it via `--bundles-config` or add it to `ENVOY_BNDL_ROOTS`.
+Download `envoy-v<version>.zip` from the latest [GitHub Release](https://github.com/gtvfx-contrib/gt-envoy/releases), extract it, and add it to `ENVOY_BNDL_ROOTS` or add it to a `--bundles-config` file.
 
-The extracted bundle zip has no `.git/` directory, so it will not be auto-discovered via `ENVOY_BNDL_ROOTS`. Use `--bundles-config` to register it explicitly, or place it inside a directory that is already in `ENVOY_BNDL_ROOTS` and add a stub `.git/` marker.
 
 ```powershell
 # Extract to a tools directory

@@ -47,6 +47,14 @@ on:
         type: string
         required: false
         default: '["self-hosted", "X64", "Windows", "synology"]'
+      namespace:
+        description: >
+          Bundle namespace prefix used to build the bndlid written into the
+          .bundle marker file (e.g. 'gt' produces 'gt:<bundle-name>').
+          Defaults to 'gt'.
+        type: string
+        required: false
+        default: 'gt'
 
 permissions:
   contents: write
@@ -111,6 +119,17 @@ jobs:
                       $zip, $file.FullName, $arcName, 'Optimal'
                   ) | Out-Null
               }
+
+              # Write .bundle marker so envoy auto-discovery recognises this
+              # as a production bundle when extracted (no .git/ present).
+              $namespace  = '${{ inputs.namespace }}'
+              $bndlid     = "$namespace`:$bundleName"
+              $published  = (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
+              $markerJson = "{`n  `"bndlid`": `"$bndlid`",`n  `"name`": `"$bundleName`",`n  `"version`": `"$version`",`n  `"published`": `"$published`"`n}"
+              $markerArc  = "$bundleName/$version/.bundle"
+              $entry = $zip.CreateEntry($markerArc, 'Optimal')
+              $writer = [System.IO.StreamWriter]::new($entry.Open())
+              try { $writer.Write($markerJson) } finally { $writer.Dispose() }
           } finally {
               $zip.Dispose()
           }

@@ -33,6 +33,12 @@ BUNDLE_CHECKOUT: str = 'checkout'
 #: supplied.
 BUNDLE_DEFAULT_NAMESPACE: str = 'gt'
 
+#: Name of the marker file written by ``engit publish`` / ``bundle-publish.yml``
+#: at the root of every production bundle.  Serves as a discovery anchor for
+#: :func:`find_bundle_roots` so that deployed (non-git) bundles are found by
+#: :func:`discover_bundles_from_roots` without requiring a ``.git/`` directory.
+BUNDLE_MARKER_FILE: str = '.bundle'
+
 _NAMESPACE_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{1,19}$')
 
 
@@ -331,37 +337,39 @@ class Bundle:
     def version(self) -> str:
         """Version string for this bundle.
 
-        Currently always :data:`BUNDLE_CHECKOUT` (``'checkout'``), indicating
-        the bundle is a live git-repository checkout rather than a built and
-        published release directory.
-
-        When the versioned-build system is implemented this property will
-        return a semantic-version string (e.g. ``'1.2.3'``) for production
-        bundles.
+        Returns the ``version`` field from the ``.bundle`` marker file when
+        the bundle is a published production release.  Otherwise returns
+        :data:`BUNDLE_CHECKOUT` (``'checkout'``), indicating a live git checkout.
 
         """
+        marker = self._info.root / BUNDLE_MARKER_FILE
+        if marker.is_file():
+            try:
+                data = json.loads(marker.read_text(encoding='utf-8'))
+                ver = data.get('version')
+                if ver:
+                    return str(ver)
+            except (OSError, json.JSONDecodeError, ValueError):
+                pass
         return BUNDLE_CHECKOUT
 
     @property
     def is_production(self) -> bool:
         """``True`` if this bundle is a built, versioned release directory.
 
-        Always ``False`` in the current implementation — all bundles are git
-        checkout directories.
-
-        When the versioned-build pipeline is available, production bundles
-        will be resolved from a central registry and this property will
-        return ``True``.
+        Returns ``True`` when a ``.bundle`` marker file is present at the
+        bundle root — indicating the bundle was created by ``engit publish``
+        or ``bundle-publish.yml`` rather than a live git checkout.
 
         """
-        return False
+        return (self._info.root / BUNDLE_MARKER_FILE).is_file()
 
     @property
     def is_checkout(self) -> bool:
         """``True`` if this bundle is a live git-repository checkout.
 
-        This is the inverse of :attr:`is_production` and always ``True``
-        in the current implementation.
+        This is the inverse of :attr:`is_production`.  ``True`` when no
+        ``.bundle`` marker file is present at the bundle root.
 
         """
         return not self.is_production
@@ -489,131 +497,205 @@ directory tagged with the requested version.  The
 
 def is_git_repo(path: Path) -> bool:
     """Check if a directory is a git repository.
-    
+
     Args:
-        path: Path to check
-        
+        path: Path to check.
+
     Returns:
-        True if path contains a .git directory
-    
+        True if path contains a .git directory.
+
     """
     return (path / ".git").is_dir()
 
 
+def is_published_bundle(path: Path) -> bool:
+    """Check if a directory is a published bundle (has a ``.bundle`` marker).
+
+    Args:
+        path: Path to check.
+
+    Returns:
+        True if path contains a ``.bundle`` marker file.
+
+    """
+    return (path / BUNDLE_MARKER_FILE).is_file()
+
+
 def has_envoy_env(path: Path) -> bool:
     """Check if a directory has an envoy_env subdirectory.
-    
+
     Args:
-        path: Path to check
-        
+        path: Path to check.
+
     Returns:
-        True if path contains an envoy_env directory
-    
+        True if path contains an envoy_env directory.
+
     """
     return (path / "envoy_env").is_dir()
 
 
 def validate_bundle(path: Path) -> bool:
     """Validate that a path is a valid envoy bundle.
-    
-    A valid bundle must:
-    - Be a directory
-    - Have an envoy_env subdirectory
-    
+
+    A valid bundle must be a directory with an ``envoy_env/`` subdirectory.
+
     Args:
-        path: Path to validate
-        
+        path: Path to validate.
+
     Returns:
-        True if path is a valid bundle
-    
+        True if path is a valid bundle.
+
     """
-    if not path.is_dir():
-        return False
-    
-    if not has_envoy_env(path):
-        return False
-    
-    return True
+    return path.is_dir() and has_envoy_env(path)
 
 
-def find_git_repos(root_dir: Path, max_depth: int = 5) -> list[Path]:
-    """Recursively find git repositories under a root directory.
-    
+def find_bundle_roots(root_dir: Path, max_depth: int = 5) -> list[Path]:
+    """Recursively find bundle roots under a root directory.
+
+    A bundle root is any directory that contains either a ``.git/`` directory
+    (live checkout) or a ``.bundle`` marker file (published production bundle).
+
     Args:
-        root_dir: Root directory to search
-        max_depth: Maximum depth to search
-        
+        root_dir: Root directory to search.
+        max_depth: Maximum directory depth to search.
+
     Returns:
-        List of paths to git repository roots
-    
+        List of paths to bundle root directories.
+
     """
-    repos = []
-    
+    bundle_roots: list[Path] = []
+
     if not root_dir.is_dir():
-        logger.warning(f"Root directory does not exist: {root_dir}")
-        return repos
-    
-    def search_dir(path: Path, depth: int = 0):
-        """Recursively search for git repos."""
+        logger.warning("Root directory does not exist: %s", root_dir)
+        return bundle_roots
+
+    def search_dir(path: Path, depth: int = 0) -> None:
         if depth > max_depth:
             return
-        
         try:
-            # Check if this directory is a git repo
-            if is_git_repo(path):
-                repos.append(path)
-                # Don't search inside git repos
+            if is_git_repo(path) or is_published_bundle(path):
+                bundle_roots.append(path)
                 return
-            
-            # Search subdirectories
             for item in path.iterdir():
                 if item.is_dir() and not item.name.startswith('.'):
                     search_dir(item, depth + 1)
         except PermissionError:
-            logger.debug(f"Permission denied: {path}")
-        except Exception as e:
-            logger.debug(f"Error searching {path}: {e}")
-    
+            logger.debug("Permission denied: %s", path)
+        except Exception as exc:
+            logger.debug("Error searching %s: %s", path, exc)
+
+    search_dir(root_dir)
+    return bundle_roots
+
+
+def find_git_repos(root_dir: Path, max_depth: int = 5) -> list[Path]:
+    """Recursively find git repositories under a root directory.
+
+    .. deprecated::
+        Use :func:`find_bundle_roots` instead — it also detects published
+        bundles that have a ``.bundle`` marker but no ``.git/`` directory.
+
+    Args:
+        root_dir: Root directory to search.
+        max_depth: Maximum depth to search.
+
+    Returns:
+        List of paths to git repository roots.
+
+    """
+    repos: list[Path] = []
+
+    if not root_dir.is_dir():
+        logger.warning("Root directory does not exist: %s", root_dir)
+        return repos
+
+    def search_dir(path: Path, depth: int = 0) -> None:
+        if depth > max_depth:
+            return
+        try:
+            if is_git_repo(path):
+                repos.append(path)
+                return
+            for item in path.iterdir():
+                if item.is_dir() and not item.name.startswith('.'):
+                    search_dir(item, depth + 1)
+        except PermissionError:
+            logger.debug("Permission denied: %s", path)
+        except Exception as exc:
+            logger.debug("Error searching %s: %s", path, exc)
+
     search_dir(root_dir)
     return repos
 
 
 def discover_bundles_from_roots(root_dirs: list[str]) -> list[BundleInfo]:
     """Discover bundles in specified root directories.
-    
-    Searches for git repositories and validates them as envoy bundles.
-    
+
+    Searches for git repositories and published bundles (with a ``.bundle``
+    marker file) and validates them as envoy bundles.
+
     Args:
-        root_dirs: List of root directory paths
-        
+        root_dirs: List of root directory paths.
+
     Returns:
-        List of discovered bundles
-    
+        List of discovered bundles.
+
     """
     bundles = []
-    
+
     for root_str in root_dirs:
         root = Path(root_str).resolve()
-        logger.debug(f"Searching for bundles in: {root}")
-        
-        # Find all git repos under this root
-        git_repos = find_git_repos(root)
-        logger.debug(f"Found {len(git_repos)} git repositories in {root}")
-        
-        # Validate each repo as a bundle
-        for repo_path in git_repos:
-            if validate_bundle(repo_path):
+        logger.debug("Searching for bundles in: %s", root)
+
+        candidates = find_bundle_roots(root)
+        logger.debug("Found %d bundle candidate(s) in %s", len(candidates), root)
+
+        for candidate_path in candidates:
+            if validate_bundle(candidate_path):
+                name, namespace = _nameAndNamespace(candidate_path)
                 bundle = BundleInfo(
-                    root=repo_path,
-                    name=repo_path.name,
-                    namespace=_infer_namespace(repo_path),
+                    root=candidate_path,
+                    name=name,
+                    namespace=namespace,
                 )
                 bundles.append(bundle)
-                logger.info(f"Discovered bundle: {bundle}")
+                logger.info("Discovered bundle: %s", bundle)
             else:
-                logger.debug(f"Git repo is not an envoy bundle: {repo_path}")
-    
+                logger.debug("Candidate is not an envoy bundle: %s", candidate_path)
+
     return bundles
+
+
+def _nameAndNamespace(bundle_root: Path) -> tuple[str, str]:
+    """Return ``(name, namespace)`` for a bundle root directory.
+
+    For published bundles (have a ``.bundle`` marker), reads ``bndlid`` from the
+    marker file so that the correct name and namespace are used even when the
+    directory name is a version string (e.g. ``v1.0.0``).
+
+    For checkout bundles (have ``.git/`` but no ``.bundle``), falls back to the
+    directory name and :func:`_infer_namespace`.
+
+    Args:
+        bundle_root: Absolute path to the bundle root directory.
+
+    Returns:
+        Tuple of ``(name, namespace)`` strings.
+
+    """
+    marker = bundle_root / BUNDLE_MARKER_FILE
+    if marker.is_file():
+        try:
+            data = json.loads(marker.read_text(encoding='utf-8'))
+            bndlid = data.get('bndlid', '')
+            if bndlid and ':' in bndlid:
+                namespace, name = bndlid.split(':', 1)
+                return name, namespace
+            name = data.get('name') or bundle_root.name
+            return name, _infer_namespace(bundle_root)
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
+    return bundle_root.name, _infer_namespace(bundle_root)
 
 
 def discover_bundles_auto() -> list[BundleInfo]:
@@ -665,7 +747,7 @@ def discover_bundles_auto() -> list[BundleInfo]:
         logger.debug("ENVOY_BNDL_ROOTS is empty")
         return []
     
-    logger.info(f"Auto-discovering bundles from {len(root_dirs)} root(s)")
+    logger.info("Auto-discovering bundles from %d root(s)", len(root_dirs))
     return discover_bundles_from_roots(root_dirs)
 
 
