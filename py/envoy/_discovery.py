@@ -41,8 +41,58 @@ BUNDLE_MARKER_FILE: str = '.bundle'
 
 _NAMESPACE_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{1,19}$')
 
-
 _BNDLID_RE = re.compile(r'^([A-Za-z][A-Za-z0-9_]{1,19}):([A-Za-z][A-Za-z0-9_-]*)$')
+
+#: Matches ``${VARNAME}`` references in bundle config path strings.
+_BUNDLE_PATH_VAR_RE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
+
+
+def _expandBundlePath(raw: str, config_file: Path) -> str | None:
+    """Expand ``${VARNAME}`` references in a bundle path string.
+
+    Resolves each ``${VARNAME}`` token against :data:`os.environ`.  If any
+    referenced variable is undefined, a warning is logged for each missing
+    variable and ``None`` is returned so the caller can skip the entry.
+
+    Args:
+        raw: Raw path string from a bundle config file, potentially containing
+            ``${VARNAME}`` tokens.
+        config_file: Path to the config file being processed (used in warning
+            messages so the user knows where the undefined reference came from).
+
+    Returns:
+        The fully expanded string, or ``None`` if any variable was undefined.
+
+    Example::
+
+        os.environ['STUDIO_ROOT'] = 'R:/studio'
+        result = _expandBundlePath('${STUDIO_ROOT}/envoy/0.2.1', Path('bundles.json'))
+        # 'R:/studio/envoy/0.2.1'
+
+    """
+    unresolved: list[str] = []
+
+    def _replacer(match: re.Match) -> str:
+        var_name = match.group(1)
+        val = os.environ.get(var_name)
+        if val is None:
+            unresolved.append(var_name)
+            return ''
+        return val
+
+    result = _BUNDLE_PATH_VAR_RE.sub(_replacer, raw)
+
+    if unresolved:
+        for var_name in unresolved:
+            logger.warning(
+                "Bundle config %s: path %r references undefined variable ${%s} — skipping",
+                config_file,
+                raw,
+                var_name,
+            )
+        return None
+
+    return result
 
 
 def _is_bndlid(spec: str) -> bool:
@@ -976,8 +1026,16 @@ def load_bundles_from_config(config_file: Path) -> list[BundleInfo]:
     
     bundles = []
     for path_str in bundle_paths:
-        path = Path(path_str).resolve()
-        
+        if not isinstance(path_str, str):
+            logger.warning("Bundle config %s: non-string entry %r — skipping", config_file, path_str)
+            continue
+
+        expanded = _expandBundlePath(path_str, config_file)
+        if expanded is None:
+            continue
+
+        path = Path(expanded).resolve()
+
         if not validate_bundle(path):
             logger.warning(f"Invalid bundle in config: {path}")
             continue
