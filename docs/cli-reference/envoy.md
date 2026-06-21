@@ -26,10 +26,15 @@ en    [OPTIONS] [command] [args ...]
 | `--which COMMAND` | | Resolve the executable path for a command |
 | `--commands-file PATH` | `-c` | Path to a specific `commands.json` |
 | `--bundles-config PATH` | `-b` | Path to a bundles config file |
+| `--set-config KEY=VALUE` | `-sc` | Set a user config value and save |
+| `--get-config [KEY]` | `-gc` | Print one or all user config values |
+| `--list-configs` | `-lc` | List all known configurable settings |
+| `--ignore-config` | `-ic` | Bypass user config for this run |
 | `--env ENV_COMMAND` | `-e` | Run command inside a different command's environment |
 | `--inherit-env` | `-i` | Inherit the full system environment (overrides closed mode) |
 | `--verbose` | `-v` | Enable verbose logging |
 | `--trace VAR` | | Trace how `VAR` is mutated through env file processing |
+| `--docs` | | Open the envoy documentation in the default browser |
 | `--version` | | Show version and exit |
 | `--help` | `-h` | Show help message |
 
@@ -131,3 +136,43 @@ en -c R:/my-project/envoy_env/commands.json my_command
 |---|---|
 | `ENVOY_BNDL_ROOTS` | Semicolon-separated root directories for bundle auto-discovery |
 | `ENVOY_ALLOWLIST` | Semicolon- or comma-separated variable names to pass through in closed mode |
+| `ENVOY_USER_CONFIG` | Override path to the user config file (useful for testing) |
+
+## User Config Flags
+
+### `--set-config KEY=VALUE` / `-sc`
+
+Save a preference to the user config file:
+
+```powershell
+en --set-config bundles_config=R:/studio/envoy/bundles.json
+en --set-config verbosity=verbose
+en --set-config bundles_config=     # clear the setting
+```
+
+### `--get-config [KEY]` / `-gc`
+
+Print the current value of one setting, or all settings if no key is given:
+
+```powershell
+en --get-config                   # show all settings
+en --get-config bundles_config    # show one setting
+```
+
+### `--list-configs` / `-lc`
+
+Show all configurable settings with descriptions and current values:
+
+```powershell
+en --list-configs
+```
+
+### `--ignore-config` / `-ic`
+
+Run without reading any user config values:
+
+```powershell
+en --ignore-config python_dev script.py
+```
+
+See [User Configuration](../user-config.md) for the full reference.
