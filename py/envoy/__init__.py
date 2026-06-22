@@ -50,6 +50,7 @@ __all__ = [
     'OPERATING_SYSTEM',
     'SUPPORTED_OPERATING_SYSTEMS',
     'BUNDLE_CHECKOUT',
+    'BUNDLE_DEFAULT_NAMESPACE',
 
     # ---- Core classes ----
     'ApplicationWrapper',
@@ -137,19 +138,23 @@ from ._exceptions import (
     CalledProcessError,
     ValidationError,
 )
+
 from ._models import (
     ExecutionResult,
     WrapperConfig
 )
+
 from ._wrapper import (
     ApplicationWrapper,
     createWrapper
 )
+
 from ._commands import (
     CommandDefinition,
     CommandRegistry,
     findCommandsFile
 )
+
 from ._discovery import (
     BundleInfo,
     Bundle,
@@ -160,6 +165,7 @@ from ._discovery import (
     discoverBundlesAuto,
     loadBundlesFromConfig
 )
+
 from ._api import (
     OPERATING_SYSTEM,
     SUPPORTED_OPERATING_SYSTEMS,
@@ -169,10 +175,14 @@ from ._api import (
     traceEnvironment,
     loadUserConfig,
     getCurrentBundleConfig,
+)
+
+from ._user_config import (
     UserConfig,
     USER_CONFIG_PATH,
-    KNOWN_SETTINGS,
+    KNOWN_SETTINGS
 )
+
 from ._config_registry import (
     NamedConfigEntry,
     CFG_ROOTS_VAR,
@@ -182,6 +192,7 @@ from ._config_registry import (
     listConfigVersions,
     publishConfig,
 )
+
 from ._environment import TraceAllowlistEvent, TraceStepEvent
 from ._cli import main as cli_main
 

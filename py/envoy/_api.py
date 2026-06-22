@@ -10,10 +10,14 @@ from __future__ import annotations
 import logging
 import platform
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ._environment import _CORE_ENV_VARS, _ENVOY_ENV_VARS
-from ._user_config import UserConfig, USER_CONFIG_PATH, KNOWN_SETTINGS
+from ._user_config import UserConfig
 
+
+if TYPE_CHECKING:
+    from ._discovery import BundleConfig
 
 # ---------------------------------------------------------------------------
 # Public constants
@@ -218,7 +222,7 @@ def loadUserConfig(path: Path | None = None) -> UserConfig:
 def getCurrentBundleConfig(
     *,
     ignore_user_config: bool = False,
-) -> 'BundleConfig | None':
+) -> BundleConfig | None:
     """Return the active bundle config as configured by the user.
 
     Convenience wrapper around :meth:`~._discovery.BundleConfig.current`.
