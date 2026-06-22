@@ -3,14 +3,21 @@ name: Bundle Publish
 # Reusable workflow for publishing a simple envoy bundle.
 #
 # Produces a versioned zip (<bundle-name>-<version>.zip) with internal
-# paths <bundle-name>/<version>/... so it can be extracted directly into
-# any install root.
+# paths derived by splitting the repo name on hyphens:
+#   gt-pythoncore  ->  gt/pythoncore/<version>/...
+#   gt-ext-python  ->  gt/ext/python/<version>/...
+# The archive can be extracted directly into any install root.
+#
+# The bndlid written to the .bundle marker follows the same rule with
+# colons as separators:
+#   gt-pythoncore  ->  gt:pythoncore
+#   gt-ext-python  ->  gt:ext:python
 #
 # Usage from a bundle's own build-release.yml:
 #
 #   jobs:
 #     publish:
-#       uses: <org>/<envoy-repo>/.github/workflows/reusable-bundle-publish.yml@main
+#       uses: <org>/<envoy-repo>/.github/workflows/bundle-publish.yml@main
 #       with:
 #         extra_excludes: 'myspec.spec pyproject.toml scripts'
 #       secrets: inherit
@@ -47,14 +54,6 @@ on:
         type: string
         required: false
         default: '["self-hosted", "X64", "Windows", "synology"]'
-      namespace:
-        description: >
-          Bundle namespace prefix used to build the bndlid written into the
-          .bundle marker file (e.g. 'gt' produces 'gt:<bundle-name>').
-          Defaults to 'gt'.
-        type: string
-        required: false
-        default: 'gt'
 
 permissions:
   contents: write
@@ -73,10 +72,13 @@ jobs:
       - name: Build publish zip
         shell: pwsh
         run: |
-          $version    = "${{ github.ref_name }}"
-          $workspace  = $env:GITHUB_WORKSPACE
-          $bundleName = Split-Path -Leaf $workspace
-          $distDir    = Join-Path $workspace 'dist'
+          $version     = "${{ github.ref_name }}"
+          $workspace   = $env:GITHUB_WORKSPACE
+          $bundleName  = "${{ github.event.repository.name }}"
+          $publishPath = $bundleName -replace '-', '/'
+          $bndlid      = $bundleName -replace '-', ':'
+          $bndlName    = ($bndlid -split ':', 2)[1]
+          $distDir     = Join-Path $workspace 'dist'
           New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 
           # Patterns excluded by default (matched against each path component).
@@ -107,14 +109,14 @@ jobs:
               -not $skip
           }
 
-          # Write versioned zip: <bundle>/<version>/<relative-path>
+          # Write versioned zip: <publish-path>/<version>/<relative-path>
           $zipPath = Join-Path $distDir "$bundleName-$version.zip"
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
           try {
               foreach ($file in $files) {
                   $rel     = $file.FullName.Substring($workspace.Length).TrimStart($sep)
-                  $arcName = ("$bundleName/$version/$rel").Replace('\', '/')
+                  $arcName = ("$publishPath/$version/$rel").Replace('\', '/')
                   [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
                       $zip, $file.FullName, $arcName, 'Optimal'
                   ) | Out-Null
@@ -122,11 +124,9 @@ jobs:
 
               # Write .bundle marker so envoy auto-discovery recognises this
               # as a production bundle when extracted (no .git/ present).
-              $namespace  = '${{ inputs.namespace }}'
-              $bndlid     = "$namespace`:$bundleName"
               $published  = (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
-              $markerJson = "{`n  `"bndlid`": `"$bndlid`",`n  `"name`": `"$bundleName`",`n  `"version`": `"$version`",`n  `"published`": `"$published`"`n}"
-              $markerArc  = "$bundleName/$version/.bundle"
+              $markerJson = "{`n  `"bndlid`": `"$bndlid`",`n  `"name`": `"$bndlName`",`n  `"version`": `"$version`",`n  `"published`": `"$published`"`n}"
+              $markerArc  = "$publishPath/$version/.bundle"
               $entry = $zip.CreateEntry($markerArc, 'Optimal')
               $writer = [System.IO.StreamWriter]::new($entry.Open())
               try { $writer.Write($markerJson) } finally { $writer.Dispose() }

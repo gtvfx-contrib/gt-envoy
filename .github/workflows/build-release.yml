@@ -81,6 +81,25 @@ jobs:
           Copy-Item "$workspace\dist\envoy.exe" "$staging\bin\envoy.exe" -Force
           Copy-Item "$workspace\dist\engit.exe" "$staging\bin\engit.exe" -Force
 
+          # Wrap staged contents in a versioned subdirectory so the zip has
+          # internal paths gt/envoy/<version>/... matching the envoy bundle
+          # naming convention (repo name segments → directory segments).
+          $repoName    = "${{ github.event.repository.name }}"
+          $publishPath = $repoName -replace '-', '/'
+          $bndlid      = $repoName -replace '-', ':'
+          $bndlName    = ($bndlid -split ':', 2)[1]
+          $topDir      = ($publishPath -split '/')[0]
+
+          $innerDir = Join-Path $staging ($publishPath.Replace('/', '\') + "\$version")
+          New-Item -ItemType Directory -Path $innerDir -Force | Out-Null
+
+          Get-ChildItem $staging | Where-Object { $_.Name -ne $topDir } |
+              ForEach-Object { Move-Item $_.FullName $innerDir -Force }
+
+          $published  = (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
+          $markerJson = "{`n  `"bndlid`": `"$bndlid`",`n  `"name`": `"$bndlName`",`n  `"version`": `"$version`",`n  `"published`": `"$published`"`n}"
+          Set-Content -Path "$innerDir\.bundle" -Value $markerJson -Encoding UTF8
+
           $zipPath = "$workspace\dist\envoy-$version.zip"
           Compress-Archive -Path "$staging\*" -DestinationPath $zipPath
           Remove-Item $staging -Recurse -Force
