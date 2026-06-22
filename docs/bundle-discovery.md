@@ -1,6 +1,6 @@
 # Bundle Discovery
 
-Envoy discovers commands from one or more **bundles** — directories containing an `envoy_env/` directory. Commands from all discovered bundles are merged into a single registry.
+Envoy discovers commands from one or more **bundles** — directories containing an `.envoy/` directory. Commands from all discovered bundles are merged into a single registry.
 
 Bundles come in two forms:
 
@@ -17,10 +17,10 @@ flowchart TD
     B -- Yes --> C[Load listed bundle paths]
     B -- No --> D{ENVOY_BNDL_ROOTS\nset?}
     D -- Yes --> E[Scan each root recursively]
-    E --> F{Has .git/ OR .bundle\nAND envoy_env/?}
+    E --> F{Has .git/ OR .bundle\nAND .envoy/?}
     F -- Yes --> G[Load bundle]
     F -- No --> H[Skip]
-    D -- No --> I[Walk up from cwd\nlooking for\nenvoy_env/commands.json]
+    D -- No --> I[Walk up from cwd\nlooking for\n.envoy/commands.json]
     C --> J[Merge command registry]
     G --> J
     I --> J
@@ -29,7 +29,7 @@ flowchart TD
 
 ## Method 1 — Auto-Discovery via `ENVOY_BNDL_ROOTS`
 
-Set `ENVOY_BNDL_ROOTS` to a semicolon-separated list of root directories. Envoy scans each root recursively for subdirectories that have an `envoy_env/` directory and either a `.git/` directory (checkout) or a `.bundle` marker file (published bundle).
+Set `ENVOY_BNDL_ROOTS` to a semicolon-separated list of root directories. Envoy scans each root recursively for subdirectories that have an `.envoy/` directory and either a `.git/` directory (checkout) or a `.bundle` marker file (published bundle).
 
 === "PowerShell"
 
@@ -54,12 +54,12 @@ Set `ENVOY_BNDL_ROOTS` to a semicolon-separated list of root directories. Envoy 
 ```
 R:\studio\bundles\
 ├── gt\
-│   ├── globals\         ← .bundle + envoy_env/ ✓ discovered (production v1.0.0)
-│   └── pythoncore\      ← .bundle + envoy_env/ ✓ discovered (production v2.1.0)
+│   ├── globals\         ← .bundle + .envoy/ ✓ discovered (production v1.0.0)
+│   └── pythoncore\      ← .bundle + .envoy/ ✓ discovered (production v2.1.0)
 R:\repo\
 └── gtvfx-contrib\
     └── gt\
-        └── my-tool\     ← .git/ + envoy_env/ ✓ discovered (checkout)
+        └── my-tool\     ← .git/ + .envoy/ ✓ discovered (checkout)
 ```
 
 !!! note
@@ -138,15 +138,15 @@ file it came from) and **skips** that bundle entry.  The remaining entries
 are still loaded normally.
 
 !!! tip
-    This is the same `${VARNAME}` syntax used in `envoy_env/*.json` files.
+    This is the same `${VARNAME}` syntax used in `.envoy/*.json` files.
 
 ## Method 3 — Local Fallback
 
-If no bundles are found via the above methods, Envoy walks up from the current directory looking for `envoy_env/commands.json`. This allows running from inside a single-bundle project without any setup.
+If no bundles are found via the above methods, Envoy walks up from the current directory looking for `.envoy/commands.json`. This allows running from inside a single-bundle project without any setup.
 
 ## `global_env.json`
 
-Any bundle may contain `envoy_env/global_env.json`. It is loaded automatically before every command's env files, regardless of which bundle the command comes from.
+Any bundle may contain `.envoy/global_env.json`. It is loaded automatically before every command's env files, regardless of which bundle the command comes from.
 
 In multi-bundle mode, `global_env.json` is collected from **every** discovered bundle in discovery order:
 

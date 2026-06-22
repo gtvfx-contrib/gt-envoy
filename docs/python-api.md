@@ -48,7 +48,7 @@ bundle = envoy.Bundle(r'R:/repo/gtvfx-contrib/gt/pythoncore')
 | `is_checkout` | `bool` | `True` if this is a live git checkout |
 | `is_production` | `bool` | `True` if this is a deployed production build |
 | `commands` | `list[str]` | Available command names |
-| `env_files` | `dict[str, Path]` | All `*.json` files in `envoy_env/`, indexed by filename |
+| `env_files` | `dict[str, Path]` | All `*.json` files in `.envoy/`, indexed by filename |
 
 ```python
 print(bundle.bndlid)       # 'gt:pythoncore'

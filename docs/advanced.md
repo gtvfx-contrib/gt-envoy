@@ -50,15 +50,15 @@ Run `en --verbose --list` to see these warnings and identify the conflict source
 
 ## Local Fallback
 
-If no bundles are found through auto-discovery or a config file, Envoy walks up from the current working directory looking for `envoy_env/commands.json`:
+If no bundles are found through auto-discovery or a config file, Envoy walks up from the current working directory looking for `.envoy/commands.json`:
 
 ```mermaid
 flowchart TD
-    CWD["Current directory\nR:/project/src/module"] --> C1{"envoy_env/\ncommands.json?"}
+    CWD["Current directory\nR:/project/src/module"] --> C1{".envoy/\ncommands.json?"}
     C1 -- No --> P1["R:/project/src"]
-    P1 --> C2{"envoy_env/\ncommands.json?"}
+    P1 --> C2{".envoy/\ncommands.json?"}
     C2 -- No --> P2["R:/project"]
-    P2 --> C3{"envoy_env/\ncommands.json?"}
+    P2 --> C3{".envoy/\ncommands.json?"}
     C3 -- Yes --> FOUND["Commands loaded\n(single-bundle mode)"]
     C3 -- No --> P3["... continues to root"]
 ```
@@ -97,7 +97,7 @@ The `engit publish` command produces a clean, deployment-ready copy of any bundl
 flowchart LR
     SRC["Bundle root\n(live checkout)"]
     PUB["engit publish"]
-    FOLD["output/\nbundle/v1.2.3/\n  envoy_env/\n  py/\n  LICENSE"]
+    FOLD["output/\nbundle/v1.2.3/\n  .envoy/\n  py/\n  LICENSE"]
     ZIP["bundle-v1.2.3.zip\n(internal: bundle/v1.2.3/...)"]
 
     SRC --> PUB

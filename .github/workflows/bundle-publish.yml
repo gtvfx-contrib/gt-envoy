@@ -69,6 +69,43 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fetch bundle assets
+        shell: pwsh
+        run: |
+          $artifactsFile = Join-Path $env:GITHUB_WORKSPACE '.envoy\bundle-artifacts.json'
+          if (Test-Path $artifactsFile) {
+              $version     = "${{ github.ref_name }}"
+              $baseVersion = $version -replace '-envoy\.\d+$', ''
+
+              # Expand ${VAR} tokens: built-ins first, then OS env vars.
+              # Unknown tokens are left unexpanded so misconfiguration is visible.
+              function Resolve-AssetTokens([string]$value) {
+                  $builtins = @{ VERSION = $version; BASE_VERSION = $baseVersion }
+                  [regex]::Replace($value, '\$\{([^}]+)\}', {
+                      param($m)
+                      $name = $m.Groups[1].Value
+                      if ($builtins.ContainsKey($name)) { return $builtins[$name] }
+                      $envVal = [Environment]::GetEnvironmentVariable($name)
+                      if ($null -ne $envVal) { return $envVal }
+                      return $m.Value
+                  })
+              }
+
+              $config = Get-Content $artifactsFile -Raw | ConvertFrom-Json
+              foreach ($artifact in $config.artifacts) {
+                  $src = Resolve-AssetTokens $artifact.source
+                  $dst = if ($artifact.dest -and $artifact.dest -ne '.') {
+                             Join-Path $env:GITHUB_WORKSPACE $artifact.dest
+                         } else { $env:GITHUB_WORKSPACE }
+                  New-Item -ItemType Directory -Path $dst -Force | Out-Null
+                  robocopy $src $dst /E /NP /NJH /NJS | Out-Null
+                  if ($LASTEXITCODE -ge 8) {
+                      throw "robocopy failed fetching artifacts from '$src' (exit $LASTEXITCODE)"
+                  }
+                  Write-Host "Fetched artifacts: $src -> $dst"
+              }
+          }
+
       - name: Build publish zip
         shell: pwsh
         run: |
@@ -86,7 +123,7 @@ jobs:
               '.git', '.gitignore', '.github', 'build', 'dist',
               '.pytest_cache', '__pycache__'
           )
-          $excludeGlobs = @('*.pyc', '*.pyo', '*.pyd')
+          $excludeGlobs = @('*.pyc', '*.pyo')
 
           # Merge extra excludes from workflow input.
           $extras = '${{ inputs.extra_excludes }}' -split '\s+' | Where-Object { $_ }

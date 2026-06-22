@@ -101,7 +101,7 @@ flowchart TD
     D -- No --> E
     R1 --> F[Use that config file]
     R2 --> F
-    E --> G[Local fallback\nenvoy_env/commands.json]
+    E --> G[Local fallback\n.envoy/commands.json]
     F --> H([Commands ready])
     G --> H
 ```

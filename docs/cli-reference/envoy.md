@@ -70,7 +70,7 @@ Bundle:  gt:pythoncore
 Executable: python -X dev
 Environment files:
   - python_env.json
-Environment directory: R:/repo/.../pythoncore/envoy_env
+Environment directory: R:/repo/.../pythoncore/.envoy
 ```
 
 ### `--which COMMAND`
@@ -127,7 +127,7 @@ en -b R:/studio/bundles.json python_dev script.py
 Point directly at a `commands.json`, bypassing bundle discovery entirely:
 
 ```powershell
-en -c R:/my-project/envoy_env/commands.json my_command
+en -c R:/my-project/.envoy/commands.json my_command
 ```
 
 ## Environment Variables

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from ._exceptions import WrapperError
+from ._discovery import BUNDLE_ENV_DIR
 
 
 log = logging.getLogger(__name__)
@@ -327,7 +328,7 @@ class CommandRegistry:
 
 
 def findCommandsFile(start_path: Path | None = None) -> Path | None:
-    """Find commands.json by searching up the directory tree for envoy_env/.
+    """Find commands.json by searching up the directory tree for ``.envoy/``.
 
     Resolution order:
 
@@ -335,7 +336,7 @@ def findCommandsFile(start_path: Path | None = None) -> Path | None:
        returned directly (used by :func:`~envoy.testing.patchCommandsFile`
        in tests).
     2. Upward directory walk from *start_path* (or cwd) looking for
-       ``envoy_env/commands.json``.
+       ``.envoy/commands.json``.
 
     Args:
         start_path: Starting directory (defaults to cwd).
@@ -362,7 +363,7 @@ def findCommandsFile(start_path: Path | None = None) -> Path | None:
     current = start_path.resolve()
 
     for parent in [current] + list(current.parents):
-        wrapper_env_dir = parent / "envoy_env"
+        wrapper_env_dir = parent / BUNDLE_ENV_DIR
         if wrapper_env_dir.is_dir():
             commands_file = wrapper_env_dir / "commands.json"
             if commands_file.exists():

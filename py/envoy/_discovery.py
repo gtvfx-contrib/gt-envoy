@@ -39,6 +39,10 @@ BUNDLE_DEFAULT_NAMESPACE: str = 'gt'
 #: :func:`discoverBundlesFromRoots` without requiring a ``.git/`` directory.
 BUNDLE_MARKER_FILE: str = '.bundle'
 
+#: Name of the per-bundle configuration directory that holds all envoy JSON
+#: files (``commands.json``, ``python_env.json``, etc.).
+BUNDLE_ENV_DIR: str = '.envoy'
+
 _NAMESPACE_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_]{1,19}$')
 
 _BNDLID_RE = re.compile(r'^([A-Za-z][A-Za-z0-9_]{1,19}):([A-Za-z][A-Za-z0-9_-]*)$')
@@ -149,7 +153,7 @@ def _resolveBndlid(bndlid: str) -> Path:
     # 1. Fast path: <root>/<namespace>/<name>
     for root in roots:
         candidate = (root / namespace / name).resolve()
-        if candidate.is_dir() and (candidate / 'envoy_env').is_dir():
+        if candidate.is_dir() and (candidate / BUNDLE_ENV_DIR).is_dir():
             logger.debug("Resolved %s via fast path: %s", bndlid, candidate)
             return candidate
 
@@ -211,7 +215,7 @@ class BundleInfo:
         self.root = root
         self.name = name
         self.namespace = namespace
-        self.envoy_env = root / "envoy_env"
+        self.envoy_env = root / BUNDLE_ENV_DIR
         self.env_files: dict[str, Path] = self._indexEnvFiles()
 
     @property
@@ -227,7 +231,7 @@ class BundleInfo:
         return f"{self.namespace}:{self.name}"
 
     def _indexEnvFiles(self) -> dict[str, Path]:
-        """Scan envoy_env/ once and index all JSON files by filename.
+        """Scan ``.envoy/`` once and index all JSON files by filename.
         
         Returns:
             Dict mapping filename to absolute Path
@@ -252,7 +256,7 @@ class Bundle:
     """A discovered envoy bundle.
 
     A bundle is a directory (or, in the future,
-    a versioned built directory) that contains an ``envoy_env/`` subdirectory
+    a versioned built directory) that contains a ``.envoy/`` subdirectory
     with a ``commands.json`` and one or more environment JSON files.
 
     **Current behaviour (checkout mode)**
@@ -305,7 +309,7 @@ class Bundle:
         WrapperError: If *spec* is a bundle ID and cannot be resolved via
             ``ENVOY_BNDL_ROOTS``.
         ValueError: If the resolved or supplied path does not exist or lacks
-            an ``envoy_env/`` subdirectory.
+            a ``.envoy/`` subdirectory.
 
     Example::
 
@@ -337,8 +341,8 @@ class Bundle:
             root = Path(spec).resolve()
             if not root.is_dir():
                 raise ValueError(f"Bundle path does not exist: {root}")
-            if not (root / 'envoy_env').is_dir():
-                raise ValueError(f"Not a valid bundle (no envoy_env/): {root}")
+            if not (root / BUNDLE_ENV_DIR).is_dir():
+                raise ValueError(f"Not a valid bundle (no {BUNDLE_ENV_DIR}/): {root}")
             ns = namespace if namespace is not None else _inferNamespace(root)
         self._info = BundleInfo(root=root, name=root.name, namespace=ns)
 
@@ -431,7 +435,7 @@ class Bundle:
 
     @property
     def envoy_env(self) -> Path:
-        """Absolute path to the ``envoy_env/`` subdirectory."""
+        """Absolute path to the ``.envoy/`` configuration subdirectory."""
         return self._info.envoy_env
 
     @property
@@ -749,22 +753,22 @@ def isPublishedBundle(path: Path) -> bool:
 
 
 def hasEnvoyEnv(path: Path) -> bool:
-    """Check if a directory has an envoy_env subdirectory.
+    """Check if a directory has a ``.envoy`` configuration subdirectory.
 
     Args:
         path: Path to check.
 
     Returns:
-        True if path contains an envoy_env directory.
+        True if path contains a ``.envoy`` directory.
 
     """
-    return (path / "envoy_env").is_dir()
+    return (path / BUNDLE_ENV_DIR).is_dir()
 
 
 def validateBundle(path: Path) -> bool:
     """Validate that a path is a valid envoy bundle.
 
-    A valid bundle must be a directory with an ``envoy_env/`` subdirectory.
+    A valid bundle must be a directory with a ``.envoy/`` subdirectory.
 
     Args:
         path: Path to validate.
@@ -1091,7 +1095,7 @@ def getBundleEnvFiles(bundles: list[BundleInfo]) -> dict[str, list[Path]]:
         wrapper_env = bundle.envoy_env
         
         if wrapper_env.is_dir():
-            # Find all .json files in envoy_env
+            # Find all .json files in .envoy/
             for json_file in wrapper_env.glob("*.json"):
                 # Skip commands.json as it's handled separately
                 if json_file.name != "commands.json":

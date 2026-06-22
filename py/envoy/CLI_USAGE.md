@@ -2,7 +2,7 @@
 
 ## Overview
 
-Envoy is invoked via the `envoy` command (provided by `bin/envoy.bat`). Commands are discovered automatically from Git repositories on `ENVOY_BNDL_ROOTS`, or loaded from a local `envoy_env/commands.json`.
+Envoy is invoked via the `envoy` command (provided by `bin/envoy.bat`). Commands are discovered automatically from Git repositories on `ENVOY_BNDL_ROOTS`, or loaded from a local `.envoy/commands.json`.
 
 ## Invocation
 
@@ -29,7 +29,7 @@ R:\path\to\envoy\bin\envoy.bat [options] [command] [args ...]
 
 ## Command Definition
 
-Commands are defined in `envoy_env/commands.json`:
+Commands are defined in `.envoy/commands.json`:
 
 ```json
 {
@@ -42,7 +42,7 @@ Commands are defined in `envoy_env/commands.json`:
 
 ### Fields
 
-- **`environment`** — List of JSON environment files to load (relative to `envoy_env/`)
+- **`environment`** — List of JSON environment files to load (relative to `.envoy/`)
 - **`alias`** (optional) — Executable and base arguments to run
   - `alias[0]` is the executable, `alias[1:]` are prepended arguments
   - If omitted, `command_name` is used as the executable (must be on the subprocess `PATH`)
@@ -128,7 +128,7 @@ $env:ENVOY_BNDL_ROOTS = "R:/repo/gtvfx-contrib;R:/repo/gtvfx"
 envoy --list
 ```
 
-Envoy scans each root for Git repositories containing `envoy_env/` and loads their `commands.json`.
+Envoy scans each root for Git repositories containing `.envoy/` and loads their `commands.json`.
 
 ### Config file
 
@@ -150,13 +150,13 @@ envoy -bc R:/repo/bundles.json --list
 ### Explicit commands file
 
 ```powershell
-envoy --commands-file R:/repo/my-tool/envoy_env/commands.json --list
-envoy -cf R:/repo/my-tool/envoy_env/commands.json my_command
+envoy --commands-file R:/repo/my-tool/.envoy/commands.json --list
+envoy -cf R:/repo/my-tool/.envoy/commands.json my_command
 ```
 
 ### Local fallback
 
-If no bundles are found and no flags are given, Envoy searches for `envoy_env/commands.json` starting from the current directory and walking up to the filesystem root.
+If no bundles are found and no flags are given, Envoy searches for `.envoy/commands.json` starting from the current directory and walking up to the filesystem root.
 
 ## Environment Modes
 
@@ -188,11 +188,11 @@ Lets specific system variables through in closed mode without full inherit-env. 
 
 ## `global_env.json`
 
-Any bundle can place a `global_env.json` in its `envoy_env/` directory. It is loaded automatically before command-specific env files for every command sourced from that bundle:
+Any bundle can place a `global_env.json` in its `.envoy/` directory. It is loaded automatically before command-specific env files for every command sourced from that bundle:
 
 ```
 my-bundle/
-└── envoy_env/
+└── .envoy/
     ├── commands.json
     ├── global_env.json     ← always loaded first
     └── my_tool_env.json
@@ -201,7 +201,7 @@ my-bundle/
 ## Error Reference
 
 **"Could not find commands.json"**
-Set `ENVOY_BNDL_ROOTS`, use `--bundles-config`/`-bc`, use `--commands-file`/`-cf`, or run from inside a project that has `envoy_env/commands.json`.
+Set `ENVOY_BNDL_ROOTS`, use `--bundles-config`/`-bc`, use `--commands-file`/`-cf`, or run from inside a project that has `.envoy/commands.json`.
 
 **"Command 'x' not found"**
 Run `envoy --list` to see what is available.

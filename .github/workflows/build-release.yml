@@ -57,7 +57,7 @@ jobs:
           $staging   = "$workspace\_publish_staging"
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
-          foreach ($item in @('bin', 'envoy_env', 'py', 'LICENSE', 'README.md')) {
+          foreach ($item in @('bin', '.envoy', 'py', 'LICENSE', 'README.md')) {
               $src = "$workspace\$item"
               if (Test-Path $src) {
                   Copy-Item $src "$staging\" -Recurse -Force

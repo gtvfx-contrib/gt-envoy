@@ -43,7 +43,7 @@ def _makeBundle(tmp_dir: Path, name: str, commands: dict, env_files: dict) -> Pa
 
         <tmp_dir>/<ns>/<name>/
             .git/          <- makes isGitRepo() return True
-            envoy_env/
+            .envoy/
                 commands.json
                 <env_file>.json  (one per entry in env_files)
 
@@ -57,7 +57,7 @@ def _makeBundle(tmp_dir: Path, name: str, commands: dict, env_files: dict) -> Pa
         Path to the bundle root (``<tmp_dir>/gt/<name>``).
     """
     bundle_root = tmp_dir / "gt" / name
-    envoy_env = bundle_root / "envoy_env"
+    envoy_env = bundle_root / ".envoy"
     envoy_env.mkdir(parents=True)
     # Make it look like a git repo so findGitRepos() picks it up.
     (bundle_root / ".git").mkdir()
@@ -70,12 +70,12 @@ def _makeBundle(tmp_dir: Path, name: str, commands: dict, env_files: dict) -> Pa
 
 
 def _makeCommandsDir(tmp_dir: Path, commands: dict, env_files: dict) -> Path:
-    """Create a bare envoy_env directory (no bundle/git structure).
+    """Create a bare ``.envoy`` directory (no bundle/git structure).
 
     Returns:
-        Path to the ``envoy_env/commands.json`` file.
+        Path to the ``.envoy/commands.json`` file.
     """
-    envoy_env = tmp_dir / "envoy_env"
+    envoy_env = tmp_dir / ".envoy"
     envoy_env.mkdir(parents=True)
 
     cf = envoy_env / "commands.json"

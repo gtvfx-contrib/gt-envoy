@@ -58,8 +58,8 @@ You can append or prepend to existing environment variables using two methods:
 The wrapper provides special internal variables that resolve to bundle-relative paths:
 
 **Available Special Variables:**
-- `{$__BUNDLE__}` - Root directory of the bundle (parent of `envoy_env/` directory)
-- `{$__BUNDLE_ENV__}` - The `envoy_env/` directory itself
+- `{$__BUNDLE__}` - Root directory of the bundle (parent of `.envoy/` directory)
+- `{$__BUNDLE_ENV__}` - The `.envoy/` directory itself
 - `{$__BUNDLE_NAME__}` - Name of the bundle (directory name)
 - `{$__FILE__}` - Path to the current environment JSON file
 
@@ -80,9 +80,9 @@ The wrapper provides special internal variables that resolve to bundle-relative 
 **Bundle Structure:**
 ```
 my-bundle/
-├── envoy_env/
+├── .envoy/
 │   └── base.json    ← {$__FILE__} points here
-│                    ← {$__BUNDLE_ENV__} points to envoy_env/
+│                    ← {$__BUNDLE_ENV__} points to .envoy/
 ├── bin/             ← {$__BUNDLE__} points to my-bundle/
 ├── py/              ← {$__BUNDLE_NAME__} = "my-bundle"
 └── config/

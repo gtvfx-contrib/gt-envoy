@@ -7,7 +7,7 @@ Envoy has no commands to load. Fix one of:
 - Set `ENVOY_BNDL_ROOTS` to point to a directory containing bundle subdirectories
 - Use `--bundles-config` / `-b` with a path to a `bundles.json`
 - Use `--commands-file` / `-c` with a direct path to `commands.json`
-- Run from inside a project that has `envoy_env/commands.json`
+- Run from inside a project that has `.envoy/commands.json`
 
 ## Commands Not Appearing in `--list`
 
@@ -18,7 +18,7 @@ en --verbose --list
 Check the verbose output for:
 
 - Which roots are being scanned
-- Which directories have `.git/` but no `envoy_env/` (or vice versa)
+- Which directories have `.git/` but no `.envoy/` (or vice versa)
 - Any parse errors in `commands.json`
 
 **Common causes:**

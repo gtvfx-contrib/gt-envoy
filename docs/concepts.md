@@ -2,12 +2,12 @@
 
 ## Bundles
 
-A **bundle** is a Git repository containing an `envoy_env/` directory. Each bundle can define commands and environment files.
+A **bundle** is a Git repository containing an `.envoy/` directory. Each bundle can define commands and environment files.
 
 ```
 my-bundle/
 ├── .git/
-├── envoy_env/
+├── .envoy/
 │   ├── commands.json       ← command definitions
 │   ├── global_env.json     ← loaded before every command's env files
 │   └── tool_env.json       ← per-tool environment
@@ -38,7 +38,7 @@ The default namespace is `gt`. It can be overridden via the Python API.
 
 ## Commands
 
-Commands are defined in `envoy_env/commands.json`:
+Commands are defined in `.envoy/commands.json`:
 
 ```json
 {
@@ -58,7 +58,7 @@ Commands are defined in `envoy_env/commands.json`:
 
 | Field | Required | Description |
 |---|---|---|
-| `environment` | Yes | List of env JSON files to load (relative to `envoy_env/`) |
+| `environment` | Yes | List of env JSON files to load (relative to `.envoy/`) |
 | `alias` | No | Executable + base args. `alias[0]` is the exe; `alias[1:]` are prepended args. If omitted, the command name is used as the executable. |
 
 ### Running Commands

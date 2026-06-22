@@ -1,14 +1,14 @@
-﻿# Bundle Discovery
+# Bundle Discovery
 
 ## Overview
 
-Envoy discovers commands from one or more **bundles** — Git repositories containing an `envoy_env/` directory. Commands from all discovered bundles are merged into a single registry, with each command tagged with its source bundle.
+Envoy discovers commands from one or more **bundles** — Git repositories containing an `.envoy/` directory. Commands from all discovered bundles are merged into a single registry, with each command tagged with its source bundle.
 
 ## Discovery Methods
 
 ### 1. Auto-Discovery (`ENVOY_BNDL_ROOTS`)
 
-Set `ENVOY_BNDL_ROOTS` to a list of root directories. Envoy scans each root for subdirectories that are Git repositories with an `envoy_env/` directory.
+Set `ENVOY_BNDL_ROOTS` to a list of root directories. Envoy scans each root for subdirectories that are Git repositories with an `.envoy/` directory.
 
 ```powershell
 # PowerShell
@@ -26,9 +26,9 @@ Separator: `;` on Windows, `:` on Unix/macOS.
 #### How it Works
 
 1. Each root is scanned one level deep for subdirectories
-2. A subdirectory qualifies if it has both a `.git/` folder and an `envoy_env/` directory
-3. `envoy_env/commands.json` is loaded from each qualifying bundle
-4. All JSON files in each `envoy_env/` are indexed at discovery time for fast lookup at run time
+2. A subdirectory qualifies if it has both a `.git/` folder and an `.envoy/` directory
+3. `.envoy/commands.json` is loaded from each qualifying bundle
+4. All JSON files in each `.envoy/` are indexed at discovery time for fast lookup at run time
 
 #### Example Structure
 
@@ -36,16 +36,16 @@ Separator: `;` on Windows, `:` on Unix/macOS.
 R:\repo\
 ├── project-a\
 │   ├── .git\
-│   └── envoy_env\
+│   └── .envoy\
 │       ├── commands.json
 │       ├── global_env.json
 │       └── project_env.json
 ├── project-b\
 │   ├── .git\
-│   └── envoy_env\
+│   └── .envoy\
 │       ├── commands.json
 │       └── project_env.json
-└── not-a-bundle\        ← no envoy_env/, skipped
+└── not-a-bundle\        ← no .envoy/, skipped
 ```
 
 ### 2. Config File (`--bundles-config` / `-bc`)
@@ -81,16 +81,16 @@ envoy -bc R:/repo/bundles.json unreal
 
 ### 3. Local Fallback
 
-If no bundles are found via the above methods, Envoy walks up from the current directory looking for `envoy_env/commands.json`. This allows running from inside a single-bundle project without any configuration.
+If no bundles are found via the above methods, Envoy walks up from the current directory looking for `.envoy/commands.json`. This allows running from inside a single-bundle project without any configuration.
 
 ## Bundle Structure
 
-A valid bundle must have an `envoy_env/` directory. A `.git/` directory is required for auto-discovery but not for config-file or local-fallback discovery.
+A valid bundle must have an `.envoy/` directory. A `.git/` directory is required for auto-discovery but not for config-file or local-fallback discovery.
 
 ```
 my-bundle/
 ├── .git/                       # required for auto-discovery
-├── envoy_env/
+├── .envoy/
 │   ├── commands.json           # command definitions
 │   ├── global_env.json         # loaded automatically before every command's env files
 │   ├── base_env.json           # shared environment
@@ -100,7 +100,7 @@ my-bundle/
 
 ### `global_env.json`
 
-If a bundle contains `envoy_env/global_env.json`, it is loaded automatically before any command-specific env files for every command sourced from that bundle. Use it for studio-wide or bundle-wide baseline variables:
+If a bundle contains `.envoy/global_env.json`, it is loaded automatically before any command-specific env files for every command sourced from that bundle. Use it for studio-wide or bundle-wide baseline variables:
 
 ```json
 {
@@ -115,7 +115,7 @@ If a bundle contains `envoy_env/global_env.json`, it is loaded automatically bef
 
 1. `--bundles-config`/`-bc` — if specified, only those bundles are used
 2. `ENVOY_BNDL_ROOTS` auto-discovery — if no config file
-3. Local `envoy_env/commands.json` fallback — if no bundles found
+3. Local `.envoy/commands.json` fallback — if no bundles found
 
 ### Command Conflicts
 
@@ -157,7 +157,7 @@ Bundle: unreal
 Executable: unreal
 Environment files:
   - unreal_env.json
-Environment directory: R:/repo/.../unreal/wrapper/envoy_env
+Environment directory: R:/repo/.../unreal/wrapper/.envoy
 ```
 
 ### Verbose Discovery Logging
@@ -190,7 +190,7 @@ envoy -bc R:/repo/bundles.json unreal
 
 With two bundles:
 
-**`app-framework/envoy_env/commands.json`:**
+**`app-framework/.envoy/commands.json`:**
 ```json
 {
     "python_dev": {
@@ -200,7 +200,7 @@ With two bundles:
 }
 ```
 
-**`tools/envoy_env/commands.json`:**
+**`tools/.envoy/commands.json`:**
 ```json
 {
     "build": {
@@ -234,7 +234,7 @@ bundles = get_bundles(config_file=Path("bundles.json"))
 # Inspect bundles
 for bundle in bundles:
     print(f"{bundle.name}: {bundle.root}")
-    print(f"  envoy_env: {bundle.envoy_env}")
+    print(f"  .envoy: {bundle..envoy}")
     # env_files is pre-indexed at discovery time: dict[str, Path]
     print(f"  env files: {list(bundle.env_files.keys())}")
 ```
@@ -259,8 +259,8 @@ for cmd_name in registry.list_commands():
 |---|---|---|
 | `name` | `str` | Bundle directory name |
 | `root` | `Path` | Absolute path to the bundle root |
-| `envoy_env` | `Path` | Absolute path to `envoy_env/` |
-| `env_files` | `dict[str, Path]` | All `*.json` files in `envoy_env/`, indexed by filename at construction time |
+| `.envoy` | `Path` | Absolute path to `.envoy/` |
+| `env_files` | `dict[str, Path]` | All `*.json` files in `.envoy/`, indexed by filename at construction time |
 
 ## Environment Variable Reference
 
@@ -272,12 +272,12 @@ for cmd_name in registry.list_commands():
 
 **No commands loaded**
 - Check `ENVOY_BNDL_ROOTS` is set and points to directories that contain bundle subdirectories
-- Each bundle must have both `.git/` (auto-discovery) and `envoy_env/`
+- Each bundle must have both `.git/` (auto-discovery) and `.envoy/`
 - Use `--bundles-config`/`-bc` with explicit paths to bypass auto-discovery
 - Run `envoy --verbose --list` to see exactly what is being scanned
 
 **Bundle not discovered**
-1. Does the directory have `envoy_env/`?
+1. Does the directory have `.envoy/`?
 2. Does it have `.git/` (required for auto-discovery)?
 3. Is its parent directory in `ENVOY_BNDL_ROOTS`?
 4. Is the path separator correct for the OS (`;` Windows, `:` Unix)?
@@ -292,7 +292,7 @@ The current implementation treats all bundles as **checkout** bundles — paths 
 A **production bundle** is created by:
 
 1. Tagging a git commit (`git tag v1.2.3`) in the bundle repo.
-2. Running an envoy build step that exports the `envoy_env/` contents to a versioned output directory.
+2. Running an envoy build step that exports the `.envoy/` contents to a versioned output directory.
 3. Registering the built directory in a central bundle registry.
 
 The `Bundle.version` property returns `'checkout'` for all current path-based bundles and will return a semver string for production bundles. `Bundle.is_production` will become `True` for built releases.

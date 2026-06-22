@@ -1,6 +1,6 @@
 # Environment Files
 
-Environment files are JSON files placed in a bundle's `envoy_env/` directory. They are listed in `commands.json` under the `environment` key and loaded in order when a command runs.
+Environment files are JSON files placed in a bundle's `.envoy/` directory. They are listed in `commands.json` under the `environment` key and loaded in order when a command runs.
 
 ## Operators
 
@@ -144,8 +144,8 @@ These are automatically available in every env file:
 
 | Variable | Value |
 |---|---|
-| `${__BUNDLE__}` | Bundle root directory (parent of `envoy_env/`) |
-| `${__BUNDLE_ENV__}` | The `envoy_env/` directory |
+| `${__BUNDLE__}` | Bundle root directory (parent of `.envoy/`) |
+| `${__BUNDLE_ENV__}` | The `.envoy/` directory |
 | `${__BUNDLE_NAME__}` | Bundle directory name |
 | `${__FILE__}` | Full path of the current JSON file being loaded |
 
@@ -157,7 +157,7 @@ You may write paths with either forward or back slashes in your JSON files — t
 
 ## `global_env.json`
 
-If a bundle contains `envoy_env/global_env.json`, it is loaded automatically before any command-specific env files for every command sourced from that bundle. Use it for bundle-wide or studio-wide baseline variables:
+If a bundle contains `.envoy/global_env.json`, it is loaded automatically before any command-specific env files for every command sourced from that bundle. Use it for bundle-wide or studio-wide baseline variables:
 
 ```json
 {

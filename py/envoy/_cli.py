@@ -293,7 +293,7 @@ def runCommand(
             if commands_file:
                 wrapper_env_dir = commands_file.parent
             else:
-                print(f"Error: Cannot determine envoy_env directory", file=sys.stderr)
+                print(f"Error: Cannot determine .envoy directory", file=sys.stderr)
                 return 1
 
         # Collect global_env.json first if it exists
@@ -417,7 +417,7 @@ def traceCommand(
             if commands_file:
                 wrapper_env_dir = commands_file.parent
             else:
-                print("Error: Cannot determine envoy_env directory", file=sys.stderr)
+                print("Error: Cannot determine .envoy directory", file=sys.stderr)
                 return 1
         global_env = wrapper_env_dir / 'global_env.json'
         if global_env.exists():
@@ -908,7 +908,7 @@ def main(argv: list[str] | None = None) -> int:
                     return 1
             else:
                 print("Error: Could not find commands.json", file=sys.stderr)
-                print("Searched for envoy_env/commands.json in current directory and parents", file=sys.stderr)
+                print("Searched for .envoy/commands.json in current directory and parents", file=sys.stderr)
                 print("Or set ENVOY_BNDL_ROOTS environment variable for auto-discovery", file=sys.stderr)
                 return 1
     

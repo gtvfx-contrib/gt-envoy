@@ -1,5 +1,6 @@
 {
     "+=PATH": [
+        "${__BUNDLE__}/bin",
         "${SystemRoot}/System32"
     ]
 }

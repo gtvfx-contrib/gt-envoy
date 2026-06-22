@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ._exceptions import WrapperError
+from ._discovery import BUNDLE_ENV_DIR
 
 
 log = logging.getLogger(__name__)
@@ -121,6 +122,9 @@ _ENVOY_ENV_VARS: frozenset[str] = frozenset({
     'ENVOY_BNDL_ROOTS',
     'ENVOY_ALLOWLIST',
     'ENVOY_BUNDLES_CONFIG',
+    'ENVOY_STUDIO_ARTIFACTS',
+    'ENVOY_STUDIO_ASSETS',
+    'ENVOY_STUDIO_BNDLS',
 })
 
 
@@ -181,8 +185,8 @@ class EnvironmentManager:
         this method only performs the textual substitution.
         
         Special variables:
-            ${__BUNDLE__}      - Root directory of the bundle (parent of envoy_env/)
-            ${__BUNDLE_ENV__}  - The envoy_env/ directory itself
+            ${__BUNDLE__}      - Root directory of the bundle (parent of .envoy/)
+            ${__BUNDLE_ENV__}  - The .envoy/ directory itself
             ${__BUNDLE_NAME__} - Name of the bundle (directory name)
             ${__FILE__}        - Current environment JSON file being processed
         
@@ -359,8 +363,8 @@ class EnvironmentManager:
         """Calculate special wrapper-internal variables for an environment file.
         
         Special variables (available as ``${NAME}`` in env file values):
-            __BUNDLE__      - Root directory of the bundle (parent of envoy_env/)
-            __BUNDLE_ENV__  - The envoy_env/ directory itself
+            __BUNDLE__      - Root directory of the bundle (parent of .envoy/)
+            __BUNDLE_ENV__  - The .envoy/ directory itself
             __BUNDLE_NAME__ - Name of the bundle (directory name)
             __FILE__        - Path to the current environment JSON file
             
@@ -370,19 +374,19 @@ class EnvironmentManager:
         """
         env_file_abs = env_file_path.resolve()
         
-        # Try to find the envoy_env/ directory by walking up the path
+        # Try to find the .envoy/ directory by walking up the path
         current = env_file_abs.parent
         package_env_dir = None
         package_root = None
         
-        # Look for 'envoy_env' directory in the path
+        # Look for '.envoy' directory in the path
         for parent in [current] + list(current.parents):
-            if parent.name == 'envoy_env':
+            if parent.name == BUNDLE_ENV_DIR:
                 package_env_dir = parent
                 package_root = parent.parent
                 break
         
-        # If no envoy_env/ directory found, use file's parent as bundle root
+        # If no .envoy/ directory found, use file's parent as bundle root
         if package_root is None:
             package_root = env_file_abs.parent
             package_env_dir = package_root
@@ -472,8 +476,8 @@ class EnvironmentManager:
             current expansion behaviour).
 
         Special wrapper variables available in ``${...}`` expansion:
-            ``${__BUNDLE__}``      — bundle root directory (parent of ``envoy_env/``)
-            ``${__BUNDLE_ENV__}``  — the ``envoy_env/`` directory itself
+            ``${__BUNDLE__}``      — bundle root directory (parent of ``.envoy/``)
+            ``${__BUNDLE_ENV__}``  — the ``.envoy/`` directory itself
             ``${__BUNDLE_NAME__}`` — bundle directory name
             ``${__FILE__}``        — current environment JSON file path
         

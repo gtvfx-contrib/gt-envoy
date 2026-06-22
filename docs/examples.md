@@ -2,7 +2,7 @@
 
 ## Example 1 — Python Development Environment
 
-**`envoy_env/commands.json`:**
+**`.envoy/commands.json`:**
 ```json
 {
     "python_dev": {
@@ -12,7 +12,7 @@
 }
 ```
 
-**`envoy_env/python_env.json`:**
+**`.envoy/python_env.json`:**
 ```json
 {
     "+=PYTHONPATH": "${__BUNDLE__}/src",
@@ -31,7 +31,7 @@ en python_dev -m pytest tests/
 
 ## Example 2 — Unreal Engine
 
-**`envoy_env/commands.json`:**
+**`.envoy/commands.json`:**
 ```json
 {
     "unreal": {
@@ -40,7 +40,7 @@ en python_dev -m pytest tests/
 }
 ```
 
-**`envoy_env/unreal_env.json`:**
+**`.envoy/unreal_env.json`:**
 ```json
 {
     "+=PYTHONPATH": "${__BUNDLE__}/py",
@@ -94,7 +94,7 @@ en deploy --env production
 
 ## Example 4 — Shared Baseline via `global_env.json`
 
-**`gt:globals/envoy_env/global_env.json`:**
+**`gt:globals/.envoy/global_env.json`:**
 ```json
 {
     "PYTHONDONTWRITEBYTECODE": "1",
@@ -140,7 +140,7 @@ The remaining paths are still applied normally.
 
 ## Example 6 — Layered Dev / Prod Environments
 
-**`envoy_env/commands.json`:**
+**`.envoy/commands.json`:**
 ```json
 {
     "app_prod": {

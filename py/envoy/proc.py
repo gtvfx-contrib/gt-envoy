@@ -125,7 +125,7 @@ def _loadRegistry(
        ``ENVOY_BNDL_ROOTS`` entirely.
     2. ``ENVOY_BNDL_ROOTS`` environment variable (standard auto-discovery).
     3. ``commands_file`` — explicit path to a bare ``commands.json``.
-    4. Upward search from CWD for ``envoy_env/commands.json``.
+    4. Upward search from CWD for ``.envoy/commands.json``.
 
     Returns:
         ``(registry, bundles_or_None)``.  *bundles* is ``None`` when the
@@ -197,13 +197,13 @@ def _collectEnvFiles(
                 if env_file_name in bundle.env_files:
                     env_files.append(bundle.env_files[env_file_name])
     else:
-        # Legacy (single commands.json) mode: build paths from envoy_env dir.
+        # Legacy (single commands.json) mode: build paths from .envoy dir.
         env_dir = cmd.envoy_env_dir
         if env_dir is None:
             cf = findCommandsFile()
             if cf is None:
                 raise EnvironmentBuildError(
-                    f"Cannot determine envoy_env directory for '{command_name}'."
+                    f"Cannot determine .envoy directory for '{command_name}'."
                 )
             env_dir = cf.parent
 
