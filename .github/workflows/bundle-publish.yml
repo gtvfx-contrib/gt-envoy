@@ -98,7 +98,7 @@ jobs:
                              Join-Path $env:GITHUB_WORKSPACE $artifact.dest
                          } else { $env:GITHUB_WORKSPACE }
                   New-Item -ItemType Directory -Path $dst -Force | Out-Null
-                  robocopy $src $dst /E /NP /NJH /NJS | Out-Null
+                  robocopy $src $dst /E /NP /NJH /NJS
                   if ($LASTEXITCODE -ge 8) {
                       throw "robocopy failed fetching artifacts from '$src' (exit $LASTEXITCODE)"
                   }
