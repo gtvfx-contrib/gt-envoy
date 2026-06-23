@@ -54,6 +54,18 @@ on:
         type: string
         required: false
         default: '["self-hosted", "X64", "Windows", "synology"]'
+    secrets:
+      ARTIFACTS_NAS_USER:
+        description: >
+          Username for authenticating to the artifact NAS share when
+          ENVOY_STUDIO_ARTIFACTS points to a UNC path (e.g. \\server\share).
+          Only required when the runner service cannot authenticate via
+          Credential Manager alone.
+        required: false
+      ARTIFACTS_NAS_PASS:
+        description: >
+          Password for the ARTIFACTS_NAS_USER account.
+        required: false
 
 permissions:
   contents: write
@@ -68,6 +80,26 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Mount artifact share
+        shell: pwsh
+        env:
+          NAS_USER: ${{ secrets.ARTIFACTS_NAS_USER }}
+          NAS_PASS: ${{ secrets.ARTIFACTS_NAS_PASS }}
+        run: |
+          $root = $env:ENVOY_STUDIO_ARTIFACTS
+          if ($root -and $root -match '^\\\\([^\\]+)') {
+              $server = $Matches[1]
+              if ($env:NAS_USER) {
+                  Write-Host "Mounting \\$server with provided credentials..."
+                  net use "\\$server" /user:"$env:NAS_USER" "$env:NAS_PASS" /persistent:no
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "net use failed mounting \\$server (exit $LASTEXITCODE)"
+                  }
+              } else {
+                  Write-Host "ARTIFACTS_NAS_USER not set — relying on Credential Manager for \\$server"
+              }
+          }
 
       - name: Fetch bundle assets
         shell: pwsh
