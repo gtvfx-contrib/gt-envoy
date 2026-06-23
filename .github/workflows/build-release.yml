@@ -27,8 +27,11 @@ jobs:
       - name: Clear Python environment conflicts
         shell: pwsh
         run: |
-          Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
-          Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+          # Override PYTHONHOME for all subsequent steps to point at the
+          # setup-python installation, replacing any system-level value.
+          "PYTHONHOME=$env:pythonLocation" >> $env:GITHUB_ENV
+          # Clear PYTHONPATH so system-level paths don't contaminate pip.
+          "PYTHONPATH=" >> $env:GITHUB_ENV
 
       - name: Install build dependencies
         run: |
