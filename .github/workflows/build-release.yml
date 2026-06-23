@@ -24,6 +24,12 @@ jobs:
         with:
           python-version: '3.14'
 
+      - name: Clear Python environment conflicts
+        shell: pwsh
+        run: |
+          Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue
+          Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue
+
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
