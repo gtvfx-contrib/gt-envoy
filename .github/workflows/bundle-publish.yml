@@ -131,10 +131,15 @@ jobs:
                          } else { $env:GITHUB_WORKSPACE }
                   New-Item -ItemType Directory -Path $dst -Force | Out-Null
                   robocopy $src $dst /E /NP /NJH /NJS
-                  if ($LASTEXITCODE -ge 8) {
-                      throw "robocopy failed fetching artifacts from '$src' (exit $LASTEXITCODE)"
+                  $rc = $LASTEXITCODE
+                  if ($rc -ge 8) {
+                      throw "robocopy failed fetching artifacts from '$src' (exit $rc)"
                   }
-                  Write-Host "Fetched artifacts: $src -> $dst"
+                  # robocopy exits 0-7 for success; clear $LASTEXITCODE so
+                  # PowerShell does not propagate the non-zero robocopy code
+                  # as the step's exit code.
+                  $global:LASTEXITCODE = 0
+                  Write-Host "Fetched artifacts: $src -> $dst (robocopy exit $rc)"
               }
           }
 
