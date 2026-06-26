@@ -31,6 +31,71 @@ from ._config_registry import (
 log = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Argument pre-processing
+# ---------------------------------------------------------------------------
+
+def _normalizeArgv(argv: list[str]) -> list[str]:
+    """Expand ``-x=value`` and ``--key=value`` tokens to ``[flag, value]``.
+
+    :mod:`argparse` natively handles ``--long=value`` but not ``-short=value``.
+    This pre-pass normalises **all** option tokens so users can write either
+    form for any envoy flag:
+
+    - ``-e=python``, ``--env=python``
+    - ``-bc=studio``, ``--bundles-config=studio``
+    - ``-sc=bundles_config=/path``
+
+    Normalisation stops as soon as the first non-option token (the command
+    positional) is encountered, so child-process arguments that happen to
+    contain ``=`` are passed through verbatim.
+
+    Args:
+        argv: Raw argument list (typically ``sys.argv[1:]``).
+
+    Returns:
+        Normalised argument list with ``flag=value`` forms expanded in-place.
+
+    """
+    result = []
+    command_seen = False
+    for token in argv:
+        if command_seen:
+            result.append(token)
+            continue
+        if token.startswith('-') and '=' in token:
+            flag, _, value = token.partition('=')
+            result.extend([flag, value])
+        else:
+            if not token.startswith('-'):
+                command_seen = True
+            result.append(token)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
+
+def _isRawPath(spec: str) -> bool:
+    """Return ``True`` when *spec* is a direct executable path.
+
+    A spec is a raw path when it is absolute (e.g. ``C:\\...``,
+    ``/usr/bin/...``) or contains an explicit directory separator
+    (``./code``, ``../bin/tool``).  Plain names like ``'maya'`` or
+    ``'python'`` are envoy command names and return ``False``.
+
+    Args:
+        spec: The command specifier to test.
+
+    Returns:
+        ``True`` if *spec* should be treated as a file-system path.
+
+    """
+    p = Path(spec)
+    return p.is_absolute() or (os.sep in spec) or ('/' in spec)
+
+
 def setupLogging(verbose: bool = False) -> None:
     """Setup logging configuration.
     
@@ -218,31 +283,46 @@ def runCommand(
     env_allowlist: set[str] | None = None,
     env_override: str | None = None,
 ) -> int:
-    """Run a command from the registry.
+    """Run a command from the registry, or execute a raw executable path.
+
+    When *command_name* is an absolute path or contains a directory separator
+    it is treated as a raw executable (exe, bat, cmd, script, etc.) and the
+    registry lookup is skipped.  In that case:
+
+    - If no *env_override* is given, the child inherits the current process
+      environment (``inherit_env`` is forced to ``True``).
+    - If *env_override* names a registered command, that command's environment
+      files are sourced and the raw executable runs inside them.
 
     Args:
-        registry: Command registry
-        command_name: Name of command to run
-        args: Arguments to pass to the command
-        bundles: List of discovered bundles (for multi-bundle env file search)
-        verbose: Enable verbose output
-        inherit_env: If True, child process inherits the full system environment
-        env_allowlist: System variable names to inherit in closed mode
-        env_override: Optional name of another envoy command whose environment
-            files should be used in place of *command_name*'s own environment.
-            The target command's executable/alias is still used; only the
+        registry: Command registry.
+        command_name: Registered command name *or* a raw executable path
+            (absolute or containing a path separator).
+        args: Arguments to pass to the command.
+        bundles: List of discovered bundles (for multi-bundle env file search).
+        verbose: Enable verbose output.
+        inherit_env: If ``True``, child process inherits the full system
+            environment.
+        env_allowlist: System variable names to inherit in closed mode.
+        env_override: Optional name of a registered envoy command whose
+            environment files should be used in place of *command_name*'s own
+            environment.  The target executable / alias is still used; only the
             environment resolution is replaced.
 
     Returns:
-        Exit code from the executed command
+        Exit code from the executed command.
 
     """
-    cmd = registry.get(command_name)
+    is_raw = _isRawPath(command_name)
 
-    if not cmd:
-        print(f"Error: Command '{command_name}' not found", file=sys.stderr)
-        print(f"Run 'envoy --list' to see available commands", file=sys.stderr)
-        return 1
+    # For a registered command name, validate it exists in the registry.
+    cmd = None
+    if not is_raw:
+        cmd = registry.get(command_name)
+        if not cmd:
+            print(f"Error: Command '{command_name}' not found", file=sys.stderr)
+            print(f"Run 'envoy --list' to see available commands", file=sys.stderr)
+            return 1
 
     # When an env override is requested, validate it exists and use its
     # environment resolution instead of the target command's own env files.
@@ -258,10 +338,21 @@ def runCommand(
         env_source_name = env_override
         log.debug(f"Using environment from '{env_override}' for command '{command_name}'")
 
-    # Collect environment files
+    # Collect environment files.
     env_files = []
 
-    if bundles:
+    if is_raw and env_override is None:
+        # Local override — NOT a change to the function's default parameter.
+        #
+        # When a raw executable is run with no -e / env_override there are no
+        # envoy env files to configure.  Leaving inherit_env=False would give
+        # the child envoy's minimal "seed" environment (nearly empty — no PATH,
+        # TEMP, etc.), which would silently break most real tools.
+        # Forcing True here makes `envoy "C:\tools\foo.exe"` behave exactly
+        # like running the tool directly from a shell.
+        inherit_env = True
+        log.debug(f"Raw executable '{command_name}' with no env override; inheriting system env")
+    elif bundles:
         # Multi-bundle mode: use pre-indexed env_files dict — no filesystem calls at run time
         for bundle in bundles:
             if 'global_env.json' in bundle.env_files:
@@ -283,9 +374,10 @@ def runCommand(
         # Legacy mode: use the env-source command's envoy_env_dir for env resolution
         # but the target command's dir as fallback.
         env_source_cmd = registry.get(env_source_name)
-        env_dir_cmd = env_source_cmd if env_source_cmd is not None else cmd
+        env_dir_fallback = cmd if cmd is not None else env_source_cmd
+        env_dir_cmd = env_source_cmd if env_source_cmd is not None else env_dir_fallback
 
-        if env_dir_cmd.envoy_env_dir:
+        if env_dir_cmd is not None and env_dir_cmd.envoy_env_dir:
             wrapper_env_dir = env_dir_cmd.envoy_env_dir
         else:
             # Fall back to finding commands.json
@@ -322,29 +414,36 @@ def runCommand(
                 return 1
 
         env_files.extend(cmd_env_files)
-    
-    # Expand ${__BUNDLE__} and other special vars in alias parts.
-    expanded = cmd.expandAlias()
-    # Combine base args with user args
-    full_args = expanded[1:] + args
-    
+
+    # Determine executable and base args.
+    if is_raw:
+        # Use the raw path directly; no alias expansion.
+        executable = command_name
+        full_args = list(args)
+    else:
+        # Expand ${__BUNDLE__} and other special vars in alias parts.
+        expanded = cmd.expandAlias()
+        full_args = expanded[1:] + args
+        executable = expanded[0]
+
     # Create wrapper config
     config = WrapperConfig(
-        executable=expanded[0],
+        executable=executable,
         args=full_args,
         env_files=[Path(f) for f in env_files],
         inherit_env=inherit_env,
         env_allowlist=env_allowlist,
         capture_output=False,
         stream_output=False,
-        log_execution=verbose
+        log_execution=verbose,
+        raise_on_error=False,
     )
-    
+
     try:
         wrapper = ApplicationWrapper(config)
         result = wrapper.run()
         return result.return_code
-        
+
     except WrapperError as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
@@ -682,13 +781,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     
     parser.add_argument(
-        '--commands-file', '-c',
+        '--commands-file', '-cf',
         type=Path,
         help='Path to commands.json file (auto-detected if not specified)'
     )
     
     parser.add_argument(
-        '--bundles-config', '-b',
+        '--bundles-config', '-bc',
         type=Path,
         help='Path to bundles config file (auto-discovers from ENVOY_BNDL_ROOTS if not specified)'
     )
@@ -777,7 +876,12 @@ def main(argv: list[str] | None = None) -> int:
     # including flags like -c or --version that belong to the child process.
     if argv is None:
         argv = sys.argv[1:]
-    
+
+    # Expand flag=value tokens (both -x=val and --key=val forms) for any
+    # envoy option that appears before the command positional.  Normalisation
+    # stops at the command so child-process args are never altered.
+    argv = _normalizeArgv(argv)
+
     args = parser.parse_args(argv)
 
     # --list-configs / --set-config / --get-config: config-only operations, exit early.
@@ -906,16 +1010,20 @@ def main(argv: list[str] | None = None) -> int:
                 except WrapperError as e:
                     print(f"Error loading commands: {e}", file=sys.stderr)
                     return 1
-            else:
+            elif not (args.command and _isRawPath(args.command) and args.env is None):
+                # A raw executable with no env override can run without any registry.
+                # For all other cases, a commands.json is required.
                 print("Error: Could not find commands.json", file=sys.stderr)
                 print("Searched for .envoy/commands.json in current directory and parents", file=sys.stderr)
                 print("Or set ENVOY_BNDL_ROOTS environment variable for auto-discovery", file=sys.stderr)
                 return 1
-    
-    # Check if we have any commands
+
+    # Check if we have any commands loaded — skip this gate when the user is
+    # running a raw executable path that needs no envoy command context.
     if len(registry) == 0:
-        print("Error: No commands loaded", file=sys.stderr)
-        return 1
+        if not (args.command and _isRawPath(args.command) and args.env is None):
+            print("Error: No commands loaded", file=sys.stderr)
+            return 1
     
     # Handle list commands
     if args.list:

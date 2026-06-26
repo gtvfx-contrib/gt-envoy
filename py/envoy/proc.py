@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from ._commands import CommandDefinition, CommandRegistry, findCommandsFile
@@ -111,6 +112,41 @@ def _rawPopen(
             full_cmd = ['cmd', '/c'] + full_cmd
 
     return subprocess.Popen(full_cmd, env=env, **kwargs)
+
+
+def _resolveEnvoyExe() -> list[str]:
+    """Return the command prefix used to invoke the envoy CLI.
+
+    Checks in order: pre-built standalone executable →  shell launcher
+    (``envoy.bat``) → Python module invocation.  The result can be prepended
+    to any envoy argument list to produce a runnable command.
+
+    The probe path is relative to this source file, which lives at
+    ``py/envoy/proc.py`` inside the repository.  Two levels up from the
+    ``py/envoy/`` directory is the repository root, where ``dist/`` and
+    ``bin/`` reside.
+
+    Returns:
+        List of strings forming the invocation prefix, for example
+        ``['C:\\...\\dist\\envoy.exe']``,
+        ``['cmd', '/c', 'C:\\...\\bin\\envoy.bat']``, or
+        ``[sys.executable, '-m', 'envoy']``.
+
+    """
+    _pkg_dir = Path(__file__).parent   # py/envoy/
+    _root = _pkg_dir.parent.parent     # repo root
+
+    _exe = _root / 'dist' / 'envoy.exe'
+    if _exe.exists():
+        return [str(_exe)]
+
+    _bat = _root / 'bin' / 'envoy.bat'
+    if _bat.exists():
+        if os.name == 'nt':
+            return ['cmd', '/c', str(_bat)]
+        return [str(_bat)]
+
+    return [sys.executable, '-m', 'envoy']
 
 
 def _loadRegistry(
@@ -588,38 +624,37 @@ class Environment:
 
 def call(
     cmd: list[str],
-    *,
-    inherit_env: bool = False,
-    allowlist: list[str] | None = None,
-    bundle_roots: list[str] | None = None,
-    commands_file: Path | None = None,
-    env_override: str | None = None,
     **kwargs,
 ) -> int:
-    """Execute an envoy command and return its exit code.
+    """Execute a command through the envoy CLI and return its exit code.
 
-    Each call performs full bundle discovery and environment preparation.
-    When launching the **same command** multiple times, prefer
-    :class:`Environment` to amortise the startup cost.
+    *cmd* is passed verbatim to the envoy CLI as its argument list, so any
+    envoy flag may be included alongside the command name::
+
+        # Simple command execution
+        proc.call(['maya', 'myfile.ma'])
+
+        # Pass envoy flags directly
+        proc.call(['-b', 'studio.json', '-e', 'python', 'script.py'])
+
+        # Run an arbitrary executable inside a managed environment
+        proc.call(['-e', 'python', r'C:\\tools\\mytool.exe'])
+
+    The envoy CLI is resolved automatically: a pre-built ``envoy.exe`` is
+    preferred, the ``envoy.bat`` launcher is used as a fallback, and finally
+    ``python -m envoy`` is used when neither is found.
 
     Args:
-        cmd: ``[command_name, arg1, arg2, ...]`` where *command_name* is the
-            envoy command key (e.g. ``'maya'``) and the remaining items are
-            forwarded to the subprocess.
-        inherit_env: Pass ``True`` to inherit the full system environment.
-        allowlist: Additional system variable names to include in closed mode.
-        bundle_roots: Override bundle discovery roots.
-        commands_file: Explicit ``commands.json`` path.
-        env_override: Name of a different envoy command whose environment files
-            should be used in place of *cmd[0]*'s own environment.  The
-            executable from *cmd[0]* (or a raw path) is still what runs.
-        **kwargs: Forwarded to :class:`subprocess.Popen`.
+        cmd: Full argument list forwarded to the envoy CLI.
+        **kwargs: Forwarded to :func:`subprocess.call`.  ``stdout`` and
+            ``stderr`` may not be :data:`PIPE` — use :func:`spawn` or
+            :func:`checkOutput` for those cases.
 
     Returns:
         The process exit code.
 
     Raises:
-        ValueError: If ``stdout`` or ``stderr`` is :data:`PIPE`.
+        ValueError: If *cmd* is empty or ``stdout``/``stderr`` is :data:`PIPE`.
 
     See also:
         :func:`subprocess.call`
@@ -633,41 +668,27 @@ def call(
             "Use 'spawn' for async capture or 'checkOutput' for "
             "synchronous capture."
         )
-    return Environment(
-        cmd[0],
-        inherit_env=inherit_env,
-        allowlist=allowlist,
-        bundle_roots=bundle_roots,
-        commands_file=commands_file,
-        env_override=env_override,
-    ).call(cmd[1:], **kwargs)
+    return subprocess.call(_resolveEnvoyExe() + list(cmd), **kwargs)
 
 
 def spawn(
     cmd: list[str],
-    *,
-    inherit_env: bool = False,
-    allowlist: list[str] | None = None,
-    bundle_roots: list[str] | None = None,
-    commands_file: Path | None = None,
-    env_override: str | None = None,
     **kwargs,
 ) -> subprocess.Popen:
-    """Execute an envoy command and return the running process immediately.
+    """Execute a command through the envoy CLI and return immediately.
+
+    *cmd* is passed verbatim to the envoy CLI as its argument list — any
+    envoy flag may appear in the list.  See :func:`call` for examples.
 
     Args:
-        cmd: ``[command_name, arg1, arg2, ...]``.
-        inherit_env: Pass ``True`` to inherit the full system environment.
-        allowlist: Additional system variable names in closed mode.
-        bundle_roots: Override bundle discovery roots.
-        commands_file: Explicit ``commands.json`` path.
-        env_override: Name of a different envoy command whose environment files
-            should be used in place of *cmd[0]*'s own environment.  The
-            executable from *cmd[0]* (or a raw path) is still what runs.
+        cmd: Full argument list forwarded to the envoy CLI.
         **kwargs: Forwarded to :class:`subprocess.Popen`.
 
     Returns:
         The running :class:`subprocess.Popen` instance.
+
+    Raises:
+        ValueError: If *cmd* is empty.
 
     See also:
         :class:`subprocess.Popen`
@@ -675,37 +696,21 @@ def spawn(
     """
     if not cmd:
         raise ValueError("'cmd' must be a non-empty list")
-    return Environment(
-        cmd[0],
-        inherit_env=inherit_env,
-        allowlist=allowlist,
-        bundle_roots=bundle_roots,
-        commands_file=commands_file,
-        env_override=env_override,
-    ).spawn(cmd[1:], **kwargs)
+    return subprocess.Popen(_resolveEnvoyExe() + list(cmd), **kwargs)
 
 
 def checkCall(
     cmd: list[str],
-    *,
-    inherit_env: bool = False,
-    allowlist: list[str] | None = None,
-    bundle_roots: list[str] | None = None,
-    commands_file: Path | None = None,
-    env_override: str | None = None,
     **kwargs,
 ) -> int:
-    """Execute an envoy command and raise on non-zero exit.
+    """Execute a command through the envoy CLI and raise on non-zero exit.
+
+    *cmd* is passed verbatim to the envoy CLI as its argument list — any
+    envoy flag may appear in the list.  See :func:`call` for examples.
 
     Args:
-        cmd: ``[command_name, arg1, arg2, ...]``.
-        inherit_env: Pass ``True`` to inherit the full system environment.
-        allowlist: Additional system variable names in closed mode.
-        bundle_roots: Override bundle discovery roots.
-        commands_file: Explicit ``commands.json`` path.
-        env_override: Name of a different envoy command whose environment files
-            should be used in place of *cmd[0]*'s own environment.
-        **kwargs: Forwarded to :class:`subprocess.Popen`.
+        cmd: Full argument list forwarded to the envoy CLI.
+        **kwargs: Forwarded to :func:`subprocess.call`.
 
     Returns:
         The exit code (always ``0``).
@@ -714,18 +719,10 @@ def checkCall(
         CalledProcessError: If the process exits with a non-zero status.
 
     See also:
-        :func:`subprocess.checkCall`
+        :func:`subprocess.check_call`
 
     """
-    rc = call(
-        cmd,
-        inherit_env=inherit_env,
-        allowlist=allowlist,
-        bundle_roots=bundle_roots,
-        commands_file=commands_file,
-        env_override=env_override,
-        **kwargs,
-    )
+    rc = call(cmd, **kwargs)
     if rc != 0:
         raise CalledProcessError(rc, cmd[0])
     return rc
@@ -733,51 +730,54 @@ def checkCall(
 
 def checkOutput(
     cmd: list[str],
-    *,
-    inherit_env: bool = False,
-    allowlist: list[str] | None = None,
-    bundle_roots: list[str] | None = None,
-    commands_file: Path | None = None,
-    env_override: str | None = None,
     **kwargs,
 ) -> bytes:
-    """Execute an envoy command and return its stdout as bytes.
+    """Execute a command through the envoy CLI and capture its stdout.
 
-    ``stdout`` is automatically captured (passing it in *kwargs* raises
-    :class:`ValueError`).  Pass ``stderr=STDOUT`` to include stderr in the
-    returned bytes.  Provide ``input=<bytes>`` as a keyword argument to
-    send data to stdin.
+    *cmd* is passed verbatim to the envoy CLI as its argument list — any
+    envoy flag may appear in the list.  See :func:`call` for examples.
+
+    ``stdout`` is captured automatically; passing it in *kwargs* raises
+    :class:`ValueError`.  Pass ``stderr=STDOUT`` to include stderr in the
+    returned bytes, or ``input=<bytes>`` to pipe data to stdin.
 
     Args:
-        cmd: ``[command_name, arg1, arg2, ...]``.
-        inherit_env: Pass ``True`` to inherit the full system environment.
-        allowlist: Additional system variable names in closed mode.
-        bundle_roots: Override bundle discovery roots.
-        commands_file: Explicit ``commands.json`` path.
-        env_override: Name of a different envoy command whose environment files
-            should be used in place of *cmd[0]*'s own environment.
-        **kwargs: Forwarded to :class:`subprocess.Popen`.  ``input`` and
-            ``stderr`` are the most commonly useful keys here.
+        cmd: Full argument list forwarded to the envoy CLI.
+        **kwargs: Forwarded to :class:`subprocess.Popen`.  ``input`` may be
+            provided as bytes/str to send to the process via stdin.
+            ``stdout`` may not be set (it is owned by this function).
 
     Returns:
         Captured stdout bytes.
 
     Raises:
         CalledProcessError: If the process exits with a non-zero status.
-        ValueError: If ``stdout`` is in *kwargs* or both ``input`` and
-            ``stdin`` are provided.
+        ValueError: If *cmd* is empty, ``stdout`` is in *kwargs*, or both
+            ``input`` and ``stdin`` are provided.
 
     See also:
-        :func:`subprocess.checkOutput`
+        :func:`subprocess.check_output`
 
     """
     if not cmd:
         raise ValueError("'cmd' must be a non-empty list")
-    return Environment(
-        cmd[0],
-        inherit_env=inherit_env,
-        allowlist=allowlist,
-        bundle_roots=bundle_roots,
-        commands_file=commands_file,
-        env_override=env_override,
-    ).checkOutput(cmd[1:], **kwargs)
+    input_ = kwargs.pop('input', None)
+    if 'stdout' in kwargs:
+        raise ValueError(
+            "'stdout' argument not allowed in checkOutput; "
+            "it will be overridden."
+        )
+    if input_ is not None and 'stdin' in kwargs:
+        raise ValueError("'input' and 'stdin' cannot both be specified")
+    kwargs['stdout'] = PIPE
+    if input_ is not None:
+        kwargs['stdin'] = PIPE
+    proc_obj = subprocess.Popen(_resolveEnvoyExe() + list(cmd), **kwargs)
+    stdout, _ = proc_obj.communicate(input_)
+    if proc_obj.returncode != 0:
+        raise CalledProcessError(
+            proc_obj.returncode,
+            cmd[0],
+            output=stdout,
+        )
+    return stdout

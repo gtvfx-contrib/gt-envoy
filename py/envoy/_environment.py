@@ -119,8 +119,10 @@ _CORE_ENV_VARS: frozenset[str] = frozenset({
 # processes launched by a command (e.g. a build script that calls envoy again)
 # inherit the same discovery and configuration context.
 _ENVOY_ENV_VARS: frozenset[str] = frozenset({
-    'ENVOY_BNDL_ROOTS',
     'ENVOY_ALLOWLIST',
+    'ENVOY_BNDL_PROD',
+    'ENVOY_BNDL_ROOTS',
+    'ENVOY_CONFIG_PROD',
     'ENVOY_BUNDLES_CONFIG',
     'ENVOY_STUDIO_ARTIFACTS',
     'ENVOY_STUDIO_ASSETS',

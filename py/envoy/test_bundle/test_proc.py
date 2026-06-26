@@ -430,7 +430,12 @@ class TestEnvironmentSpawn:
 # ---------------------------------------------------------------------------
 
 class TestProcFreeFunctions:
-    """Tests for the module-level call / spawn / checkCall / checkOutput."""
+    """Tests for the module-level call / spawn / checkCall / checkOutput.
+
+    Free functions now route every invocation through the envoy CLI.  The
+    *cmd* list is passed verbatim as envoy's argument list, so envoy flags
+    such as ``-c`` (commands file) can be included directly.
+    """
 
     def test_call_empty_cmd_raises(self):
         with pytest.raises(ValueError, match="non-empty"):
@@ -438,18 +443,18 @@ class TestProcFreeFunctions:
 
     def test_call_success(self, tmp_path):
         cf = _pythonCommandsFile(tmp_path)
-        rc = proc.call(["py", "-c", "pass"], commands_file=cf)
+        rc = proc.call(["-cf", str(cf), "py", "-c", "pass"])
         assert rc == 0
 
     def test_call_nonzero(self, tmp_path):
         cf = _pythonCommandsFile(tmp_path)
-        rc = proc.call(["py", "-c", "raise SystemExit(7)"], commands_file=cf)
+        rc = proc.call(["-cf", str(cf), "py", "-c", "raise SystemExit(7)"])
         assert rc == 7
 
     def test_call_pipe_raises(self, tmp_path):
         cf = _pythonCommandsFile(tmp_path)
         with pytest.raises(ValueError, match="PIPE"):
-            proc.call(["py", "-c", "pass"], commands_file=cf, stdout=PIPE)
+            proc.call(["-cf", str(cf), "py", "-c", "pass"], stdout=PIPE)
 
     def test_spawn_empty_cmd_raises(self):
         with pytest.raises(ValueError, match="non-empty"):
@@ -458,19 +463,19 @@ class TestProcFreeFunctions:
     def test_spawn_returns_popen(self, tmp_path):
         import subprocess
         cf = _pythonCommandsFile(tmp_path)
-        p = proc.spawn(["py", "-c", "pass"], commands_file=cf)
+        p = proc.spawn(["-cf", str(cf), "py", "-c", "pass"])
         assert isinstance(p, subprocess.Popen)
         p.wait()
 
     def test_check_call_success(self, tmp_path):
         cf = _pythonCommandsFile(tmp_path)
-        rc = proc.checkCall(["py", "-c", "pass"], commands_file=cf)
+        rc = proc.checkCall(["-cf", str(cf), "py", "-c", "pass"])
         assert rc == 0
 
     def test_check_call_failure_raises(self, tmp_path):
         cf = _pythonCommandsFile(tmp_path)
         with pytest.raises(CalledProcessError):
-            proc.checkCall(["py", "-c", "raise SystemExit(2)"], commands_file=cf)
+            proc.checkCall(["-cf", str(cf), "py", "-c", "raise SystemExit(2)"])
 
     def test_check_output_empty_cmd_raises(self):
         with pytest.raises(ValueError, match="non-empty"):
@@ -478,18 +483,33 @@ class TestProcFreeFunctions:
 
     def test_check_output_captures_stdout(self, tmp_path):
         cf = _pythonCommandsFile(tmp_path)
-        out = proc.checkOutput(["py", "-c", "print('envoy_output')"], commands_file=cf)
+        out = proc.checkOutput(["-cf", str(cf), "py", "-c", "print('envoy_output')"])
         assert b"envoy_output" in out
 
     def test_check_output_failure_raises(self, tmp_path):
         cf = _pythonCommandsFile(tmp_path)
         with pytest.raises(CalledProcessError):
-            proc.checkOutput(["py", "-c", "raise SystemExit(1)"], commands_file=cf)
+            proc.checkOutput(["-cf", str(cf), "py", "-c", "raise SystemExit(1)"])
 
     def test_check_output_stdout_kwarg_raises(self, tmp_path):
         cf = _pythonCommandsFile(tmp_path)
         with pytest.raises(ValueError, match="stdout"):
-            proc.checkOutput(["py", "-c", "pass"], commands_file=cf, stdout=PIPE)
+            proc.checkOutput(["-cf", str(cf), "py", "-c", "pass"], stdout=PIPE)
+
+    def test_resolve_envoy_exe_returns_list(self):
+        """_resolveEnvoyExe should return a non-empty list of strings."""
+        from envoy.proc import _resolveEnvoyExe
+        prefix = _resolveEnvoyExe()
+        assert isinstance(prefix, list)
+        assert len(prefix) >= 1
+        assert all(isinstance(s, str) for s in prefix)
+
+    def test_call_with_envoy_flags_in_cmd(self, tmp_path):
+        """Envoy CLI flags embedded in cmd (e.g. -cf path) are forwarded."""
+        cf = _pythonCommandsFile(tmp_path)
+        # Use the -cf= equals form to exercise normalisation end-to-end.
+        rc = proc.call([f"-cf={cf}", "py", "-c", "pass"])
+        assert rc == 0
 
 
 # ---------------------------------------------------------------------------
