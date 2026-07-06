@@ -1,24 +1,21 @@
 """Quick verification of all features."""
-import sys
-import os
+
 import json
+import os
+import sys
 from pathlib import Path
 
 # Add the module to path for testing
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
-from envoy import WrapperConfig, ApplicationWrapper
+from envoy import ApplicationWrapper, WrapperConfig
 
 # Create test file
 test_env = {
-    "TEST_LIST": [
-        "C:/path1",
-        "C:/path2",
-        "C:/path3"
-    ],
+    "TEST_LIST": ["C:/path1", "C:/path2", "C:/path3"],
     "TEST_STRING": "C:/single/path",
     "+=TEST_APPEND": ["D:/added1", "D:/added2"],
-    "^=TEST_PREPEND": "D:/priority"
+    "^=TEST_PREPEND": "D:/priority",
 }
 
 temp_dir = Path(__file__).parent / "temp"
@@ -34,17 +31,20 @@ os.environ['TEST_PREPEND'] = 'D:/original_prepend'
 
 config = WrapperConfig(
     executable='python',
-    args=['-c', '''
+    args=[
+        '-c',
+        '''
 import os, sys
 sep = ";" if sys.platform == "win32" else ":"
 print("TEST_LIST:", os.environ.get("TEST_LIST"))
 print("TEST_STRING:", os.environ.get("TEST_STRING"))
 print("TEST_APPEND:", os.environ.get("TEST_APPEND"))
 print("TEST_PREPEND:", os.environ.get("TEST_PREPEND"))
-'''],
+''',
+    ],
     env_files=test_file,
     capture_output=True,
-    stream_output=False
+    stream_output=False,
 )
 
 wrapper = ApplicationWrapper(config)

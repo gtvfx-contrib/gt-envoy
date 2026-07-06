@@ -1,99 +1,99 @@
 """Process execution handling for ApplicationWrapper."""
 
-import os
-import sys
-import subprocess
-import shutil
 import logging
+import os
+import shutil
+import subprocess
+import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from ._exceptions import WrapperError
-
 
 log = logging.getLogger(__name__)
 
 
 class ProcessExecutor:
     """Handles subprocess execution, output streaming, and process control.
-    
+
     Manages:
     - Executable resolution
     - Command preparation
     - Process spawning and monitoring
     - Output streaming (stdout/stderr)
     - Process termination (graceful/forceful)
-    
+
     """
-    
+
     def __init__(
         self,
         stream_output: bool = True,
-        onOutput: Callable[[str], None] | None = None,
-        onError: Callable[[str], None] | None = None
+        # onOutput/onError: public callback API, intentional camelCase
+        onOutput: Callable[[str], None] | None = None,  # noqa: N803
+        onError: Callable[[str], None] | None = None,  # noqa: N803
     ):
         """Initialize the process executor.
-        
+
         Args:
             stream_output: Whether to stream output to stdout/stderr
             onOutput: Callback for stdout lines
             onError: Callback for stderr lines
-            
+
         """
         self.stream_output = stream_output
         self.onOutput = onOutput
         self.onError = onError
-    
+
     @staticmethod
     def resolveExecutable(executable: str | Path, search_path: str | None = None) -> str:
         """Resolve executable path, checking PATH if necessary.
-        
+
         Args:
             executable: Executable name or path
             search_path: Value of PATH to search when resolving bare executable
                 names.  Should be the subprocess PATH built from env files, not
                 the envoy process PATH.  Falls back to the system PATH if None.
-            
+
         Returns:
             Absolute path to executable
-            
+
         Raises:
             WrapperError: If executable cannot be found
-            
+
         """
         exe = str(executable)
-        
+
         # If it's an absolute path or relative path with directory separators
         if os.path.isabs(exe) or os.path.dirname(exe):
             if not os.path.exists(exe):
                 raise WrapperError(f"Executable not found: {exe}")
             return os.path.abspath(exe)
-        
+
         # Search in the subprocess PATH (or system PATH if not provided)
         found = shutil.which(exe, path=search_path)
         if found:
             return found
-        
+
         raise WrapperError(f"Executable '{exe}' not found in PATH")
-    
+
     def prepareCommand(
-        self, 
-        executable: str | Path, 
+        self,
+        executable: str | Path,
         args: list[str],
         search_path: str | None = None,
     ) -> list[str]:
         """Prepare the full command to execute.
-        
+
         Args:
             executable: Executable name or path
             args: Command-line arguments
             search_path: PATH string to use for bare-name resolution.  Pass the
                 subprocess env PATH so the correct executable is found even in
                 closed-environment mode.
-            
+
         Returns:
             List of command components
-            
+
         """
         exe = self.resolveExecutable(executable, search_path=search_path)
         cmd = [exe] + list(args)
@@ -103,20 +103,20 @@ class ProcessExecutor:
         if os.name == 'nt' and Path(exe).suffix.lower() in ('.bat', '.cmd'):
             cmd = ['cmd', '/c'] + cmd
         return cmd
-    
+
     def streamProcessOutput(self, process: subprocess.Popen) -> tuple[str, str]:
         """Stream output from process in real-time.
-        
+
         Args:
             process: Running subprocess
-            
+
         Returns:
             Tuple of (stdout, stderr) as strings
-            
+
         """
         stdout_lines = []
         stderr_lines = []
-        
+
         # Read stdout
         if process.stdout:
             for line in iter(process.stdout.readline, b''):
@@ -124,16 +124,16 @@ class ProcessExecutor:
                     break
                 decoded = line.decode('utf-8', errors='replace').rstrip()
                 stdout_lines.append(decoded)
-                
+
                 if self.stream_output:
                     print(decoded, file=sys.stdout, flush=True)
-                
+
                 if self.onOutput:
                     try:
                         self.onOutput(decoded)
                     except Exception as e:
                         log.warning(f"onOutput callback error: {e}")
-        
+
         # Read stderr
         if process.stderr:
             for line in iter(process.stderr.readline, b''):
@@ -141,31 +141,31 @@ class ProcessExecutor:
                     break
                 decoded = line.decode('utf-8', errors='replace').rstrip()
                 stderr_lines.append(decoded)
-                
+
                 if self.stream_output:
                     print(decoded, file=sys.stderr, flush=True)
-                
+
                 if self.onError:
                     try:
                         self.onError(decoded)
                     except Exception as e:
                         log.warning(f"onError callback error: {e}")
-        
+
         return '\n'.join(stdout_lines), '\n'.join(stderr_lines)
-    
+
     @staticmethod
     def terminateProcess(process: subprocess.Popen | None) -> None:
         """Terminate a running process gracefully.
-        
+
         Attempts graceful termination first, then forces kill if needed.
-        
+
         Args:
             process: Process to terminate (None is safe to pass)
-            
+
         """
         if not process:
             return
-        
+
         try:
             # Try graceful termination first
             process.terminate()

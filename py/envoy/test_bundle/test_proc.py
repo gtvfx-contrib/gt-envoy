@@ -7,10 +7,10 @@ Covers:
 - Free functions: call, spawn, checkCall, checkOutput
 - Error paths: CommandNotFoundError, CalledProcessError, ValueError
 """
+
 import json
 import os
 import sys
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -19,22 +19,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
 import envoy.proc as proc
-from envoy.proc import (
-    Environment,
-    _loadRegistry,
-    _collectEnvFiles,
-    PIPE,
-)
 from envoy._exceptions import (
     CalledProcessError,
     CommandNotFoundError,
-    EnvironmentBuildError,
 )
-
+from envoy.proc import (
+    PIPE,
+    Environment,
+    _collectEnvFiles,
+    _loadRegistry,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _makeBundle(tmp_dir: Path, name: str, commands: dict, env_files: dict) -> Path:
     """Create a minimal bundle directory tree.
@@ -89,6 +88,7 @@ def _makeCommandsDir(tmp_dir: Path, commands: dict, env_files: dict) -> Path:
 # ---------------------------------------------------------------------------
 # _loadRegistry
 # ---------------------------------------------------------------------------
+
 
 class TestLoadRegistry:
     """Tests for the _loadRegistry helper."""
@@ -146,6 +146,7 @@ class TestLoadRegistry:
 # ---------------------------------------------------------------------------
 # _collectEnvFiles
 # ---------------------------------------------------------------------------
+
 
 class TestCollectEnvFiles:
     """Tests for the _collectEnvFiles helper."""
@@ -223,6 +224,7 @@ class TestCollectEnvFiles:
 # ---------------------------------------------------------------------------
 # Environment class
 # ---------------------------------------------------------------------------
+
 
 def _pythonCommandsFile(tmp_path: Path) -> Path:
     """Return a commands.json that defines a 'py' command using ``python``."""
@@ -368,6 +370,7 @@ class TestEnvironmentCheckOutput:
     def test_check_output_input_and_stdin_raises(self, tmp_path):
         """Passing both input= and stdin= to checkOutput raises ValueError."""
         import subprocess
+
         cf = _pythonCommandsFile(tmp_path)
         env = Environment("py", commands_file=cf)
         with pytest.raises(ValueError, match="input"):
@@ -393,6 +396,7 @@ class TestEnvironmentSpawn:
 
     def test_spawn_returns_popen(self, tmp_path):
         import subprocess
+
         cf = _pythonCommandsFile(tmp_path)
         env = Environment("py", commands_file=cf)
         proc_obj = env.spawn(["-c", "pass"])
@@ -402,7 +406,7 @@ class TestEnvironmentSpawn:
     def test_spawn_nonblocking(self, tmp_path):
         """spawn() returns before the process exits."""
         import time
-        import subprocess
+
         cf = _pythonCommandsFile(tmp_path)
         env = Environment("py", commands_file=cf)
         start = time.monotonic()
@@ -428,6 +432,7 @@ class TestEnvironmentSpawn:
 # ---------------------------------------------------------------------------
 # Free functions
 # ---------------------------------------------------------------------------
+
 
 class TestProcFreeFunctions:
     """Tests for the module-level call / spawn / checkCall / checkOutput.
@@ -462,6 +467,7 @@ class TestProcFreeFunctions:
 
     def test_spawn_returns_popen(self, tmp_path):
         import subprocess
+
         cf = _pythonCommandsFile(tmp_path)
         p = proc.spawn(["-cf", str(cf), "py", "-c", "pass"])
         assert isinstance(p, subprocess.Popen)
@@ -499,6 +505,7 @@ class TestProcFreeFunctions:
     def test_resolve_envoy_exe_returns_list(self):
         """_resolveEnvoyExe should return a non-empty list of strings."""
         from envoy.proc import _resolveEnvoyExe
+
         prefix = _resolveEnvoyExe()
         assert isinstance(prefix, list)
         assert len(prefix) >= 1
@@ -515,6 +522,7 @@ class TestProcFreeFunctions:
 # ---------------------------------------------------------------------------
 # Bundle discovery integration
 # ---------------------------------------------------------------------------
+
 
 class TestBundleDiscoveryIntegration:
     """End-to-end tests exercising bundle discovery + environment building."""
@@ -593,15 +601,11 @@ class TestBundleDiscoveryIntegration:
 
         if os.name == "nt":
             wrapper = bundle_bin / "pyalias.bat"
-            wrapper.write_text(
-                f'@echo off\n"{sys.executable}" %*\n', encoding="utf-8"
-            )
+            wrapper.write_text(f'@echo off\n"{sys.executable}" %*\n', encoding="utf-8")
             alias_entry = "${__BUNDLE__}/bin/pyalias.bat"
         else:
             wrapper = bundle_bin / "pyalias.sh"
-            wrapper.write_text(
-                f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8"
-            )
+            wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n', encoding="utf-8")
             wrapper.chmod(0o755)
             alias_entry = "${__BUNDLE__}/bin/pyalias.sh"
 

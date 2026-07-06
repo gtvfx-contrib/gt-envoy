@@ -22,6 +22,22 @@ theme:
 
 plugins:
   - search
+  - gen-files:
+      scripts:
+        - docs/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            merge_init_into_class: true
+            separate_signature: true
+            show_signature_annotations: true
+            members_order: source
 
 markdown_extensions:
   - admonition
@@ -51,7 +67,7 @@ nav:
   - CLI Reference:
     - envoy: cli-reference/envoy.md
     - engit: cli-reference/engit.md
-  - Python API: python-api.md
+  - Reference: reference/
   - Examples: examples.md
   - Advanced Topics: advanced.md
   - Troubleshooting: troubleshooting.md

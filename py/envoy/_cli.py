@@ -1,32 +1,40 @@
 """Command-line interface for envoy."""
 
-import os
-import sys
 import argparse
 import logging
-from importlib.metadata import version as _metadata_version, PackageNotFoundError as _PackageNotFoundError
+import os
+import sys
+from importlib.metadata import (
+    PackageNotFoundError as _PackageNotFoundError,
+)
+from importlib.metadata import (
+    version as _metadata_version,
+)
 from pathlib import Path
 
 try:
     _VERSION = _metadata_version('envoy')
 except _PackageNotFoundError:
     try:
-        from ._version import __version__ as _VERSION
+        # _VERSION: module-level constant naming (UPPER_SNAKE), not a naming mistake
+        from ._version import __version__ as _VERSION  # noqa: N812
     except ImportError:
         _VERSION = '0.0.0+uninstalled'
 
 from ._commands import CommandRegistry, findCommandsFile
-from ._discovery import getBundles, BundleInfo
-from ._wrapper import ApplicationWrapper
+from ._config_registry import (
+    CFG_ROOTS_VAR,
+    isConfigName,
+    listNamedConfigs,
+    resolveNamedConfig,
+)
+from ._discovery import BundleInfo, getBundles
 from ._environment import EnvironmentManager, TraceAllowlistEvent, TraceStepEvent
+from ._exceptions import WrapperError
 from ._executor import ProcessExecutor
 from ._models import WrapperConfig
-from ._exceptions import WrapperError
-from ._user_config import UserConfig, KNOWN_SETTINGS
-from ._config_registry import (
-    isConfigName, resolveNamedConfig, listNamedConfigs, CFG_ROOTS_VAR,
-)
-
+from ._user_config import KNOWN_SETTINGS, UserConfig
+from ._wrapper import ApplicationWrapper
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +42,7 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Argument pre-processing
 # ---------------------------------------------------------------------------
+
 
 def _normalizeArgv(argv: list[str]) -> list[str]:
     """Expand ``-x=value`` and ``--key=value`` tokens to ``[flag, value]``.
@@ -77,8 +86,9 @@ def _normalizeArgv(argv: list[str]) -> list[str]:
 # Path helpers
 # ---------------------------------------------------------------------------
 
+
 def _isRawPath(spec: str) -> bool:
-    """Return ``True`` when *spec* is a direct executable path.
+    r"""Return ``True`` when *spec* is a direct executable path.
 
     A spec is a raw path when it is absolute (e.g. ``C:\\...``,
     ``/usr/bin/...``) or contains an explicit directory separator
@@ -98,95 +108,92 @@ def _isRawPath(spec: str) -> bool:
 
 def setupLogging(verbose: bool = False) -> None:
     """Setup logging configuration.
-    
+
     Args:
         verbose: Enable verbose logging
-        
+
     """
     level = logging.DEBUG if verbose else logging.WARNING
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    logging.basicConfig(level=level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 
 def listCommands(registry: CommandRegistry) -> int:
     """List all available commands.
-    
+
     Args:
         registry: Command registry
-        
+
     Returns:
         Exit code (0 for success)
-        
+
     """
     commands = registry.listCommands()
-    
+
     if not commands:
         print("No commands defined.")
         return 1
-    
+
     print("Available commands:")
     print()
-    
+
     for cmd_name in commands:
         cmd = registry.get(cmd_name)
         if cmd:
             # Build command display
             bundle_str = f" [{cmd.bundle}]" if cmd.bundle else ""
-            
+
             if cmd.alias:
                 alias_str = " ".join(cmd.alias)
                 print(f"  {cmd_name:<20} → {alias_str}{bundle_str}")
             else:
                 print(f"  {cmd_name:<20} (executable on PATH){bundle_str}")
-    
+
     return 0
 
 
 def showCommandInfo(registry: CommandRegistry, command_name: str) -> int:
     """Show detailed information about a command.
-    
+
     Args:
         registry: Command registry
         command_name: Name of command to show
-        
+
     Returns:
         Exit code (0 for success)
-        
+
     """
     cmd = registry.get(command_name)
-    
+
     if not cmd:
         print(f"Error: Command '{command_name}' not found")
         return 1
-    
+
     print(f"Command: {command_name}")
-    
+
     if cmd.bundle:
         print(f"Bundle: {cmd.bundle}")
-    
+
     print(f"Executable: {cmd.executable}")
-    
+
     if cmd.base_args:
         print(f"Base args: {' '.join(cmd.base_args)}")
-    
+
     try:
         resolved_env = registry.resolveEnvironment(command_name)
     except WrapperError as e:
         print(f"Error resolving environment for '{command_name}': {e}", file=sys.stderr)
         return 1
 
-    print(f"Environment files:")
+    print("Environment files:")
     for env_file_name, _env_dir in resolved_env:
         print(f"  - {env_file_name}")
-    
+
     if cmd.envoy_env_dir:
         print(f"Environment directory: {cmd.envoy_env_dir}")
-    
+
     if cmd.alias:
         print(f"Alias: {' '.join(cmd.alias)}")
-    
+
     return 0
 
 
@@ -198,36 +205,36 @@ def showWhich(
     env_allowlist: set[str] | None = None,
 ) -> int:
     """Show the resolved executable path for a command.
-    
+
     Builds the subprocess environment from the command's env files so that
     PATH resolution matches what the child process would actually see.
-    
+
     Args:
         registry: Command registry
         command_name: Name of command to find
         bundles: Discovered bundles (for multi-bundle env file search)
         inherit_env: Whether to inherit the full system environment
         env_allowlist: System variable names to seed in closed mode
-        
+
     Returns:
         Exit code (0 for success)
-        
+
     """
     cmd = registry.get(command_name)
-    
+
     if not cmd:
         print(f"Error: Command '{command_name}' not found", file=sys.stderr)
         return 1
-    
+
     executable = cmd.expandAlias()[0]
-    
+
     if cmd.alias:
         alias_str = " ".join(cmd.alias)
         print(f"command {command_name} aliased to: {alias_str}")
         if cmd.source_file:
             print(f"  defined in: {cmd.source_file}")
         return 0
-    
+
     # Build env files the same way runCommand does so PATH is correct.
     env_files = []
     try:
@@ -251,14 +258,14 @@ def showWhich(
         for env_file_name, env_dir in resolved_env:
             dir_to_use = env_dir or cmd.envoy_env_dir
             env_files.append(str(dir_to_use / env_file_name))
-    
+
     env_mgr = EnvironmentManager(inherit_env=inherit_env, allowlist=env_allowlist)
     try:
         env = env_mgr.prepareEnvironment(env_files=[Path(f) for f in env_files])
     except WrapperError as e:
         print(f"Warning: Could not build environment: {e}", file=sys.stderr)
         env = {}
-    
+
     # Resolve using the subprocess PATH.
     try:
         resolved = ProcessExecutor.resolveExecutable(executable, search_path=env.get('PATH'))
@@ -269,7 +276,7 @@ def showWhich(
         print(f"command {command_name} executable: {executable} (not found on PATH)")
         if cmd.source_file:
             print(f"  defined in: {cmd.source_file}")
-    
+
     return 0
 
 
@@ -321,7 +328,7 @@ def runCommand(
         cmd = registry.get(command_name)
         if not cmd:
             print(f"Error: Command '{command_name}' not found", file=sys.stderr)
-            print(f"Run 'envoy --list' to see available commands", file=sys.stderr)
+            print("Run 'envoy --list' to see available commands", file=sys.stderr)
             return 1
 
     # When an env override is requested, validate it exists and use its
@@ -333,7 +340,7 @@ def runCommand(
                 f"Error: Environment override command '{env_override}' not found",
                 file=sys.stderr,
             )
-            print(f"Run 'envoy --list' to see available commands", file=sys.stderr)
+            print("Run 'envoy --list' to see available commands", file=sys.stderr)
             return 1
         env_source_name = env_override
         log.debug(f"Using environment from '{env_override}' for command '{command_name}'")
@@ -385,7 +392,7 @@ def runCommand(
             if commands_file:
                 wrapper_env_dir = commands_file.parent
             else:
-                print(f"Error: Cannot determine .envoy directory", file=sys.stderr)
+                print("Error: Cannot determine .envoy directory", file=sys.stderr)
                 return 1
 
         # Collect global_env.json first if it exists
@@ -487,7 +494,9 @@ def traceCommand(
     env_source_name = command_name
     if env_override is not None:
         if registry.get(env_override) is None:
-            print(f"Error: Environment override command '{env_override}' not found", file=sys.stderr)
+            print(
+                f"Error: Environment override command '{env_override}' not found", file=sys.stderr
+            )
             return 1
         env_source_name = env_override
 
@@ -564,12 +573,18 @@ def traceCommand(
         for ev in allowlist_events:
             file_label = Path(ev.file_path).name
             if ev.already_set:
-                print(f"  {file_label}  {trace_var} in environment_allowlist (already in base env, skipped)")
+                print(
+                    f"  {file_label}  {trace_var} in environment_allowlist "
+                    "(already in base env, skipped)"
+                )
             elif ev.seeded:
                 print(f"  {file_label}  {trace_var} in environment_allowlist")
                 print(f"    → seeded from os.environ: {ev.os_value!r}")
             else:
-                print(f"  {file_label}  {trace_var} in environment_allowlist (not present in os.environ)")
+                print(
+                    f"  {file_label}  {trace_var} in environment_allowlist "
+                    "(not present in os.environ)"
+                )
     else:
         print(f"  {trace_var} not listed in any environment_allowlist")
     print()
@@ -612,6 +627,7 @@ def traceCommand(
 # User config handlers
 # ---------------------------------------------------------------------------
 
+
 def handleSetConfig(raw: str) -> int:
     """Handle ``--set-config KEY=VALUE`` or ``--set-config KEY=`` (clear).
 
@@ -624,8 +640,7 @@ def handleSetConfig(raw: str) -> int:
     """
     if '=' not in raw:
         print(
-            f"Error: --set-config requires KEY=VALUE format "
-            f"(use KEY= to clear a setting)",
+            "Error: --set-config requires KEY=VALUE format (use KEY= to clear a setting)",
             file=sys.stderr,
         )
         return 1
@@ -737,17 +752,16 @@ def handleListConfigs() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point.
-    
+
     Args:
         argv: Command-line arguments (defaults to sys.argv[1:])
-        
+
     Returns:
         Exit code
-        
+
     """
     parser = argparse.ArgumentParser(
-        prog='envoy',
-        description='Envoy: Environment orchestration for applications'
+        prog='envoy', description='Envoy: Environment orchestration for applications'
     )
 
     parser.add_argument(
@@ -762,38 +776,33 @@ def main(argv: list[str] | None = None) -> int:
         help='Open the envoy documentation in the default browser.',
     )
 
+    parser.add_argument('--list', action='store_true', help='List all available commands')
+
     parser.add_argument(
-        '--list',
-        action='store_true',
-        help='List all available commands'
-    )
-    
-    parser.add_argument(
-        '--info',
-        metavar='COMMAND',
-        help='Show detailed information about a command'
-    )
-    
-    parser.add_argument(
-        '--which',
-        metavar='COMMAND',
-        help='Show the resolved executable path for a command'
-    )
-    
-    parser.add_argument(
-        '--commands-file', '-cf',
-        type=Path,
-        help='Path to commands.json file (auto-detected if not specified)'
-    )
-    
-    parser.add_argument(
-        '--bundles-config', '-bc',
-        type=Path,
-        help='Path to bundles config file (auto-discovers from ENVOY_BNDL_ROOTS if not specified)'
+        '--info', metavar='COMMAND', help='Show detailed information about a command'
     )
 
     parser.add_argument(
-        '--set-config', '-sc',
+        '--which', metavar='COMMAND', help='Show the resolved executable path for a command'
+    )
+
+    parser.add_argument(
+        '--commands-file',
+        '-cf',
+        type=Path,
+        help='Path to commands.json file (auto-detected if not specified)',
+    )
+
+    parser.add_argument(
+        '--bundles-config',
+        '-bc',
+        type=Path,
+        help='Path to bundles config file (auto-discovers from ENVOY_BNDL_ROOTS if not specified)',
+    )
+
+    parser.add_argument(
+        '--set-config',
+        '-sc',
         metavar='KEY=VALUE',
         help=(
             'Set a user config value and save it. '
@@ -803,24 +812,24 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     parser.add_argument(
-        '--get-config', '-gc',
+        '--get-config',
+        '-gc',
         metavar='KEY',
         nargs='?',
         const='',
-        help=(
-            'Print one or all user config values and exit. '
-            'Omit KEY to print all settings.'
-        ),
+        help=('Print one or all user config values and exit. Omit KEY to print all settings.'),
     )
 
     parser.add_argument(
-        '--list-configs', '-lc',
+        '--list-configs',
+        '-lc',
         action='store_true',
         help='List all known configurable settings with their descriptions and exit.',
     )
 
     parser.add_argument(
-        '--ignore-config', '-ic',
+        '--ignore-config',
+        '-ic',
         action='store_true',
         help=(
             'Bypass the user config for this invocation. '
@@ -829,24 +838,22 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     parser.add_argument(
-        '--env', '-e',
+        '--env',
+        '-e',
         metavar='ENV_COMMAND',
         help=(
             'Run the target command inside a different command\'s environment. '
             'E.g. "envoy -e krita python" runs python using the krita environment.'
-        )
+        ),
     )
 
+    parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose logging')
+
     parser.add_argument(
-        '--verbose', '-v',
+        '--inherit-env',
+        '-i',
         action='store_true',
-        help='Enable verbose logging'
-    )
-    
-    parser.add_argument(
-        '--inherit-env', '-i',
-        action='store_true',
-        help='Inherit the full system environment (overrides default closed environment mode)'
+        help='Inherit the full system environment (overrides default closed environment mode)',
     )
 
     parser.add_argument(
@@ -857,21 +864,13 @@ def main(argv: list[str] | None = None) -> int:
             'Prints each mutation step (allowlist seeding, per-file operators) '
             'and exits without running COMMAND. '
             'Example: envoy --trace UE_PYTHONPATH unreal'
-        )
+        ),
     )
-    
-    parser.add_argument(
-        'command',
-        nargs='?',
-        help='Command to execute'
-    )
-    
-    parser.add_argument(
-        'args',
-        nargs=argparse.REMAINDER,
-        help='Arguments to pass to the command'
-    )
-    
+
+    parser.add_argument('command', nargs='?', help='Command to execute')
+
+    parser.add_argument('args', nargs=argparse.REMAINDER, help='Arguments to pass to the command')
+
     # Parse args - REMAINDER captures everything after the command verbatim,
     # including flags like -c or --version that belong to the child process.
     if argv is None:
@@ -900,7 +899,8 @@ def main(argv: list[str] | None = None) -> int:
     # --docs: open the documentation site and exit immediately.
     if args.docs:
         import webbrowser
-        _DOCS_URL = 'https://gtvfx-contrib.github.io/gt-envoy/'
+
+        _docs_url = 'https://gtvfx-contrib.github.io/gt-envoy/'
         if getattr(sys, 'frozen', False):
             # Running as a PyInstaller exe: bin/envoy.exe → parent = bin/ → parent = bundle root
             _bundle_root = Path(sys.executable).parent.parent
@@ -908,7 +908,7 @@ def main(argv: list[str] | None = None) -> int:
             # Running from source or wheel: py/envoy/_cli.py → up 3 levels = bundle root
             _bundle_root = Path(__file__).parent.parent.parent
         _local_docs = _bundle_root / 'docs' / 'index.html'
-        webbrowser.open(_local_docs.as_uri() if _local_docs.exists() else _DOCS_URL)
+        webbrowser.open(_local_docs.as_uri() if _local_docs.exists() else _docs_url)
         return 0
 
     # Load user config (used unless --ignore-config is set).
@@ -1014,8 +1014,14 @@ def main(argv: list[str] | None = None) -> int:
                 # A raw executable with no env override can run without any registry.
                 # For all other cases, a commands.json is required.
                 print("Error: Could not find commands.json", file=sys.stderr)
-                print("Searched for .envoy/commands.json in current directory and parents", file=sys.stderr)
-                print("Or set ENVOY_BNDL_ROOTS environment variable for auto-discovery", file=sys.stderr)
+                print(
+                    "Searched for .envoy/commands.json in current directory and parents",
+                    file=sys.stderr,
+                )
+                print(
+                    "Or set ENVOY_BNDL_ROOTS environment variable for auto-discovery",
+                    file=sys.stderr,
+                )
                 return 1
 
     # Check if we have any commands loaded — skip this gate when the user is
@@ -1024,20 +1030,21 @@ def main(argv: list[str] | None = None) -> int:
         if not (args.command and _isRawPath(args.command) and args.env is None):
             print("Error: No commands loaded", file=sys.stderr)
             return 1
-    
+
     # Handle list commands
     if args.list:
         return listCommands(registry)
-    
+
     # Handle command info
     if args.info:
         return showCommandInfo(registry, args.info)
-    
+
     # Parse allowlist and inherit-env — needed by both --which and run.
     allowlist_str = os.environ.get('ENVOY_ALLOWLIST', '')
     env_allowlist = (
         {v.strip() for v in allowlist_str.replace(',', ';').split(';') if v.strip()}
-        if allowlist_str else None
+        if allowlist_str
+        else None
     )
     if env_allowlist:
         log.debug(f"Allowlist: {sorted(env_allowlist)}")
@@ -1067,12 +1074,12 @@ def main(argv: list[str] | None = None) -> int:
             env_allowlist=env_allowlist,
             env_override=args.env,
         )
-    
+
     # Must have a command to execute
     if not args.command:
         parser.print_help()
         return 0
-    
+
     # Execute command
     return runCommand(
         registry=registry,

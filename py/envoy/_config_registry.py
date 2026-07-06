@@ -39,7 +39,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 #: Environment variable containing the config root directories.
 #: Semicolon-separated on Windows, colon-separated on Unix.
 CFG_ROOTS_VAR: str = 'ENVOY_CFG_ROOTS'
@@ -54,6 +53,7 @@ _TIMESTAMP_FMT: str = '%Y-%m-%dT%H-%M-%S'
 # ---------------------------------------------------------------------------
 # Data types
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class NamedConfigEntry:
@@ -77,6 +77,7 @@ class NamedConfigEntry:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _cfgRoots() -> list[Path]:
     """Return the list of config root directories from ``ENVOY_CFG_ROOTS``.
 
@@ -88,11 +89,7 @@ def _cfgRoots() -> list[Path]:
     if not roots_str:
         return []
     separator = ';' if os.name == 'nt' else ':'
-    return [
-        Path(r.strip()).resolve()
-        for r in roots_str.split(separator)
-        if r.strip()
-    ]
+    return [Path(r.strip()).resolve() for r in roots_str.split(separator) if r.strip()]
 
 
 def _readLatest(name_dir: Path) -> str | None:
@@ -130,8 +127,9 @@ def _writeLatest(name_dir: Path, filename: str) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def isConfigName(value: str) -> bool:
-    """Return ``True`` if *value* looks like a named config rather than a path.
+    r"""Return ``True`` if *value* looks like a named config rather than a path.
 
     A value is treated as a *name* when it contains no path separator characters
     (``/``, ``\\``, ``:``) and does not start with a dot.  Everything else is
@@ -213,12 +211,14 @@ def listNamedConfigs() -> list[NamedConfigEntry]:
             if not config_path.is_file():
                 continue
             version = latest_filename.removesuffix('.json')
-            entries.append(NamedConfigEntry(
-                name=name,
-                version=version,
-                path=config_path,
-                cfg_root=root,
-            ))
+            entries.append(
+                NamedConfigEntry(
+                    name=name,
+                    version=version,
+                    path=config_path,
+                    cfg_root=root,
+                )
+            )
             seen.add(name)
 
     return sorted(entries, key=lambda e: e.name)
@@ -291,9 +291,7 @@ def publishConfig(
         return dest_path
 
     name_dir.mkdir(parents=True, exist_ok=True)
-    dest_path.write_text(
-        source_path.read_text(encoding='utf-8'), encoding='utf-8'
-    )
+    dest_path.write_text(source_path.read_text(encoding='utf-8'), encoding='utf-8')
     _writeLatest(name_dir, filename)
 
     return dest_path

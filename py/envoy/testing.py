@@ -65,8 +65,7 @@ def patchBundleRoots(roots: list[str | Path]):
 
 @contextmanager
 def patchCommandsFile(commands_file: str | Path):
-    """Context manager that temporarily points envoy at a specific
-    ``commands.json`` file.
+    """Context manager that temporarily points envoy at a specific ``commands.json`` file.
 
     Useful when your test fixture provides a bare ``commands.json`` rather
     than a full bundle directory tree.  Under the hood this clears
@@ -90,8 +89,7 @@ def patchCommandsFile(commands_file: str | Path):
     cf_path = Path(commands_file).resolve()
     if not cf_path.is_file():
         raise FileNotFoundError(
-            f"patchCommandsFile expected an existing commands.json file, but "
-            f"got {cf_path!s}"
+            f"patchCommandsFile expected an existing commands.json file, but got {cf_path!s}"
         )
 
     old_roots = os.environ.get('ENVOY_BNDL_ROOTS')

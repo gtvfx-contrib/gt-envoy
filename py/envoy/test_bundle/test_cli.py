@@ -2,16 +2,13 @@
 
 import json
 import sys
-import io
 import tempfile
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
+from envoy._cli import _normalizeArgv, runCommand, showCommandInfo, showWhich
 from envoy._commands import CommandRegistry
-from envoy._cli import showCommandInfo, showWhich, _normalizeArgv, runCommand
 
 
 def _makeRegistry(commands: dict) -> CommandRegistry:
@@ -100,6 +97,7 @@ def test_show_which_unknown_command_returns_1(capsys):
 # _normalizeArgv tests
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeArgv:
     """Tests for the _normalizeArgv pre-processing helper."""
 
@@ -115,9 +113,7 @@ class TestNormalizeArgv:
 
     def test_expands_short_set_config_option(self):
         """-sc=KEY=VALUE expands to ['-sc', 'KEY=VALUE'] (splits only on first =)."""
-        assert _normalizeArgv(['-sc=bundles_config=/path/x']) == [
-            '-sc', 'bundles_config=/path/x'
-        ]
+        assert _normalizeArgv(['-sc=bundles_config=/path/x']) == ['-sc', 'bundles_config=/path/x']
 
     def test_expands_short_commands_file_option(self):
         """-cf=/some/path expands to ['-cf', '/some/path']."""
@@ -140,13 +136,15 @@ class TestNormalizeArgv:
     def test_expands_long_bundles_config_option(self):
         """--bundles-config=path expands to ['--bundles-config', 'path']."""
         assert _normalizeArgv(['--bundles-config=studio.json']) == [
-            '--bundles-config', 'studio.json'
+            '--bundles-config',
+            'studio.json',
         ]
 
     def test_expands_long_set_config_option(self):
         """--set-config=KEY=VALUE expands to ['--set-config', 'KEY=VALUE']."""
         assert _normalizeArgv(['--set-config=bundles_config=/path']) == [
-            '--set-config', 'bundles_config=/path'
+            '--set-config',
+            'bundles_config=/path',
         ]
 
     # --- flags without values are left unchanged ---
@@ -191,6 +189,7 @@ class TestNormalizeArgv:
 # ---------------------------------------------------------------------------
 # runCommand raw-path tests
 # ---------------------------------------------------------------------------
+
 
 class TestRunCommandRawPath:
     """Tests for runCommand when the command is a raw executable path."""

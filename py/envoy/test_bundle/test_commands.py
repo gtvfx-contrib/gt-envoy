@@ -9,10 +9,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 from envoy._commands import CommandDefinition, CommandRegistry
 from envoy._exceptions import WrapperError
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _makeRegistry(*commands: tuple) -> CommandRegistry:
     """Build a CommandRegistry from (name, environment_list) tuples.
@@ -32,6 +32,7 @@ def _makeRegistry(*commands: tuple) -> CommandRegistry:
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_simple_resolution():
     """Plain file entries (containing a dot) are returned as-is."""
@@ -72,16 +73,16 @@ def test_multi_level_recursion_order():
     print("Testing multi-level recursion order...")
 
     registry = _makeRegistry(
-        ("base",  ["base_env.json"]),
-        ("mid",   ["base", "mid_env.json"]),
-        ("top",   ["mid", "top_env.json"]),
+        ("base", ["base_env.json"]),
+        ("mid", ["base", "mid_env.json"]),
+        ("top", ["mid", "top_env.json"]),
     )
     result = registry.resolveEnvironment("top")
 
     assert result == [
         ("base_env.json", Path("/fake/dir")),
-        ("mid_env.json",  Path("/fake/dir")),
-        ("top_env.json",  Path("/fake/dir")),
+        ("mid_env.json", Path("/fake/dir")),
+        ("top_env.json", Path("/fake/dir")),
     ], f"Unexpected result: {result}"
 
     print("  ✅ Multi-level recursion order test passed")
@@ -92,15 +93,15 @@ def test_mixed_files_and_references():
     print("Testing mixed files and command references...")
 
     registry = _makeRegistry(
-        ("base",  ["base_env.json"]),
+        ("base", ["base_env.json"]),
         ("mixed", ["pre.json", "base", "post.json"]),
     )
     result = registry.resolveEnvironment("mixed")
 
     assert result == [
-        ("pre.json",      Path("/fake/dir")),
+        ("pre.json", Path("/fake/dir")),
         ("base_env.json", Path("/fake/dir")),
-        ("post.json",     Path("/fake/dir")),
+        ("post.json", Path("/fake/dir")),
     ], f"Unexpected result: {result}"
 
     print("  ✅ Mixed files and references test passed")
@@ -175,6 +176,7 @@ def test_self_referential_command():
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
+
 
 def runAllTests():
     """Run all resolveEnvironment tests."""

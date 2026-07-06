@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 from ._environment import _CORE_ENV_VARS, _ENVOY_ENV_VARS
 from ._user_config import UserConfig
 
-
 if TYPE_CHECKING:
     from ._discovery import BundleConfig
 
@@ -34,6 +33,7 @@ SUPPORTED_OPERATING_SYSTEMS: tuple[str, ...] = ('Windows', 'Linux', 'Darwin')
 # ---------------------------------------------------------------------------
 # Top-level API functions
 # ---------------------------------------------------------------------------
+
 
 def getEnvironment(
     command: str,
@@ -72,6 +72,7 @@ def getEnvironment(
 
     """
     from .proc import Environment
+
     return Environment(
         command,
         inherit_env=inherit_env,
@@ -82,8 +83,7 @@ def getEnvironment(
 
 
 def getAllowlist(extra: list[str] | None = None) -> frozenset[str]:
-    """Return the default set of system variable names that envoy seeds in
-    closed mode.
+    """Return the default set of system variable names envoy seeds in closed mode.
 
     This is the union of :data:`~._environment._CORE_ENV_VARS` (identity,
     temp, system paths, locale) and :data:`~._environment._ENVOY_ENV_VARS`
@@ -150,8 +150,8 @@ def traceEnvironment(
             print(ev)
 
     """
-    from .proc import _loadRegistry, _collectEnvFiles
     from ._environment import EnvironmentManager
+    from .proc import _collectEnvFiles, _loadRegistry
 
     registry, bundles = _loadRegistry(
         bundle_roots=bundle_roots,
@@ -252,4 +252,5 @@ def getCurrentBundleConfig(
 
     """
     from ._discovery import BundleConfig
+
     return BundleConfig.current(ignore_user_config=ignore_user_config)

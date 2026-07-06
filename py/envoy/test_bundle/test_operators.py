@@ -1,12 +1,13 @@
 """Test the += and ^= operators."""
-import sys
+
 import os
+import sys
 from pathlib import Path
 
 # Add the module to path for testing
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
-from envoy import WrapperConfig, ApplicationWrapper
+from envoy import ApplicationWrapper, WrapperConfig
 
 # Set up test environment variable
 os.environ['TEST_PATH'] = 'original_value'
@@ -18,7 +19,7 @@ config1 = WrapperConfig(
     args=['-c', 'import os; print(f"TEST_PATH: {os.environ.get(\'TEST_PATH\')}")'],
     env_files='gt/app/wrapper/example_env_operator_append.json',
     capture_output=True,
-    stream_output=False
+    stream_output=False,
 )
 
 wrapper1 = ApplicationWrapper(config1)
@@ -34,7 +35,7 @@ config2 = WrapperConfig(
     args=['-c', 'import os; print(f"TEST_PATH: {os.environ.get(\'TEST_PATH\')}")'],
     env_files='gt/app/wrapper/example_env_operator_prepend.json',
     capture_output=True,
-    stream_output=False
+    stream_output=False,
 )
 
 wrapper2 = ApplicationWrapper(config2)

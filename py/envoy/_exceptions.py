@@ -1,4 +1,4 @@
-﻿"""Exception classes for envoy.
+"""Exception classes for envoy.
 
 Hierarchy::
 
@@ -23,13 +23,12 @@ the following identity holds::
 from __future__ import annotations
 
 import subprocess
-from typing import Union
 from os import PathLike
-
 
 # ---------------------------------------------------------------------------
 # Root
 # ---------------------------------------------------------------------------
+
 
 class EnvoyError(Exception):
     """Root base class for all envoy exceptions.
@@ -42,6 +41,7 @@ class EnvoyError(Exception):
 # ---------------------------------------------------------------------------
 # Back-compat wrapper hierarchy
 # ---------------------------------------------------------------------------
+
 
 class WrapperError(EnvoyError):
     """Back-compat base for application-wrapper errors.
@@ -68,6 +68,7 @@ class ExecutionError(WrapperError):
 # Process errors
 # ---------------------------------------------------------------------------
 
+
 class CalledProcessError(EnvoyError, subprocess.CalledProcessError):
     """Raised when a checked envoy subprocess call exits with a non-zero code.
 
@@ -82,7 +83,7 @@ class CalledProcessError(EnvoyError, subprocess.CalledProcessError):
 
     """
 
-    def __init__(self, returncode: int, cmd: Union[str, bytes, PathLike], output=None, stderr=None):
+    def __init__(self, returncode: int, cmd: str | bytes | PathLike, output=None, stderr=None):
         # subprocess.CalledProcessError.__init__ requires positional args.
         subprocess.CalledProcessError.__init__(self, returncode, cmd, output, stderr)
 
@@ -90,6 +91,7 @@ class CalledProcessError(EnvoyError, subprocess.CalledProcessError):
 # ---------------------------------------------------------------------------
 # Environment / validation errors
 # ---------------------------------------------------------------------------
+
 
 class EnvironmentBuildError(EnvoyError):
     """Failed to construct the subprocess environment for a command.

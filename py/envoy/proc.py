@@ -42,7 +42,7 @@ import sys
 from pathlib import Path
 
 from ._commands import CommandDefinition, CommandRegistry, findCommandsFile
-from ._discovery import BundleInfo, discoverBundlesFromRoots, discoverBundlesAuto
+from ._discovery import BundleInfo, discoverBundlesAuto, discoverBundlesFromRoots
 from ._environment import EnvironmentManager
 from ._exceptions import (
     CalledProcessError,
@@ -51,7 +51,6 @@ from ._exceptions import (
     WrapperError,
 )
 from ._executor import ProcessExecutor
-
 
 # ---------------------------------------------------------------------------
 # Re-exported subprocess constants
@@ -76,9 +75,9 @@ DEVNULL = subprocess.DEVNULL
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _isRawPath(spec: str) -> bool:
-    """Return ``True`` when *spec* should be treated as a direct executable
-    path rather than an envoy command name.
+    r"""Return ``True`` when *spec* should be treated as a direct executable path.
 
     A spec is considered a raw path when it is absolute (``C:\\...``,
     ``/usr/bin/...``) or contains an explicit directory separator
@@ -115,7 +114,7 @@ def _rawPopen(
 
 
 def _resolveEnvoyExe() -> list[str]:
-    """Return the command prefix used to invoke the envoy CLI.
+    r"""Return the command prefix used to invoke the envoy CLI.
 
     Checks in order: pre-built standalone executable →  shell launcher
     (``envoy.bat``) → Python module invocation.  The result can be prepended
@@ -133,8 +132,8 @@ def _resolveEnvoyExe() -> list[str]:
         ``[sys.executable, '-m', 'envoy']``.
 
     """
-    _pkg_dir = Path(__file__).parent   # py/envoy/
-    _root = _pkg_dir.parent.parent     # repo root
+    _pkg_dir = Path(__file__).parent  # py/envoy/
+    _root = _pkg_dir.parent.parent  # repo root
 
     _exe = _root / 'dist' / 'envoy.exe'
     if _exe.exists():
@@ -251,9 +250,7 @@ def _collectEnvFiles(
             dir_to_use = entry_env_dir or env_dir
             file_path = dir_to_use / env_file_name
             if not file_path.exists():
-                raise EnvironmentBuildError(
-                    f"Environment file not found: {file_path}"
-                )
+                raise EnvironmentBuildError(f"Environment file not found: {file_path}")
             env_files.append(file_path)
 
     return env_files
@@ -307,9 +304,7 @@ def _prepareEnv(
     else:
         cmd = registry.get(command_name)
         if cmd is None:
-            raise CommandNotFoundError(
-                f"Command '{command_name}' is not registered."
-            )
+            raise CommandNotFoundError(f"Command '{command_name}' is not registered.")
 
     env_files = _collectEnvFiles(env_source, registry, bundles)
     allowlist_set: set[str] | None = set(allowlist) if allowlist else None
@@ -318,9 +313,7 @@ def _prepareEnv(
     try:
         env = env_mgr.prepareEnvironment(env_files=env_files)
     except WrapperError as e:
-        raise EnvironmentBuildError(
-            f"Failed to prepare environment for '{env_source}': {e}"
-        ) from e
+        raise EnvironmentBuildError(f"Failed to prepare environment for '{env_source}': {e}") from e
 
     return env, cmd
 
@@ -338,16 +331,12 @@ def _popen(
     passes an explicit ``creationflags``.
 
     """
-    from ._environment import EnvironmentManager
-
     expanded = cmd_def.expandAlias(env)
     executable = expanded[0]
     base_args = expanded[1:]
 
     try:
-        resolved = ProcessExecutor.resolveExecutable(
-            executable, search_path=env.get('PATH')
-        )
+        resolved = ProcessExecutor.resolveExecutable(executable, search_path=env.get('PATH'))
     except WrapperError as e:
         raise EnvironmentBuildError(str(e)) from e
 
@@ -368,6 +357,7 @@ def _popen(
 # ---------------------------------------------------------------------------
 # Environment class
 # ---------------------------------------------------------------------------
+
 
 class Environment:
     """A pre-built envoy command environment for launching multiple processes.
@@ -414,6 +404,18 @@ class Environment:
         commands_file: Path | None = None,
         env_override: str | None = None,
     ) -> None:
+        """Initialize the environment for *command*.
+
+        Args:
+            command: The envoy command name this environment is built for.
+            inherit_env: See the class docstring.
+            allowlist: See the class docstring.
+            whitelist: Deprecated alias for ``allowlist``.
+            bundle_roots: See the class docstring.
+            commands_file: See the class docstring.
+            env_override: See the class docstring.
+
+        """
         # ``whitelist`` is a deprecated alias for ``allowlist``; both are
         # merged so legacy callers continue to work.
         combined = list(allowlist or []) + list(whitelist or [])
@@ -450,9 +452,11 @@ class Environment:
     # ------------------------------------------------------------------
 
     def __str__(self) -> str:
+        """Return ``<Environment {command}>``."""
         return f"<Environment {self._command}>"
 
     def __repr__(self) -> str:
+        """Return ``<Environment {command}>``."""
         return f"<Environment {self._command}>"
 
     def build(self) -> dict[str, str]:
@@ -477,9 +481,7 @@ class Environment:
         if self._env is None:
             if _isRawPath(self._command) and self._env_override is None:
                 # Direct executable — no registry lookup or env-file loading.
-                allowlist_set: set[str] | None = (
-                    set(self._allowlist) if self._allowlist else None
-                )
+                allowlist_set: set[str] | None = set(self._allowlist) if self._allowlist else None
                 env_mgr = EnvironmentManager(
                     inherit_env=self._inherit_env,
                     allowlist=allowlist_set,
@@ -496,8 +498,11 @@ class Environment:
                     commands_file=self._commands_file,
                 )
                 self._env, self._cmd_def = _prepareEnv(
-                    self._command, registry, bundles,
-                    self._inherit_env, self._allowlist,
+                    self._command,
+                    registry,
+                    bundles,
+                    self._inherit_env,
+                    self._allowlist,
                     env_override=self._env_override,
                 )
         return self._env
@@ -597,10 +602,7 @@ class Environment:
         """
         input_ = kwargs.pop('input', None)  # noqa: A001
         if 'stdout' in kwargs:
-            raise ValueError(
-                "'stdout' argument not allowed in checkOutput; "
-                "it will be overridden."
-            )
+            raise ValueError("'stdout' argument not allowed in checkOutput; it will be overridden.")
         if input_ is not None and 'stdin' in kwargs:
             raise ValueError("'input' and 'stdin' cannot both be specified")
         kwargs['stdout'] = PIPE
@@ -622,11 +624,12 @@ class Environment:
 # Free functions
 # ---------------------------------------------------------------------------
 
+
 def call(
     cmd: list[str],
     **kwargs,
 ) -> int:
-    """Execute a command through the envoy CLI and return its exit code.
+    r"""Execute a command through the envoy CLI and return its exit code.
 
     *cmd* is passed verbatim to the envoy CLI as its argument list, so any
     envoy flag may be included alongside the command name::
@@ -656,7 +659,7 @@ def call(
     Raises:
         ValueError: If *cmd* is empty or ``stdout``/``stderr`` is :data:`PIPE`.
 
-    See also:
+    See Also:
         :func:`subprocess.call`
 
     """
@@ -690,7 +693,7 @@ def spawn(
     Raises:
         ValueError: If *cmd* is empty.
 
-    See also:
+    See Also:
         :class:`subprocess.Popen`
 
     """
@@ -718,7 +721,7 @@ def checkCall(
     Raises:
         CalledProcessError: If the process exits with a non-zero status.
 
-    See also:
+    See Also:
         :func:`subprocess.check_call`
 
     """
@@ -755,7 +758,7 @@ def checkOutput(
         ValueError: If *cmd* is empty, ``stdout`` is in *kwargs*, or both
             ``input`` and ``stdin`` are provided.
 
-    See also:
+    See Also:
         :func:`subprocess.check_output`
 
     """
@@ -763,10 +766,7 @@ def checkOutput(
         raise ValueError("'cmd' must be a non-empty list")
     input_ = kwargs.pop('input', None)
     if 'stdout' in kwargs:
-        raise ValueError(
-            "'stdout' argument not allowed in checkOutput; "
-            "it will be overridden."
-        )
+        raise ValueError("'stdout' argument not allowed in checkOutput; it will be overridden.")
     if input_ is not None and 'stdin' in kwargs:
         raise ValueError("'input' and 'stdin' cannot both be specified")
     kwargs['stdout'] = PIPE

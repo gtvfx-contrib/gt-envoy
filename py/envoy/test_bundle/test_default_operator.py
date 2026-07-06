@@ -1,15 +1,16 @@
 """Tests for the ?= (default) operator."""
-import sys
-import os
+
 import json
+import os
+import sys
 import tempfile
 from pathlib import Path
 
 # Add the module to path for testing
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
+from envoy import ApplicationWrapper, WrapperConfig
 from envoy._environment import EnvironmentManager
-from envoy import WrapperConfig, ApplicationWrapper
 
 
 def _writeEnvFile(tmp_dir: str, data: dict) -> Path:
@@ -45,9 +46,7 @@ def test_default_operator_skips_when_present():
         env_file = _writeEnvFile(tmp, {"?=MY_VAR": "default_value"})
 
         manager = EnvironmentManager(inherit_env=False)
-        result = manager.loadEnvFromFiles(
-            env_file, base_env={"MY_VAR": "existing_value"}
-        )
+        result = manager.loadEnvFromFiles(env_file, base_env={"MY_VAR": "existing_value"})
 
     assert result.get("MY_VAR") == "existing_value", (
         "?= must not overwrite MY_VAR when it is already present in merged_env"
@@ -64,20 +63,15 @@ def test_default_operator_inherit_env_mode():
     os.environ["ENVOY_TEST_DEFAULT_OP"] = "system_value"
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            env_file = _writeEnvFile(
-                tmp, {"?=ENVOY_TEST_DEFAULT_OP": "file_default"}
-            )
+            env_file = _writeEnvFile(tmp, {"?=ENVOY_TEST_DEFAULT_OP": "file_default"})
 
             # inherit_env=True seeds merged_env with the full os.environ, so
             # ENVOY_TEST_DEFAULT_OP is already present before the file is processed.
             manager = EnvironmentManager(inherit_env=True)
-            result = manager.loadEnvFromFiles(
-                env_file, base_env=dict(os.environ)
-            )
+            result = manager.loadEnvFromFiles(env_file, base_env=dict(os.environ))
 
         assert result.get("ENVOY_TEST_DEFAULT_OP") == "system_value", (
-            "In inherit-env mode ?= must not override a variable that came "
-            "from os.environ"
+            "In inherit-env mode ?= must not override a variable that came from os.environ"
         )
     finally:
         del os.environ["ENVOY_TEST_DEFAULT_OP"]
@@ -93,9 +87,7 @@ def test_default_operator_closed_mode_allowlisted():
     os.environ["ENVOY_TEST_DEFAULT_OP"] = "allowlisted_value"
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            env_file = _writeEnvFile(
-                tmp, {"?=ENVOY_TEST_DEFAULT_OP": "file_default"}
-            )
+            env_file = _writeEnvFile(tmp, {"?=ENVOY_TEST_DEFAULT_OP": "file_default"})
 
             # Closed mode with ENVOY_TEST_DEFAULT_OP in the allowlist:
             # prepareEnvironment seeds merged_env with that var before
@@ -113,8 +105,7 @@ def test_default_operator_closed_mode_allowlisted():
             result = manager.loadEnvFromFiles(env_file, base_env=base)
 
         assert result.get("ENVOY_TEST_DEFAULT_OP") == "allowlisted_value", (
-            "In closed mode ?= must not override a variable that was seeded "
-            "from the allowlist"
+            "In closed mode ?= must not override a variable that was seeded from the allowlist"
         )
     finally:
         del os.environ["ENVOY_TEST_DEFAULT_OP"]
@@ -130,9 +121,7 @@ def test_default_operator_closed_mode_not_allowlisted():
     os.environ["ENVOY_TEST_DEFAULT_OP"] = "system_value"
     try:
         with tempfile.TemporaryDirectory() as tmp:
-            env_file = _writeEnvFile(
-                tmp, {"?=ENVOY_TEST_DEFAULT_OP": "file_default"}
-            )
+            env_file = _writeEnvFile(tmp, {"?=ENVOY_TEST_DEFAULT_OP": "file_default"})
 
             # Closed mode with an EMPTY allowlist: the system variable is not
             # seeded into merged_env, so ?= should apply the file default.

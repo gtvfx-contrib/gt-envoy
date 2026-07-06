@@ -1,4 +1,4 @@
-"""Persistent user configuration for envoy.
+r"""Persistent user configuration for envoy.
 
 Stores per-user preferences in a platform-appropriate JSON file so that
 flags and paths do not need to be repeated on every invocation.
@@ -28,10 +28,10 @@ import platform
 from pathlib import Path
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Platform-appropriate default path
 # ---------------------------------------------------------------------------
+
 
 def _defaultConfigPath() -> Path:
     """Return the platform-appropriate user config file path.
@@ -83,6 +83,7 @@ KNOWN_SETTINGS: dict[str, dict[str, Any]] = {
 # UserConfig class
 # ---------------------------------------------------------------------------
 
+
 class UserConfig:
     """Persistent user configuration for envoy.
 
@@ -118,7 +119,7 @@ class UserConfig:
     # ------------------------------------------------------------------
 
     @classmethod
-    def load(cls, path: Path | None = None) -> 'UserConfig':
+    def load(cls, path: Path | None = None) -> UserConfig:
         """Load the user config from disk.
 
         Returns an empty (default) config if the file does not exist or
@@ -196,14 +197,11 @@ class UserConfig:
         """
         if key not in KNOWN_SETTINGS:
             known = ', '.join(sorted(KNOWN_SETTINGS))
-            raise ValueError(
-                f"Unknown config setting {key!r}. Known settings: {known}"
-            )
+            raise ValueError(f"Unknown config setting {key!r}. Known settings: {known}")
         choices = KNOWN_SETTINGS[key].get('choices')
         if choices is not None and value not in choices:
             raise ValueError(
-                f"Invalid value {value!r} for {key!r}. "
-                f"Valid choices: {', '.join(choices)}"
+                f"Invalid value {value!r} for {key!r}. Valid choices: {', '.join(choices)}"
             )
         self._data[key] = value
 

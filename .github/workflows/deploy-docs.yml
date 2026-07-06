@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build MkDocs site
+    name: Build ProperDocs site
     runs-on: ["self-hosted", "Linux", "X64", "synology"]
 
     steps:
@@ -26,8 +26,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install MkDocs dependencies
-        run: pip install mkdocs-material
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install envoy with docs extras
+        # Installing envoy itself lets mkdocstrings introspect envoy/engit
+        # docstrings; the [docs] extra brings properdocs, mkdocstrings, and
+        # the gen-files/literate-nav plugins used for auto-generated API
+        # reference pages under docs/reference/ (see docs/gen_ref_pages.py).
+        working-directory: ${{ github.workspace }}/py
+        run: pip install -e ..[docs]
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -35,7 +45,7 @@ jobs:
           enablement: true
 
       - name: Build site
-        run: mkdocs build --clean
+        run: python -m properdocs build --clean
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

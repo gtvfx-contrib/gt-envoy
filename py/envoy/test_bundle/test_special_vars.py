@@ -1,19 +1,22 @@
 """Test special wrapper variables."""
-import sys
+
 import os
+import sys
 from pathlib import Path
 
 # Add the module to path for testing
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
-from envoy import WrapperConfig, ApplicationWrapper
+from envoy import ApplicationWrapper, WrapperConfig
 
 # Set up test PATH
 os.environ['TEST_PATH'] = 'C:/original/path'
 
 config = WrapperConfig(
     executable='python',
-    args=['-c', '''
+    args=[
+        '-c',
+        '''
 import os
 print("Special Variables Test:")
 print("=" * 60)
@@ -27,10 +30,11 @@ print()
 print(f"TEST_PATH (with append): {os.environ.get('TEST_PATH')}")
 print()
 print(f"SIMPLE_VAR: {os.environ.get('SIMPLE_VAR')}")
-'''],
+''',
+    ],
     env_files='gt/app/wrapper/test_package/env/test.json',
     capture_output=True,
-    stream_output=False
+    stream_output=False,
 )
 
 wrapper = ApplicationWrapper(config)

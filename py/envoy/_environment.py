@@ -1,16 +1,15 @@
 """Environment variable handling for ApplicationWrapper."""
 
-import os
 import json
-import re
 import logging
+import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ._exceptions import WrapperError
 from ._discovery import BUNDLE_ENV_DIR
-
+from ._exceptions import WrapperError
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +17,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class TraceAllowlistEvent:
     """Emitted when the traced variable appears in an ``environment_allowlist``."""
+
     file_path: Path
     var_name: str
     #: True → the variable was actually written into the merged env.
@@ -31,6 +31,7 @@ class TraceAllowlistEvent:
 @dataclass
 class TraceStepEvent:
     """Emitted for each env-file entry that touches the traced variable."""
+
     file_path: Path
     var_name: str
     #: Operator string: ``'='``, ``'+='``, ``'^='``, or ``'?='``.
@@ -52,87 +53,91 @@ class TraceStepEvent:
 # are present. They are never secret and refusing them typically breaks
 # tools in unexpected ways. The user allowlist (ENVOY_ALLOWLIST / --inherit-env)
 # is additive on top of these.
-_CORE_ENV_VARS: frozenset[str] = frozenset({
-    # --- User identity & home ---
-    'USERNAME',
-    'USERPROFILE',
-    'USERDOMAIN',
-    'USERDOMAIN_ROAMINGPROFILE',
-    'HOMEDRIVE',
-    'HOMEPATH',
-    # --- User data directories ---
-    'APPDATA',
-    'LOCALAPPDATA',
-    'PUBLIC',
-    'PROGRAMDATA',
-    'ALLUSERSPROFILE',  # legacy alias for PROGRAMDATA, still set on all Windows versions
-    # --- Temp ---
-    'TEMP',
-    'TMP',
-    'TMPDIR',           # macOS / Linux
-    # --- System / Windows layout ---
-    'SystemRoot',
-    'SystemDrive',
-    'windir',
-    'ProgramFiles',
-    'ProgramFiles(x86)',
-    'ProgramW6432',
-    'CommonProgramFiles',
-    'CommonProgramFiles(x86)',
-    'CommonProgramW6432',
-    # --- Hardware / OS identity ---
-    'COMPUTERNAME',
-    'OS',
-    'PROCESSOR_ARCHITECTURE',
-    'PROCESSOR_IDENTIFIER',
-    'PROCESSOR_LEVEL',
-    'PROCESSOR_REVISION',
-    'NUMBER_OF_PROCESSORS',
-    # --- Shell / console ---
-    'COMSPEC',
-    'PATHEXT',          # Windows: executable file extensions (.COM;.EXE;.BAT;.CMD;...)
-    'TERM',
-    'TERM_PROGRAM',
-    'COLORTERM',
-    # --- Unix identity (macOS / Linux) ---
-    'HOME',
-    'USER',
-    'LOGNAME',
-    'SHELL',
-    # --- Locale / encoding ---
-    'LANG',
-    'LC_ALL',
-    'LC_CTYPE',
-    'LC_MESSAGES',
-    # --- XDG base dirs (Linux) ---
-    'XDG_RUNTIME_DIR',
-    'XDG_CONFIG_HOME',
-    'XDG_DATA_HOME',
-    'XDG_CACHE_HOME',
-    # --- NOTE: PATH and PYTHONPATH are intentionally excluded ---
-    # These are only inherited from the local environment when inherit_env=True.
-    # In closed mode (the default) env files are solely responsible for setting PATH
-    # and PYTHONPATH, preventing unintentional leakage from the host environment.
-})
+_CORE_ENV_VARS: frozenset[str] = frozenset(
+    {
+        # --- User identity & home ---
+        'USERNAME',
+        'USERPROFILE',
+        'USERDOMAIN',
+        'USERDOMAIN_ROAMINGPROFILE',
+        'HOMEDRIVE',
+        'HOMEPATH',
+        # --- User data directories ---
+        'APPDATA',
+        'LOCALAPPDATA',
+        'PUBLIC',
+        'PROGRAMDATA',
+        'ALLUSERSPROFILE',  # legacy alias for PROGRAMDATA, still set on all Windows versions
+        # --- Temp ---
+        'TEMP',
+        'TMP',
+        'TMPDIR',  # macOS / Linux
+        # --- System / Windows layout ---
+        'SystemRoot',
+        'SystemDrive',
+        'windir',
+        'ProgramFiles',
+        'ProgramFiles(x86)',
+        'ProgramW6432',
+        'CommonProgramFiles',
+        'CommonProgramFiles(x86)',
+        'CommonProgramW6432',
+        # --- Hardware / OS identity ---
+        'COMPUTERNAME',
+        'OS',
+        'PROCESSOR_ARCHITECTURE',
+        'PROCESSOR_IDENTIFIER',
+        'PROCESSOR_LEVEL',
+        'PROCESSOR_REVISION',
+        'NUMBER_OF_PROCESSORS',
+        # --- Shell / console ---
+        'COMSPEC',
+        'PATHEXT',  # Windows: executable file extensions (.COM;.EXE;.BAT;.CMD;...)
+        'TERM',
+        'TERM_PROGRAM',
+        'COLORTERM',
+        # --- Unix identity (macOS / Linux) ---
+        'HOME',
+        'USER',
+        'LOGNAME',
+        'SHELL',
+        # --- Locale / encoding ---
+        'LANG',
+        'LC_ALL',
+        'LC_CTYPE',
+        'LC_MESSAGES',
+        # --- XDG base dirs (Linux) ---
+        'XDG_RUNTIME_DIR',
+        'XDG_CONFIG_HOME',
+        'XDG_DATA_HOME',
+        'XDG_CACHE_HOME',
+        # --- NOTE: PATH and PYTHONPATH are intentionally excluded ---
+        # These are only inherited from the local environment when inherit_env=True.
+        # In closed mode (the default) env files are solely responsible for setting PATH
+        # and PYTHONPATH, preventing unintentional leakage from the host environment.
+    }
+)
 
 # Envoy's own environment variables — always carried through so that child
 # processes launched by a command (e.g. a build script that calls envoy again)
 # inherit the same discovery and configuration context.
-_ENVOY_ENV_VARS: frozenset[str] = frozenset({
-    'ENVOY_ALLOWLIST',
-    'ENVOY_BNDL_PROD',
-    'ENVOY_BNDL_ROOTS',
-    'ENVOY_CONFIG_PROD',
-    'ENVOY_BUNDLES_CONFIG',
-    'ENVOY_STUDIO_ARTIFACTS',
-    'ENVOY_STUDIO_ASSETS',
-    'ENVOY_STUDIO_BNDLS',
-})
+_ENVOY_ENV_VARS: frozenset[str] = frozenset(
+    {
+        'ENVOY_ALLOWLIST',
+        'ENVOY_BNDL_PROD',
+        'ENVOY_BNDL_ROOTS',
+        'ENVOY_CONFIG_PROD',
+        'ENVOY_BUNDLES_CONFIG',
+        'ENVOY_STUDIO_ARTIFACTS',
+        'ENVOY_STUDIO_ASSETS',
+        'ENVOY_STUDIO_BNDLS',
+    }
+)
 
 
 class EnvironmentManager:
     """Manages environment variable loading, expansion, and preparation.
-    
+
     Handles:
     - Loading environment from JSON files
     - Variable expansion with ${VARNAME} syntax
@@ -143,38 +148,36 @@ class EnvironmentManager:
     - Null value detection: JSON null entries are skipped with a warning
     - Unresolved reference filtering: list items containing undefined ${VAR}
       references are omitted from the result with a warning
-    
+
     Environment modes:
     - Closed (default): child process receives variables defined in env files,
       plus the built-in core OS variables (_CORE_ENV_VARS) and any additional
       variables listed in the user allowlist (ENVOY_ALLOWLIST / --inherit-env).
     - Inherit-env: child process inherits the full system environment, with env
       file values layered on top.
-    
+
     """
-    
+
     def __init__(self, inherit_env: bool = False, allowlist: set[str] | None = None):
         """Initialize the environment manager.
-        
+
         Args:
             inherit_env: If True, child process inherits the full system environment
                 (inherit-env mode). If False, only env file variables and allowlisted
                 system variables are passed through (closed mode).
             allowlist: Set of system environment variable names to inherit even in
                 closed mode. Typically sourced from ENVOY_ALLOWLIST.
-            
+
         """
         self.inherit_env = inherit_env
         self.allowlist = allowlist or set()
-    
+
     @staticmethod
     def expandEnvValue(
-        value: str, 
-        current_env: dict[str, str],
-        special_vars: dict[str, str] | None = None
+        value: str, current_env: dict[str, str], special_vars: dict[str, str] | None = None
     ) -> str:
         """Expand environment variable references in a value string.
-        
+
         Supports ``${VARNAME}`` syntax to reference existing environment
         variables.  The legacy ``{$VARNAME}`` form is also accepted for
         backward compatibility.
@@ -185,37 +188,35 @@ class EnvironmentManager:
         form.  Warning suppression and silent-skip logic for optional refs
         is handled by the caller via :meth:`_findUndefinedOptionalRefs`;
         this method only performs the textual substitution.
-        
+
         Special variables:
             ${__BUNDLE__}      - Root directory of the bundle (parent of .envoy/)
             ${__BUNDLE_ENV__}  - The .envoy/ directory itself
             ${__BUNDLE_NAME__} - Name of the bundle (directory name)
             ${__FILE__}        - Current environment JSON file being processed
-        
+
         Lookup priority:
         1. Special wrapper variables (if provided)
         2. Current environment being built
-        
+
         Unresolved references expand to an empty string. In closed mode
         only allowlisted variables are seeded into current_env, so unknown
         references produce empty strings rather than leaking system values.
-        
+
         Args:
             value: String potentially containing ${VARNAME} or ${?VARNAME} references
             current_env: Current environment dictionary being built
             special_vars: Special wrapper-internal variables (optional)
-            
+
         Returns:
             Expanded string value
-            
+
         """
         # Primary form:  ${VARNAME}   (required reference)
         # Optional form: ${?VARNAME}  (optional reference — strip '?' for lookup)
         # Back-compat:   {$VARNAME}   (legacy envoy form)
-        pattern = re.compile(
-            r'\$\{(\??)([A-Za-z_][A-Za-z0-9_]*)\}|\{\$([A-Za-z_][A-Za-z0-9_]*)\}'
-        )
-        
+        pattern = re.compile(r'\$\{(\??)([A-Za-z_][A-Za-z0-9_]*)\}|\{\$([A-Za-z_][A-Za-z0-9_]*)\}')
+
         def replacer(match):
             if match.group(3):
                 # Back-compat {$VAR} style
@@ -229,28 +230,28 @@ class EnvironmentManager:
             if var_name in current_env:
                 return current_env[var_name]
             return ''
-        
+
         return pattern.sub(replacer, value)
-    
+
     @staticmethod
     def normalizePath(path: str) -> str:
         """Normalize Unix-style paths to OS-specific format.
-        
+
         Converts forward slashes to backslashes on Windows.
         Leaves paths unchanged on Unix systems.
-        
+
         Args:
             path: Path string (can use Unix-style forward slashes)
-            
+
         Returns:
             Normalized path for the current OS
-            
+
         """
         if os.name == 'nt':
             # On Windows, convert forward slashes to backslashes
             return path.replace('/', '\\')
         return path
-    
+
     @staticmethod
     def _findUnresolvedRefs(
         value: str,
@@ -277,9 +278,7 @@ class EnvironmentManager:
 
         """
         # Only match required refs ${VAR}, not optional ${?VAR}
-        pattern = re.compile(
-            r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\$([A-Za-z_][A-Za-z0-9_]*)\}'
-        )
+        pattern = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\{\$([A-Za-z_][A-Za-z0-9_]*)\}')
         unresolved: set[str] = set()
         for match in pattern.finditer(value):
             var_name = match.group(1) or match.group(2)
@@ -317,15 +316,12 @@ class EnvironmentManager:
             if (not special_vars or var_name not in special_vars) and var_name not in current_env:
                 undefined.add(var_name)
         return undefined
-    
+
     def processEnvValue(
-        self, 
-        value: Any, 
-        merged_env: dict[str, str],
-        special_vars: dict[str, str] | None = None
+        self, value: Any, merged_env: dict[str, str], special_vars: dict[str, str] | None = None
     ) -> str:
         """Process an environment variable value from JSON.
-        
+
         Handles:
         - Lists: joined with OS path separator
         - Strings: used as-is
@@ -333,25 +329,25 @@ class EnvironmentManager:
         - ${VARNAME} expansion (including special variables)
         - Path normalization to OS-native format (forward slashes → backslashes
           on Windows) applied after expansion
-        
+
         Args:
             value: The value from JSON (string, list, or other)
             merged_env: Current environment dictionary for variable expansion
             special_vars: Special wrapper-internal variables (optional)
-            
+
         Returns:
             Processed string value with OS-native path separators
-            
+
         """
         # Determine path separator based on OS
         path_sep = ';' if os.name == 'nt' else ':'
-        
+
         # Handle list values - join with path separator
         if isinstance(value, list):
             str_value = path_sep.join(str(item) for item in value)
         else:
             str_value = str(value)
-        
+
         # Expand any ${VARNAME} references (including special vars), then
         # normalize to OS-native path separators so the final environment
         # value is consistent regardless of how slashes appear in JSON or
@@ -359,40 +355,40 @@ class EnvironmentManager:
         # while ${__BUNDLE__} is stored with forward slashes internally).
         expanded_value = self.expandEnvValue(str_value, merged_env, special_vars)
         return self.normalizePath(expanded_value)
-    
+
     @staticmethod
     def getSpecialVariables(env_file_path: Path) -> dict[str, str]:
         """Calculate special wrapper-internal variables for an environment file.
-        
+
         Special variables (available as ``${NAME}`` in env file values):
             __BUNDLE__      - Root directory of the bundle (parent of .envoy/)
             __BUNDLE_ENV__  - The .envoy/ directory itself
             __BUNDLE_NAME__ - Name of the bundle (directory name)
             __FILE__        - Path to the current environment JSON file
-            
+
         Returns:
             Dictionary of special variable names and their values
-            
+
         """
         env_file_abs = env_file_path.resolve()
-        
+
         # Try to find the .envoy/ directory by walking up the path
         current = env_file_abs.parent
         package_env_dir = None
         package_root = None
-        
+
         # Look for '.envoy' directory in the path
         for parent in [current] + list(current.parents):
             if parent.name == BUNDLE_ENV_DIR:
                 package_env_dir = parent
                 package_root = parent.parent
                 break
-        
+
         # If no .envoy/ directory found, use file's parent as bundle root
         if package_root is None:
             package_root = env_file_abs.parent
             package_env_dir = package_root
-        
+
         # Convert to cross-platform paths (keep forward slashes - will be normalized later)
         # The paths will use forward slashes internally and get normalized
         # to backslashes on Windows during normalizePath processing
@@ -402,9 +398,9 @@ class EnvironmentManager:
             '__BUNDLE_ENV__': str(package_env_dir).replace('\\', '/'),
             '__BUNDLE_NAME__': package_root.name,
         }
-        
+
         return special_vars
-    
+
     def loadEnvFromFiles(
         self,
         env_files: str | Path | list[str | Path] | None,
@@ -417,7 +413,7 @@ class EnvironmentManager:
 
         Files are merged in order, with later files overriding earlier ones.
         Supports variable expansion, append/prepend operators, and path lists.
-        
+
         Two top-level JSON formats are accepted:
 
         **Flat format** — every key is a variable name (with optional operator):
@@ -456,7 +452,7 @@ class EnvironmentManager:
         means a var declared in a later file's allowlist is already visible to
         ``+=`` / ``^=`` operators in earlier files.  Variables not present in
         ``os.environ`` are silently skipped.
-        
+
         Operator prefix summary:
             ``+=VAR`` — append (current + sep + new)
             ``^=VAR`` — prepend (new + sep + current)
@@ -482,14 +478,15 @@ class EnvironmentManager:
             ``${__BUNDLE_ENV__}``  — the ``.envoy/`` directory itself
             ``${__BUNDLE_NAME__}`` — bundle directory name
             ``${__FILE__}``        — current environment JSON file path
-        
+
         Args:
             env_files: Single file path or list of file paths to load
             base_env: Variables already in scope before any file is processed.
-                Used for ${VARNAME} expansion (with {$VARNAME} as a legacy alias) and as the starting point for +=
-                and ^= operators.  Should be os.environ.copy() in inherit-env
-                mode, or the allowlist-seeded dict in closed mode.  Never
-                modified — a copy is taken before file processing begins.
+                Used for ${VARNAME} expansion (with {$VARNAME} as a legacy
+                alias) and as the starting point for += and ^= operators.
+                Should be os.environ.copy() in inherit-env mode, or the
+                allowlist-seeded dict in closed mode.  Never modified — a
+                copy is taken before file processing begins.
             trace_var: Variable name to trace mutations for (optional).
             trace_out: List to append :class:`TraceStepEvent` and
                 :class:`TraceAllowlistEvent` objects to (optional).
@@ -507,14 +504,14 @@ class EnvironmentManager:
         """
         if not env_files:
             return dict(base_env) if base_env else {}
-        
+
         # Normalize to list
         if isinstance(env_files, (str, Path)):
             env_files = [env_files]
-        
+
         # Determine path separator based on OS
         path_sep = ';' if os.name == 'nt' else ':'
-        
+
         # Seed from base_env so ${VAR} references and += operators see whatever
         # variables are legitimately in scope (allowlist or full system env).
         # A copy is taken so the caller's dict is never modified.
@@ -531,7 +528,7 @@ class EnvironmentManager:
             if not path.exists():
                 raise WrapperError(f"Environment file not found: {path}")
             try:
-                with open(path, 'r', encoding='utf-8') as f:
+                with open(path, encoding='utf-8') as f:
                     file_data = json.load(f)
             except json.JSONDecodeError as e:
                 raise WrapperError(f"Invalid JSON in environment file {path}: {e}") from e
@@ -549,13 +546,15 @@ class EnvironmentManager:
                     if allowlist_out is not None:
                         allowlist_out.append(var)
                     if trace_out is not None and trace_var == var:
-                        trace_out.append(TraceAllowlistEvent(
-                            file_path=_path,
-                            var_name=var,
-                            seeded=not already_set and in_os,
-                            os_value=os.environ.get(var, ''),
-                            already_set=already_set,
-                        ))
+                        trace_out.append(
+                            TraceAllowlistEvent(
+                                file_path=_path,
+                                var_name=var,
+                                seeded=not already_set and in_os,
+                                os_value=os.environ.get(var, ''),
+                                already_set=already_set,
+                            )
+                        )
 
         # --- Main pass: process each file's entries in order -----------------
         for path, file_data in parsed_files:
@@ -606,7 +605,8 @@ class EnvironmentManager:
                     if unknown_keys:
                         log.warning(
                             'Unknown keys in structured env file %s: %s',
-                            path, ', '.join(sorted(unknown_keys)),
+                            path,
+                            ', '.join(sorted(unknown_keys)),
                         )
 
                 else:
@@ -621,7 +621,7 @@ class EnvironmentManager:
                     prepend_mode = False
                     default_mode = False
                     var_name = key
-                    
+
                     if key.startswith('?='):
                         default_mode = True
                         var_name = key[2:]
@@ -636,7 +636,8 @@ class EnvironmentManager:
                     if value is None:
                         log.warning(
                             "Skipping '%s' in %s: value is null",
-                            var_name, path,
+                            var_name,
+                            path,
                         )
                         continue
 
@@ -648,7 +649,8 @@ class EnvironmentManager:
                             if item is None:
                                 log.warning(
                                     "Skipping null item for '%s' in %s",
-                                    var_name, path,
+                                    var_name,
+                                    path,
                                 )
                                 continue
                             item_str = str(item)
@@ -666,9 +668,10 @@ class EnvironmentManager:
                             )
                             if unresolved:
                                 log.warning(
-                                    "Skipping item '%s' for '%s' in %s: "
-                                    "undefined variable(s): %s",
-                                    item_str, var_name, path,
+                                    "Skipping item '%s' for '%s' in %s: undefined variable(s): %s",
+                                    item_str,
+                                    var_name,
+                                    path,
                                     ', '.join(sorted(unresolved)),
                                 )
                             else:
@@ -683,14 +686,13 @@ class EnvironmentManager:
                         if opt_undefined:
                             continue
                         # Required refs — warn (entry is still applied).
-                        unresolved = self._findUnresolvedRefs(
-                            value, merged_env, special_vars
-                        )
+                        unresolved = self._findUnresolvedRefs(value, merged_env, special_vars)
                         if unresolved:
                             log.warning(
-                                "Variable '%s' in %s references undefined "
-                                "variable(s): %s",
-                                var_name, path, ', '.join(sorted(unresolved)),
+                                "Variable '%s' in %s references undefined variable(s): %s",
+                                var_name,
+                                path,
+                                ', '.join(sorted(unresolved)),
                             )
 
                     # Process the value (handles lists, normalization, expansion)
@@ -719,27 +721,37 @@ class EnvironmentManager:
                         merged_env[var_name] = processed_value
 
                     if trace_out is not None and trace_var == var_name:
-                        operator = '?=' if default_mode else '+=' if append_mode else '^=' if prepend_mode else '='
-                        trace_out.append(TraceStepEvent(
-                            file_path=path,
-                            var_name=var_name,
-                            operator=operator,
-                            raw_value=json.dumps(value),
-                            expanded_value=processed_value,
-                            value_before=value_before,
-                            value_after=merged_env.get(var_name, ''),
-                            was_applied=was_applied,
-                        ))
-                
+                        operator = (
+                            '?='
+                            if default_mode
+                            else '+='
+                            if append_mode
+                            else '^='
+                            if prepend_mode
+                            else '='
+                        )
+                        trace_out.append(
+                            TraceStepEvent(
+                                file_path=path,
+                                var_name=var_name,
+                                operator=operator,
+                                raw_value=json.dumps(value),
+                                expanded_value=processed_value,
+                                value_before=value_before,
+                                value_after=merged_env.get(var_name, ''),
+                                was_applied=was_applied,
+                            )
+                        )
+
                 log.info('Loaded environment from %s (%d entries)', path, len(items))
 
             except WrapperError:
                 raise
             except Exception as e:
                 raise WrapperError(f"Error reading environment file {path}: {e}") from e
-        
+
         return merged_env
-    
+
     def prepareEnvironment(
         self,
         env_files: str | Path | list[str | Path] | None = None,
@@ -748,7 +760,7 @@ class EnvironmentManager:
         trace_out: list | None = None,
     ) -> dict[str, str]:
         """Prepare environment variables for subprocess.
-        
+
         Priority (later overrides earlier):
         1. Allowlisted system variables (closed mode) or full system env (inherit-env mode)
         2. Environment from JSON files
@@ -759,14 +771,17 @@ class EnvironmentManager:
             mode (the default).  Env files are solely responsible for defining
             them.  Pass ``inherit_env=True`` to ``EnvironmentManager`` if you need
             to propagate them from the host environment.
-        
+
         Args:
             env_files: JSON file(s) to load environment from
             env: Explicit environment variables to add/override
-            
+            trace_var: Variable name to trace mutations for (optional).
+            trace_out: List to append :class:`TraceStepEvent` and
+                :class:`TraceAllowlistEvent` objects to (optional).
+
         Returns:
             Dictionary of environment variables
-            
+
         """
         if self.inherit_env:
             # Inherit-env: start with the full system environment
@@ -781,7 +796,7 @@ class EnvironmentManager:
             for var in _CORE_ENV_VARS | _ENVOY_ENV_VARS | self.allowlist:
                 if var in os.environ:
                     result_env[var] = os.environ[var]
-        
+
         # Load from files (overrides inherited/seeded env).
         # Pass result_env as base_env so ${VAR} expansion and += / ^= operators
         # inside env files see exactly the same variables that will be in scope —
@@ -804,9 +819,9 @@ class EnvironmentManager:
             existing_set = {v.strip() for v in existing.replace(',', ';').split(';') if v.strip()}
             combined = existing_set | set(allowlist_additions)
             result_env['ENVOY_ALLOWLIST'] = ';'.join(sorted(combined))
-        
+
         # Explicit env dict overrides everything
         if env:
             result_env.update(env)
-        
+
         return result_env
