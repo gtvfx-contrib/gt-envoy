@@ -43,7 +43,7 @@ en python_dev -m pytest tests/
 **`.envoy/unreal_env.json`:**
 ```json
 {
-    "+=PYTHONPATH": "${__BUNDLE__}/py",
+    "+=UE_PYTHONPATH": "${__BUNDLE__}/py",
     "+=PATH":       "${__BUNDLE__}/bin",
     "UE_BIN":       "D:/Epic Games/UE_5.7/Engine/Binaries/Win64/UnrealEditor.exe"
 }
