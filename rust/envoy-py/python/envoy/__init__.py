@@ -16,6 +16,11 @@ from . import testing
 _native = importlib.import_module("._envoy", __name__)
 
 _core_version = _native._core_version
+#: Git-tag-derived version string (e.g. ``'v1.2.3'`` or ``'v1.2.3-4-gabc123'``
+#: for commits after the last tag), computed at build time via
+#: ``rust/envoy-py/build.rs``. Mirrors ``py/envoy/__init__.py``'s
+#: ``hatch-vcs``-derived ``__version__``.
+__version__ = _native._git_version()
 OPERATING_SYSTEM = _native.OPERATING_SYSTEM
 SUPPORTED_OPERATING_SYSTEMS = _native.SUPPORTED_OPERATING_SYSTEMS
 TraceAllowlistEvent = _native.TraceAllowlistEvent
@@ -46,6 +51,7 @@ _sys.modules[__name__ + ".exceptions"] = exceptions
 
 __all__ = [
     "_core_version",
+    "__version__",
     "OPERATING_SYSTEM",
     "SUPPORTED_OPERATING_SYSTEMS",
     "TraceAllowlistEvent",

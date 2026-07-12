@@ -6,7 +6,7 @@ const LEGACY_ALIAS_HELP: &str = "Legacy compatibility aliases: -cf, -bc, -sc, -g
 #[command(
     name = "envoy",
     about = "Envoy: Environment orchestration for applications",
-    version,
+    version = env!("ENVOY_VERSION"),
     after_help = LEGACY_ALIAS_HELP
 )]
 pub(crate) struct Cli {

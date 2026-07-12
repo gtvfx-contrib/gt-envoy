@@ -15,6 +15,18 @@ as the migration progresses.
 | `engit-core`  | lib                  | `py/engit/_*.py`        | Git/GitHub tooling logic. Depends on `envoy-core` for bundle discovery / named-config resolution. |
 | `engit-cli`   | bin (`engit`)        | `py/engit/_cli.py`      | Native binary. No Python API — `engit` is CLI-only. |
 
+## Versioning
+
+`envoy-cli`/`engit-cli`'s `--version` output and `envoy.__version__` (in
+`envoy-py`) are derived from `git describe --tags --always --dirty` at
+*build time* via each crate's `build.rs`, falling back to the static
+`Cargo.toml` version if `git` is unavailable (e.g. building from a
+source-only tarball with no `.git/`). This mirrors `py/envoy`'s
+`hatch-vcs`-derived versioning without requiring `Cargo.toml`'s
+`[workspace.package] version` (which must stay a fixed placeholder, since
+Cargo requires a static valid semver there) to be hand-maintained per
+release.
+
 ## Building
 
 ```powershell

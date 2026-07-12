@@ -26,9 +26,18 @@ fn _core_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Git-tag-derived version string (see `build.rs`), exposed as
+/// `envoy.__version__` via `python/envoy/__init__.py`, mirroring
+/// `py/envoy/__init__.py`'s `hatch-vcs`-derived `__version__`.
+#[pyfunction]
+fn _git_version() -> &'static str {
+    env!("ENVOY_PY_VERSION")
+}
+
 #[pymodule]
 fn _envoy(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_core_version, m)?)?;
+    m.add_function(wrap_pyfunction!(_git_version, m)?)?;
     exceptions::register_exception_bindings(py, m)?;
     api::register_api_bindings(py, m)?;
     proc::register_proc_module(py, m)?;
