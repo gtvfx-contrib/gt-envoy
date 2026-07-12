@@ -65,3 +65,43 @@ jobs:
       - name: Run cargo test
         working-directory: rust
         run: cargo test --workspace --exclude envoy-py
+
+  rust-envoy-py:
+    name: Rust envoy-py (fmt + clippy + test, PyO3)
+    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry/build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Run cargo fmt --check
+        working-directory: rust
+        run: cargo fmt --check -p envoy-py
+
+      - name: Run cargo clippy
+        working-directory: rust
+        run: cargo clippy -p envoy-py --all-targets -- -D warnings
+
+      - name: Run cargo test
+        working-directory: rust
+        run: cargo test -p envoy-py --lib
+
+      - name: Build wheel with maturin
+        run: |
+          pip install maturin
+          python -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml

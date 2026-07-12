@@ -43,7 +43,35 @@ commands above because it requires linking against a Python interpreter
 
 ## Migration status
 
-This workspace is being built out incrementally, module-by-module, per the
-migration plan. See the `todos` tracked for this effort for current status.
-Until the migration completes, `py/envoy` and `py/engit` remain the
-source of truth / what's actually shipped.
+`envoy-core`, `envoy-cli`, `engit-core`, and `engit-cli` are functionally
+complete (full test coverage, ported module-for-module from `py/envoy`'s
+core and `py/engit`). `envoy-py` (the PyO3 bindings preserving `import
+envoy`) currently exposes `envoy.proc`, `envoy.testing`, `envoy.exceptions`,
+and a subset of top-level functions (`getEnvironment`, `getAllowlist`,
+`traceEnvironment`, `setApiVerbosity`, `loadUserConfig`,
+`getCurrentBundleConfig`) — but **not yet** the full `py/envoy/__init__.py`
+surface (e.g. `Bundle`, `BundleConfig` full construction, `ApplicationWrapper`,
+`CommandRegistry`, `discoverBundlesAuto()`, etc., which
+`gt/globals/py/gt/vscode/wrapper` calls directly today).
+
+**Distribution status:**
+- `envoy`/`engit` **native binaries** (`bin/envoy.bat`, `bin/engit.bat`) now
+  prefer the Rust builds (`rust/target/release/*.exe`, falling back to
+  `dist/*.exe` in published bundles, falling back to `python -m envoy`/
+  `python -m engit` from `py/` in dev checkouts). `.github/workflows/
+  build-release.yml` builds these via `cargo build --release`, replacing
+  the old PyInstaller (`envoy.spec`) step.
+- The **`envoy` Python package** (`pip install envoy`, used as a library by
+  `gt/globals`, `gt/devtools`, `gt/krita`, `gt/unreal`) is still built from
+  `py/envoy` (pure Python, `hatchling` backend) — **not** yet cut over to
+  the `envoy-py` PyO3 wheel — because `envoy-py` doesn't have full parity
+  with `py/envoy`'s public API yet. CI builds the PyO3 wheel too (via
+  `maturin`) as a build-correctness check, but does not publish it as a
+  release asset until parity is verified against real consumers.
+- Cross-platform (Linux/macOS) builds of the native binaries are verified
+  in CI (`build-native-cross-platform` job) but not yet distributed as
+  release assets, since Linux/macOS distribution isn't an established
+  workflow for this project yet (bin/*.bat, the bundle-publish zip layout,
+  etc. are still Windows-oriented).
+
+See the `todos` tracked for this effort for granular per-module status.
