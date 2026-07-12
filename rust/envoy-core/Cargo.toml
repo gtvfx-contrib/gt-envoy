@@ -1,0 +1,18 @@
+[package]
+name = "envoy-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Environment orchestration core logic for envoy (bundle discovery, environment operators, command registry, process execution)."
+
+[lib]
+name = "envoy_core"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

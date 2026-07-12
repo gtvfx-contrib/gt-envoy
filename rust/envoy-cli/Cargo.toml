@@ -1,0 +1,15 @@
+[package]
+name = "envoy-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native envoy CLI dispatcher (no Python runtime dependency)."
+
+[[bin]]
+name = "envoy"
+path = "src/main.rs"
+
+[dependencies]
+envoy-core = { path = "../envoy-core" }
+clap.workspace = true

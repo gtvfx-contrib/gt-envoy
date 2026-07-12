@@ -1,0 +1,16 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "envoy"
+version = "0.0.0"
+requires-python = ">=3.10"
+description = "Environment orchestration for managed application execution (Rust core, PyO3 bindings)."
+
+[tool.maturin]
+# Mixed Rust/Python layout: python/envoy/__init__.py re-exports symbols from
+# the compiled extension built from src/lib.rs (module name `envoy._envoy`).
+python-source = "python"
+module-name = "envoy._envoy"
+features = ["pyo3/extension-module"]

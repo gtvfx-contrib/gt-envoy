@@ -1,0 +1,19 @@
+[package]
+name = "envoy-py"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "PyO3 bindings exposing envoy-core as the `envoy` Python package."
+
+[lib]
+# Built as a cdylib for Python (`maturin build`) and as an rlib so it can
+# still be unit-tested with `cargo test`.
+name = "envoy"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+envoy-core = { path = "../envoy-core" }
+# abi3-py310 matches pyproject.toml's `requires-python = ">=3.10"`, so a
+# single wheel per OS/arch works across all supported Python versions.
+pyo3 = { version = "0.22", features = ["abi3-py310"] }
