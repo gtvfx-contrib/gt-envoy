@@ -22,6 +22,8 @@
 //! | [`wrapper`]          | `_wrapper.py`            |
 
 pub mod config_registry;
+pub mod discovery;
+pub mod environment;
 pub mod error;
 pub mod models;
 pub mod user_config;
