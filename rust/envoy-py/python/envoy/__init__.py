@@ -11,6 +11,8 @@ from __future__ import annotations
 import importlib
 import sys as _sys
 
+from . import testing
+
 _native = importlib.import_module("._envoy", __name__)
 
 _core_version = _native._core_version
@@ -20,10 +22,12 @@ CommandNotFoundError = proc.CommandNotFoundError
 EnvironmentBuildError = proc.EnvironmentBuildError
 
 _sys.modules[__name__ + ".proc"] = proc
+_sys.modules[__name__ + ".testing"] = testing
 
 __all__ = [
     "_core_version",
     "proc",
+    "testing",
     "CalledProcessError",
     "CommandNotFoundError",
     "EnvironmentBuildError",
