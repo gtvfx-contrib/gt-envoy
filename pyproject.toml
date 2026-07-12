@@ -12,7 +12,6 @@ license = { file = "LICENSE" }
 
 [project.scripts]
 envoy = "envoy._cli:main"
-engit = "engit._cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -35,7 +34,7 @@ version-file = "py/envoy/_version.py"
 
 [tool.hatch.build.targets.wheel]
 # Package sources live under py/, not the project root.
-packages = ["py/envoy", "py/engit"]
+packages = ["py/envoy"]
 exclude = [
     "py/envoy/test_bundle",
     "py/envoy/examples",
