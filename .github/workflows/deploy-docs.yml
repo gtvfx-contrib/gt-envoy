@@ -36,6 +36,12 @@ jobs:
         # docstrings; the [docs] extra brings properdocs, mkdocstrings, and
         # the gen-files/literate-nav plugins used for auto-generated API
         # reference pages under docs/reference/ (see docs/gen_ref_pages.py).
+        #
+        # This introspects the pure-Python py/envoy package, which remains
+        # the distributed `envoy` library until the envoy-py PyO3 port
+        # reaches full API parity (see rust/README.md). The Rust crate docs
+        # are built separately below as an internal-only artifact, not
+        # published to this site.
         working-directory: ${{ github.workspace }}/py
         run: pip install -e ..[docs]
 
@@ -64,3 +70,48 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  rust-docs:
+    # Internal-only rustdoc build for the Rust workspace, for maintainers
+    # working on the rust/ migration. NOT published to GitHub Pages (the
+    # public docs site above documents the Python API surface, which is
+    # what consumers actually use) -- uploaded as a plain workflow artifact
+    # instead, downloadable from the Actions run summary.
+    name: Build internal rustdoc (not published)
+    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry/build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build rustdoc
+        working-directory: rust
+        run: cargo doc --workspace --exclude envoy-py --no-deps
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Build rustdoc for envoy-py
+        # Separate step: envoy-py links against a Python interpreter (pyo3),
+        # so it needs the Python toolchain set up first (unlike the other
+        # crates above).
+        working-directory: rust
+        run: cargo doc -p envoy-py --no-deps
+
+      - name: Upload rustdoc artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdoc
+          path: rust/target/doc/
+          retention-days: 14
+
