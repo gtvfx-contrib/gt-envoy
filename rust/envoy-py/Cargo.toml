@@ -12,6 +12,9 @@ description = "PyO3 bindings exposing envoy-core as the `envoy` Python package."
 name = "envoy"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+gil-refs = []
+
 [dependencies]
 envoy-core = { path = "../envoy-core" }
 # abi3-py310 matches pyproject.toml's `requires-python = ">=3.10"`, so a

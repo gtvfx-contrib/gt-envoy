@@ -1,18 +1,30 @@
 """envoy -- Environment orchestration for managed application execution.
 
-Phase-0 scaffolding placeholder for the PyO3-backed `envoy` package. Real
-public API surface (Bundle, BundleConfig, ApplicationWrapper, proc, testing,
-exceptions, etc. -- see py/envoy/__init__.py for the full contract to
-replicate) is ported in Phases 2-4 of the Rust migration plan.
-
-Once ported, this file becomes the thin Python-side aggregator that
-re-exports symbols from the compiled `envoy._envoy` extension module,
-mirroring today's `py/envoy/__init__.py` structure so `import envoy` keeps
-working unchanged for existing consumers.
+This mixed-layout maturin package re-exports symbols from the compiled
+``envoy._envoy`` extension module while preserving the existing
+``import envoy`` and ``import envoy.proc`` entry points expected by
+downstream consumers.
 """
 
 from __future__ import annotations
 
-from ._envoy import _core_version
+import importlib
+import sys as _sys
 
-__all__ = ["_core_version"]
+_native = importlib.import_module("._envoy", __name__)
+
+_core_version = _native._core_version
+proc = _native.proc
+CalledProcessError = proc.CalledProcessError
+CommandNotFoundError = proc.CommandNotFoundError
+EnvironmentBuildError = proc.EnvironmentBuildError
+
+_sys.modules[__name__ + ".proc"] = proc
+
+__all__ = [
+    "_core_version",
+    "proc",
+    "CalledProcessError",
+    "CommandNotFoundError",
+    "EnvironmentBuildError",
+]

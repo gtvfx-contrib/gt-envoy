@@ -14,6 +14,8 @@
 
 use pyo3::prelude::*;
 
+mod proc;
+
 /// Returns the `envoy-core` crate version this extension was built against.
 /// Placeholder export to prove the PyO3 build/import path works end-to-end;
 /// removed once real bindings are ported.
@@ -23,7 +25,8 @@ fn _core_version() -> &'static str {
 }
 
 #[pymodule]
-fn _envoy(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _envoy(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_core_version, m)?)?;
+    proc::register_proc_module(py, m)?;
     Ok(())
 }
