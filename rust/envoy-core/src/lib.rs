@@ -21,6 +21,9 @@
 //! | [`executor`]         | `_executor.py`           |
 //! | [`wrapper`]          | `_wrapper.py`            |
 
+pub mod config_registry;
 pub mod error;
+pub mod models;
+pub mod user_config;
 
 pub use error::{EnvoyError, Result};
