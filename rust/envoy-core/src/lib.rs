@@ -21,10 +21,12 @@
 //! | [`executor`]         | `_executor.py`           |
 //! | [`wrapper`]          | `_wrapper.py`            |
 
+pub mod commands;
 pub mod config_registry;
 pub mod discovery;
 pub mod environment;
 pub mod error;
+pub mod executor;
 pub mod models;
 pub mod user_config;
 
