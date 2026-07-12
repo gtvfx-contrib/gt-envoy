@@ -7,13 +7,14 @@
 //! `gt/globals/py/gt/vscode/wrapper`, `gt/devtools/py/cleanup_branches.py`,
 //! and the `gt/krita` / `gt/unreal` wrapper packages.
 //!
-//! This is currently a Phase 0 scaffolding placeholder. The real bindings
-//! (Bundle, BundleConfig, ApplicationWrapper, proc.call/checkCall/
-//! checkOutput/spawn, exception classes, etc.) land in Phases 2-4 of the
-//! migration plan as envoy-core gains the corresponding modules.
+//! Current bindings include the `envoy.proc` subprocess surface plus the
+//! top-level `_api.py` convenience functions and supporting wrapper types
+//! (`UserConfig`, `BundleConfig`, and trace-event records). Additional
+//! bundle/discovery/wrapper APIs land in later migration phases.
 
 use pyo3::prelude::*;
 
+mod api;
 mod proc;
 
 /// Returns the `envoy-core` crate version this extension was built against.
@@ -27,6 +28,7 @@ fn _core_version() -> &'static str {
 #[pymodule]
 fn _envoy(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_core_version, m)?)?;
+    api::register_api_bindings(py, m)?;
     proc::register_proc_module(py, m)?;
     Ok(())
 }
