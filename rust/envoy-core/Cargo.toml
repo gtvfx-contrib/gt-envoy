@@ -10,6 +10,7 @@ description = "Environment orchestration core logic for envoy (bundle discovery,
 name = "envoy_core"
 
 [dependencies]
+ctrlc = "3"
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true

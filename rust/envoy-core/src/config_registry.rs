@@ -373,7 +373,6 @@ mod tests {
     use std::ffi::{OsStr, OsString};
     use std::fs;
     use std::path::Path;
-    use std::sync::Mutex;
     use std::time::{Duration, UNIX_EPOCH};
 
     use tempfile::tempdir;
@@ -383,8 +382,6 @@ mod tests {
         publish_config, read_latest, resolve_named_config, roots_from_str, EnvoyError,
         NamedConfigEntry, CFG_ROOTS_VAR, LATEST_FILE, TIMESTAMP_FMT,
     };
-
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     struct EnvVarGuard {
         previous: Option<OsString>,
@@ -412,10 +409,15 @@ mod tests {
         }
     }
 
+    /// Locks the crate-wide `crate::env_test_lock::MUTEX` rather than a
+    /// module-local mutex: both `config_registry` and `discovery` tests
+    /// mutate the same real `ENVOY_CFG_ROOTS` process environment variable,
+    /// so a single shared lock is required to prevent cross-module test
+    /// races under `cargo test`'s default parallel execution.
     fn with_cfg_roots_env<T>(value: Option<&OsStr>, test_fn: impl FnOnce() -> T) -> T {
-        let _lock = TEST_MUTEX
+        let _lock = crate::env_test_lock::MUTEX
             .lock()
-            .expect("config registry test mutex poisoned");
+            .unwrap_or_else(|poison| poison.into_inner());
         let _env_guard = EnvVarGuard::set(value);
 
         test_fn()

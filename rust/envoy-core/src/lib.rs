@@ -29,5 +29,28 @@ pub mod error;
 pub mod executor;
 pub mod models;
 pub mod user_config;
+pub mod wrapper;
 
 pub use error::{EnvoyError, Result};
+
+/// Shared test-only synchronization for tests that mutate real process
+/// environment variables (`ENVOY_CFG_ROOTS`, `ENVOY_USER_CONFIG`,
+/// `ENVOY_COMMANDS_FILE`, `ENVOY_BNDL_ROOTS`, etc.).
+///
+/// `commands`, `config_registry`, `discovery`, and `environment` each have
+/// tests that temporarily set/restore real environment variables. Since
+/// `cargo test` runs tests in parallel threads within a single process, and
+/// environment variables are process-global, tests in *different* modules
+/// that each guarded their own module-local mutex could still race against
+/// each other on the same real env var (e.g. both `discovery` and
+/// `config_registry` touch `ENVOY_CFG_ROOTS`). All such tests must lock this
+/// single crate-wide mutex instead of a module-local one.
+#[cfg(test)]
+pub(crate) mod env_test_lock {
+    use std::sync::Mutex;
+
+    /// Crate-wide mutex guarding any test that mutates real environment
+    /// variables. Lock this (via `.lock().unwrap_or_else(|poison|
+    /// poison.into_inner())`) before mutating `std::env` in a test.
+    pub(crate) static MUTEX: Mutex<()> = Mutex::new(());
+}

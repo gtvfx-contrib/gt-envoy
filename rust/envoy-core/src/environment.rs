@@ -1072,14 +1072,10 @@ mod tests {
     use std::ffi::{OsStr, OsString};
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
-
     use tempfile::tempdir;
 
     use super::{core_env_vars, envoy_env_vars, path_separator, EnvironmentManager, TraceEvent};
     use crate::error::EnvoyError;
-
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     struct EnvVarGuard {
         previous: Vec<(String, Option<OsString>)>,
@@ -1112,8 +1108,15 @@ mod tests {
         }
     }
 
+    /// Locks the crate-wide `crate::env_test_lock::MUTEX` rather than a
+    /// module-local mutex: several modules' tests mutate the same real
+    /// process environment variables, so a single shared lock is required to
+    /// prevent cross-module test races under `cargo test`'s default parallel
+    /// execution.
     fn with_locked_env<T>(updates: &[(&str, Option<&OsStr>)], test_fn: impl FnOnce() -> T) -> T {
-        let _lock = TEST_MUTEX.lock().expect("environment test mutex poisoned");
+        let _lock = crate::env_test_lock::MUTEX
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let _env_guard = EnvVarGuard::set_many(updates);
         test_fn()
     }

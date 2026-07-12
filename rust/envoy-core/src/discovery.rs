@@ -979,7 +979,6 @@ mod tests {
     use std::ffi::{OsStr, OsString};
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::sync::Mutex;
 
     use serde_json::json;
     use serde_json::Value;
@@ -993,8 +992,6 @@ mod tests {
         BundleInfo, EnvoyError, BUNDLES_CONFIG_VAR, BUNDLE_CHECKOUT, BUNDLE_ENV_DIR,
         BUNDLE_MARKER_FILE, BUNDLE_ROOTS_VAR,
     };
-
-    static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
     struct EnvVarGuard {
         key: &'static str,
@@ -1023,8 +1020,14 @@ mod tests {
         }
     }
 
+    /// Locks the crate-wide `crate::env_test_lock::MUTEX` rather than a
+    /// module-local mutex: several modules' tests mutate the same real
+    /// process environment variables (e.g. `ENVOY_CFG_ROOTS` is touched by
+    /// both `discovery` and `config_registry`), so a single shared lock is
+    /// required to prevent cross-module test races under `cargo test`'s
+    /// default parallel execution.
     fn with_env_lock<T>(test_fn: impl FnOnce() -> T) -> T {
-        let _lock = TEST_MUTEX
+        let _lock = crate::env_test_lock::MUTEX
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         test_fn()
