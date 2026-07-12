@@ -29,12 +29,20 @@ setApiVerbosity = _native.setApiVerbosity
 loadUserConfig = _native.loadUserConfig
 getCurrentBundleConfig = _native.getCurrentBundleConfig
 proc = _native.proc
-CalledProcessError = proc.CalledProcessError
-CommandNotFoundError = proc.CommandNotFoundError
-EnvironmentBuildError = proc.EnvironmentBuildError
+exceptions = _native.exceptions
+EnvoyError = exceptions.EnvoyError
+WrapperError = exceptions.WrapperError
+PreRunError = exceptions.PreRunError
+PostRunError = exceptions.PostRunError
+ExecutionError = exceptions.ExecutionError
+CalledProcessError = exceptions.CalledProcessError
+EnvironmentBuildError = exceptions.EnvironmentBuildError
+CommandNotFoundError = exceptions.CommandNotFoundError
+ValidationError = exceptions.ValidationError
 
 _sys.modules[__name__ + ".proc"] = proc
 _sys.modules[__name__ + ".testing"] = testing
+_sys.modules[__name__ + ".exceptions"] = exceptions
 
 __all__ = [
     "_core_version",
@@ -52,7 +60,14 @@ __all__ = [
     "getCurrentBundleConfig",
     "proc",
     "testing",
+    "exceptions",
+    "EnvoyError",
+    "WrapperError",
+    "PreRunError",
+    "PostRunError",
+    "ExecutionError",
     "CalledProcessError",
     "CommandNotFoundError",
     "EnvironmentBuildError",
+    "ValidationError",
 ]

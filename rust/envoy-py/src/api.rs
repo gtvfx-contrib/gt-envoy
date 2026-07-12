@@ -11,6 +11,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
+use crate::exceptions::envoy_error_to_pyerr;
 use envoy_core::discovery::{Bundle as CoreBundle, BundleConfig as CoreBundleConfig};
 use envoy_core::environment::{
     core_env_vars, envoy_env_vars, EnvironmentManager,
@@ -20,7 +21,7 @@ use envoy_core::environment::{
 use envoy_core::error::EnvoyError;
 use envoy_core::runtime::{collect_env_files, is_raw_path, load_registry, prepare_env};
 use envoy_core::user_config::UserConfig as CoreUserConfig;
-use pyo3::exceptions::{PyException, PyOSError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyOSError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyModule, PyTuple, PyType};
 
@@ -383,12 +384,12 @@ fn get_environment(
         let allowlist_set = allowlist_to_hashset(allowlist);
         return EnvironmentManager::new(inherit_env, allowlist_set)
             .prepare_environment(&[], None, None, None)
-            .map_err(top_level_envoy_error_to_pyerr);
+            .map_err(envoy_error_to_pyerr);
     }
 
     let commands_file = resolve_optional_path(commands_file)?;
     let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref())
-        .map_err(top_level_envoy_error_to_pyerr)?;
+        .map_err(envoy_error_to_pyerr)?;
     let (env, _) = prepare_env(
         command,
         &registry,
@@ -397,7 +398,7 @@ fn get_environment(
         allowlist.as_deref(),
         None,
     )
-    .map_err(top_level_envoy_error_to_pyerr)?;
+    .map_err(envoy_error_to_pyerr)?;
 
     Ok(env)
 }
@@ -431,16 +432,16 @@ fn trace_environment(
     let final_env = if is_raw_path(command) {
         env_manager
             .prepare_environment(&[], None, Some(var), Some(&mut trace_events))
-            .map_err(top_level_envoy_error_to_pyerr)?
+            .map_err(envoy_error_to_pyerr)?
     } else {
         let commands_file = resolve_optional_path(commands_file)?;
         let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref())
-            .map_err(top_level_envoy_error_to_pyerr)?;
+            .map_err(envoy_error_to_pyerr)?;
         let env_files = collect_env_files(command, &registry, bundles.as_deref())
-            .map_err(top_level_envoy_error_to_pyerr)?;
+            .map_err(envoy_error_to_pyerr)?;
         env_manager
             .prepare_environment(&env_files, None, Some(var), Some(&mut trace_events))
-            .map_err(top_level_envoy_error_to_pyerr)?
+            .map_err(envoy_error_to_pyerr)?
     };
 
     let trace_out = trace_events
@@ -579,51 +580,17 @@ fn path_to_py_path(py: Python<'_>, path: &Path) -> PyResult<PyObject> {
         .unbind())
 }
 
-fn proc_exception(py: Python<'_>, class_name: &str, message: String) -> PyErr {
-    let result = (|| -> PyResult<PyErr> {
-        let module = PyModule::import_bound(py, "envoy._envoy")?;
-        let proc = module.getattr("proc")?;
-        let exc_type = proc.getattr(class_name)?;
-        let instance = exc_type.call1((message.clone(),))?;
-        Ok(PyErr::from_value_bound(instance.into_any()))
-    })();
-
-    result.unwrap_or_else(|_| PyException::new_err(message))
-}
-
-fn top_level_envoy_error_to_pyerr(error: EnvoyError) -> PyErr {
-    Python::with_gil(|py| match error {
-        EnvoyError::CommandNotFound(message) => proc_exception(py, "CommandNotFoundError", message),
-        EnvoyError::EnvironmentBuild(message) => {
-            proc_exception(py, "EnvironmentBuildError", message)
-        }
-        other @ (EnvoyError::Io { .. }
-        | EnvoyError::Json { .. }
-        | EnvoyError::PreRun(_)
-        | EnvoyError::PostRun(_)
-        | EnvoyError::Execution(_)
-        | EnvoyError::CalledProcess { .. }) => {
-            proc_exception(py, "EnvironmentBuildError", other.to_string())
-        }
-        EnvoyError::Validation(message) => PyValueError::new_err(message),
-    })
-}
-
 fn user_config_save_to_pyerr(error: EnvoyError) -> PyErr {
     match error {
-        EnvoyError::Validation(message) => PyValueError::new_err(message),
         other @ (EnvoyError::Io { .. } | EnvoyError::Json { .. }) => {
             PyOSError::new_err(other.to_string())
         }
-        _ => top_level_envoy_error_to_pyerr(error),
+        other => envoy_error_to_pyerr(other),
     }
 }
 
 fn bundle_config_to_pyerr(error: EnvoyError) -> PyErr {
-    match error {
-        EnvoyError::Validation(message) => PyValueError::new_err(message),
-        _ => top_level_envoy_error_to_pyerr(error),
-    }
+    envoy_error_to_pyerr(error)
 }
 
 #[cfg(test)]

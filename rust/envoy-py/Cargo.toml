@@ -20,3 +20,6 @@ envoy-core = { path = "../envoy-core" }
 # abi3-py310 matches pyproject.toml's `requires-python = ">=3.10"`, so a
 # single wheel per OS/arch works across all supported Python versions.
 pyo3 = { version = "0.22", features = ["abi3-py310"] }
+
+[dev-dependencies]
+serde_json = "1"

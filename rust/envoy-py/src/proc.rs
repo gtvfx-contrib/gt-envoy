@@ -6,8 +6,8 @@
 //! - module-level `PIPE`, `STDOUT`, and `DEVNULL` constants
 //! - free functions `call`, `spawn`, `checkCall`, and `checkOutput`
 //! - the cached `Environment` launcher class
-//! - Python-visible `CalledProcessError`, `CommandNotFoundError`, and
-//!   `EnvironmentBuildError` exception types
+//! - Python-visible aliases for the canonical envoy exception types used by
+//!   the process-launching API
 //!
 //! The free functions always invoke the envoy CLI executable resolved by
 //! [`envoy_core::runtime::resolve_envoy_exe`]. The [`Environment`] class is
@@ -23,19 +23,20 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::exceptions::{
+    called_process_error, envoy_error_to_pyerr, CalledProcessError, CommandNotFoundError,
+    EnvironmentBuildError,
+};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
 use envoy_core::commands::CommandDefinition;
 use envoy_core::environment::EnvironmentManager;
-use envoy_core::error::EnvoyError;
 use envoy_core::executor::ProcessExecutor;
 use envoy_core::runtime::{is_raw_path, load_registry, prepare_env, resolve_envoy_exe};
-use pyo3::create_exception;
-use pyo3::exceptions::{PyException, PyOSError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyOSError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyBytes, PyDict, PyModule, PyString};
-use pyo3::PyTypeInfo;
 
 const PIPE_SENTINEL: i32 = -1;
 const STDOUT_SENTINEL: i32 = -2;
@@ -49,10 +50,6 @@ const PROC_MODULE_DOC: &str = r#"envoy.proc -- Process execution with pre-built 
 This module is the primary Python API for launching managed subprocesses
 through envoy's environment system.
 "#;
-
-create_exception!(envoy, CalledProcessError, PyException);
-create_exception!(envoy, CommandNotFoundError, PyException);
-create_exception!(envoy, EnvironmentBuildError, PyException);
 
 type SharedReader = Arc<Mutex<Option<BufReader<Box<dyn Read + Send>>>>>;
 type SharedWriter = Arc<Mutex<Option<Box<dyn Write + Send>>>>;
@@ -1246,42 +1243,6 @@ fn timeout_expired(py: Python<'_>, args: &[String], timeout_secs: f64) -> PyErr 
     PyErr::from_value_bound(instance.into_any())
 }
 
-fn called_process_error(
-    py: Python<'_>,
-    returncode: i32,
-    cmd: String,
-    output: Option<Vec<u8>>,
-    stderr: Option<Vec<u8>>,
-) -> PyErr {
-    let message = format!("command '{cmd}' returned non-zero exit status {returncode}");
-    let instance = CalledProcessError::type_object_bound(py)
-        .call1((message,))
-        .expect("CalledProcessError should be instantiable");
-    instance
-        .setattr("returncode", returncode)
-        .expect("CalledProcessError.returncode should be assignable");
-    instance
-        .setattr("cmd", cmd)
-        .expect("CalledProcessError.cmd should be assignable");
-    match output {
-        Some(output) => instance
-            .setattr("output", PyBytes::new_bound(py, &output))
-            .expect("CalledProcessError.output should be assignable"),
-        None => instance
-            .setattr("output", py.None())
-            .expect("CalledProcessError.output should be assignable"),
-    }
-    match stderr {
-        Some(stderr) => instance
-            .setattr("stderr", PyBytes::new_bound(py, &stderr))
-            .expect("CalledProcessError.stderr should be assignable"),
-        None => instance
-            .setattr("stderr", py.None())
-            .expect("CalledProcessError.stderr should be assignable"),
-    }
-    PyErr::from_value_bound(instance.into_any())
-}
-
 fn path_like_to_pathbuf(py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<PathBuf> {
     let os = PyModule::import_bound(py, "os")?;
     let path_value = os.getattr("fspath")?.call1((value,))?;
@@ -1310,26 +1271,6 @@ fn resolve_command_for_spawn(command: &str, search_path: Option<&str>) -> std::i
     ProcessExecutor::resolve_executable(Path::new(command), search_path)
         .map(|path| path.to_string_lossy().into_owned())
         .map_err(|error| std::io::Error::other(error.to_string()))
-}
-
-fn envoy_error_to_pyerr(error: EnvoyError) -> PyErr {
-    match error {
-        EnvoyError::CalledProcess {
-            returncode,
-            cmd,
-            output,
-            stderr,
-        } => Python::with_gil(|py| called_process_error(py, returncode, cmd, output, stderr)),
-        EnvoyError::CommandNotFound(message) => CommandNotFoundError::new_err(message),
-        EnvoyError::EnvironmentBuild(message) => EnvironmentBuildError::new_err(message),
-        EnvoyError::Io { .. } | EnvoyError::Json { .. } => {
-            EnvironmentBuildError::new_err(error.to_string())
-        }
-        EnvoyError::Validation(message) => PyValueError::new_err(message),
-        EnvoyError::PreRun(message)
-        | EnvoyError::PostRun(message)
-        | EnvoyError::Execution(message) => EnvironmentBuildError::new_err(message),
-    }
 }
 
 fn io_to_pyerr(error: std::io::Error) -> PyErr {
