@@ -28,10 +28,8 @@ struct ExecutionOptions<'a> {
     env_override: Option<&'a str>,
 }
 
-pub(crate) fn run(argv: Option<Vec<String>>) -> i32 {
-    let raw_argv = argv.unwrap_or_else(|| env::args().skip(1).collect());
-
-    let cli = match args::parse(&raw_argv) {
+pub(crate) fn run(argv: &[String]) -> i32 {
+    let cli = match args::parse(argv) {
         Ok(cli) => cli,
         Err(error) => {
             let _ = error.print();

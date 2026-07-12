@@ -10,6 +10,9 @@ description = "Native envoy CLI dispatcher (no Python runtime dependency)."
 name = "envoy"
 path = "src/main.rs"
 
+[lib]
+name = "envoy_cli"
+
 [dependencies]
 envoy-core = { path = "../envoy-core" }
 clap.workspace = true

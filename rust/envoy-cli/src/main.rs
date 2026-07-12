@@ -1,7 +1,4 @@
-mod app;
-mod args;
-
 fn main() {
-    let exit_code = app::run(None);
-    std::process::exit(exit_code);
+    let argv = std::env::args().skip(1).collect::<Vec<_>>();
+    std::process::exit(envoy_cli::run(&argv));
 }
