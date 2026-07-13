@@ -12,7 +12,12 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use crate::exceptions::envoy_error_to_pyerr;
-use envoy_core::discovery::{Bundle as CoreBundle, BundleConfig as CoreBundleConfig};
+use envoy_core::discovery::{
+    discover_bundles_auto as core_discover_bundles_auto, get_bundles as core_get_bundles,
+    load_bundles_from_config as core_load_bundles_from_config, Bundle as CoreBundle,
+    BundleConfig as CoreBundleConfig, BundleInfo as CoreBundleInfo, BUNDLE_CHECKOUT,
+    BUNDLE_DEFAULT_NAMESPACE,
+};
 use envoy_core::environment::{
     core_env_vars, envoy_env_vars, EnvironmentManager,
     TraceAllowlistEvent as CoreTraceAllowlistEvent, TraceEvent as CoreTraceEvent,
@@ -229,6 +234,15 @@ struct Bundle {
 
 #[pymethods]
 impl Bundle {
+    #[new]
+    #[pyo3(signature = (spec, namespace=None))]
+    fn new(spec: &Bound<'_, PyAny>, namespace: Option<&str>) -> PyResult<Self> {
+        Ok(Self {
+            inner: CoreBundle::new(path_like_to_pathbuf(spec)?, namespace)
+                .map_err(envoy_error_to_pyerr)?,
+        })
+    }
+
     #[getter]
     fn name(&self) -> String {
         self.inner.name().to_string()
@@ -298,6 +312,66 @@ impl Bundle {
 
 impl Bundle {
     fn from_inner(inner: CoreBundle) -> Self {
+        Self { inner }
+    }
+}
+
+#[pyclass(module = "envoy")]
+struct BundleInfo {
+    inner: CoreBundleInfo,
+}
+
+#[pymethods]
+impl BundleInfo {
+    #[getter]
+    fn root(&self, py: Python<'_>) -> PyResult<PyObject> {
+        path_to_py_path(py, &self.inner.root)
+    }
+
+    #[getter]
+    fn name(&self) -> String {
+        self.inner.name.clone()
+    }
+
+    #[getter]
+    fn namespace(&self) -> String {
+        self.inner.namespace.clone()
+    }
+
+    #[getter]
+    fn bndlid(&self) -> String {
+        self.inner.bndlid()
+    }
+
+    #[getter]
+    fn envoy_env(&self, py: Python<'_>) -> PyResult<PyObject> {
+        path_to_py_path(py, self.inner.envoy_env())
+    }
+
+    #[getter]
+    fn env_files(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let dict = PyDict::new_bound(py);
+        for (key, value) in self.inner.env_files() {
+            dict.set_item(key, path_to_py_path(py, value)?)?;
+        }
+        Ok(dict.into_any().unbind())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "BundleInfo(bndlid='{}', root={})",
+            self.inner.bndlid(),
+            self.inner.root.display()
+        )
+    }
+
+    fn __str__(&self) -> String {
+        format!("{} ({})", self.inner.name, self.inner.root.display())
+    }
+}
+
+impl BundleInfo {
+    fn from_inner(inner: CoreBundleInfo) -> Self {
         Self { inner }
     }
 }
@@ -485,16 +559,51 @@ fn get_current_bundle_config(
     config.map(|value| Py::new(py, value)).transpose()
 }
 
+#[pyfunction(name = "discoverBundlesAuto")]
+fn discover_bundles_auto(py: Python<'_>) -> PyResult<Vec<Py<BundleInfo>>> {
+    bundle_infos_to_py(
+        py,
+        core_discover_bundles_auto().map_err(envoy_error_to_pyerr)?,
+    )
+}
+
+#[pyfunction(name = "getBundles", signature = (config_file=None))]
+fn get_bundles(
+    py: Python<'_>,
+    config_file: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Vec<Py<BundleInfo>>> {
+    let config_file = resolve_optional_path(config_file)?;
+    bundle_infos_to_py(
+        py,
+        core_get_bundles(config_file.as_deref()).map_err(envoy_error_to_pyerr)?,
+    )
+}
+
+#[pyfunction(name = "loadBundlesFromConfig")]
+fn load_bundles_from_config(
+    py: Python<'_>,
+    config_file: &Bound<'_, PyAny>,
+) -> PyResult<Vec<Py<BundleInfo>>> {
+    bundle_infos_to_py(
+        py,
+        core_load_bundles_from_config(&path_like_to_pathbuf(config_file)?)
+            .map_err(envoy_error_to_pyerr)?,
+    )
+}
+
 pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("OPERATING_SYSTEM", current_operating_system())?;
     m.add(
         "SUPPORTED_OPERATING_SYSTEMS",
         PyTuple::new_bound(py, SUPPORTED_OPERATING_SYSTEMS),
     )?;
+    m.add("BUNDLE_CHECKOUT", BUNDLE_CHECKOUT)?;
+    m.add("BUNDLE_DEFAULT_NAMESPACE", BUNDLE_DEFAULT_NAMESPACE)?;
     m.add_class::<TraceAllowlistEvent>()?;
     m.add_class::<TraceStepEvent>()?;
     m.add_class::<UserConfig>()?;
     m.add_class::<Bundle>()?;
+    m.add_class::<BundleInfo>()?;
     m.add_class::<BundleConfig>()?;
     m.add_function(wrap_pyfunction!(get_environment, m)?)?;
     m.add_function(wrap_pyfunction!(get_allowlist, m)?)?;
@@ -502,6 +611,9 @@ pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResul
     m.add_function(wrap_pyfunction!(set_api_verbosity, m)?)?;
     m.add_function(wrap_pyfunction!(load_user_config, m)?)?;
     m.add_function(wrap_pyfunction!(get_current_bundle_config, m)?)?;
+    m.add_function(wrap_pyfunction!(discover_bundles_auto, m)?)?;
+    m.add_function(wrap_pyfunction!(get_bundles, m)?)?;
+    m.add_function(wrap_pyfunction!(load_bundles_from_config, m)?)?;
     Ok(())
 }
 
@@ -551,6 +663,13 @@ fn trace_event_to_pyobject(py: Python<'_>, event: CoreTraceEvent) -> PyResult<Py
             .into_any()
             .unbind()),
     }
+}
+
+fn bundle_infos_to_py(py: Python<'_>, infos: Vec<CoreBundleInfo>) -> PyResult<Vec<Py<BundleInfo>>> {
+    infos
+        .into_iter()
+        .map(|info| Py::new(py, BundleInfo::from_inner(info)))
+        .collect()
 }
 
 fn resolve_optional_path(value: Option<&Bound<'_, PyAny>>) -> PyResult<Option<PathBuf>> {

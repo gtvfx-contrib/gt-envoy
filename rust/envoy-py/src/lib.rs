@@ -15,8 +15,11 @@
 use pyo3::prelude::*;
 
 mod api;
+mod commands;
+mod config_registry;
 mod exceptions;
 mod proc;
+mod wrapper;
 
 /// Returns the `envoy-core` crate version this extension was built against.
 /// Placeholder export to prove the PyO3 build/import path works end-to-end;
@@ -40,6 +43,9 @@ fn _envoy(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_git_version, m)?)?;
     exceptions::register_exception_bindings(py, m)?;
     api::register_api_bindings(py, m)?;
+    commands::register_command_bindings(py, m)?;
+    config_registry::register_config_registry_bindings(py, m)?;
     proc::register_proc_module(py, m)?;
+    wrapper::register_wrapper_bindings(py, m)?;
     Ok(())
 }

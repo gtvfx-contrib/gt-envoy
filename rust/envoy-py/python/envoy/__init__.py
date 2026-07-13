@@ -26,7 +26,37 @@ SUPPORTED_OPERATING_SYSTEMS = _native.SUPPORTED_OPERATING_SYSTEMS
 TraceAllowlistEvent = _native.TraceAllowlistEvent
 TraceStepEvent = _native.TraceStepEvent
 UserConfig = _native.UserConfig
+# Wrapper bindings.
+ExecutionResult = _native.ExecutionResult
+WrapperConfig = _native.WrapperConfig
+ApplicationWrapper = _native.ApplicationWrapper
+createWrapper = _native.createWrapper
+# Bundle discovery bindings.
+BUNDLE_CHECKOUT = _native.BUNDLE_CHECKOUT
+BUNDLE_DEFAULT_NAMESPACE = _native.BUNDLE_DEFAULT_NAMESPACE
+Bundle = _native.Bundle
 BundleConfig = _native.BundleConfig
+BundleInfo = _native.BundleInfo
+discoverBundlesAuto = _native.discoverBundlesAuto
+getBundles = _native.getBundles
+loadBundlesFromConfig = _native.loadBundlesFromConfig
+# Command bindings.
+CommandDefinition = _native.CommandDefinition
+CommandRegistry = _native.CommandRegistry
+Command = _native.Command
+findCommandsFile = _native.findCommandsFile
+
+# Named-config registry and user-config metadata bindings.
+NamedConfigEntry = _native.NamedConfigEntry
+CFG_ROOTS_VAR = _native.CFG_ROOTS_VAR
+USER_CONFIG_PATH = _native.USER_CONFIG_PATH
+KNOWN_SETTINGS = _native.KNOWN_SETTINGS
+isConfigName = _native.isConfigName
+resolveNamedConfig = _native.resolveNamedConfig
+listNamedConfigs = _native.listNamedConfigs
+listConfigVersions = _native.listConfigVersions
+publishConfig = _native.publishConfig
+
 getEnvironment = _native.getEnvironment
 getAllowlist = _native.getAllowlist
 traceEnvironment = _native.traceEnvironment
@@ -54,16 +84,40 @@ __all__ = [
     "__version__",
     "OPERATING_SYSTEM",
     "SUPPORTED_OPERATING_SYSTEMS",
+    "BUNDLE_CHECKOUT",
+    "BUNDLE_DEFAULT_NAMESPACE",
     "TraceAllowlistEvent",
     "TraceStepEvent",
     "UserConfig",
+    "ExecutionResult",
+    "WrapperConfig",
+    "ApplicationWrapper",
+    "createWrapper",
+    "Command",
+    "CommandDefinition",
+    "CommandRegistry",
+    "Bundle",
     "BundleConfig",
+    "BundleInfo",
+    "NamedConfigEntry",
+    "CFG_ROOTS_VAR",
+    "USER_CONFIG_PATH",
+    "KNOWN_SETTINGS",
+    "isConfigName",
+    "resolveNamedConfig",
+    "listNamedConfigs",
+    "listConfigVersions",
+    "publishConfig",
+    "findCommandsFile",
     "getEnvironment",
     "getAllowlist",
     "traceEnvironment",
     "setApiVerbosity",
     "loadUserConfig",
     "getCurrentBundleConfig",
+    "discoverBundlesAuto",
+    "getBundles",
+    "loadBundlesFromConfig",
     "proc",
     "testing",
     "exceptions",
