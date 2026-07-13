@@ -370,6 +370,12 @@ struct Environment {
     commands_file: Option<PathBuf>,
     env_override: Option<String>,
     cache: Mutex<Option<CachedEnvironment>>,
+    // Caches the actual `dict` object returned by `build()`, separate from
+    // `cache` (the parsed env-var map), so repeated `build()` calls return
+    // the *same* Python object -- matching `py/envoy/proc.py`'s
+    // `self._env` instance-attribute caching (`build()` is documented as
+    // idempotent: "after the first call the cached result is returned").
+    built_dict: Mutex<Option<Py<PyDict>>>,
 }
 
 #[pymethods]
@@ -417,6 +423,7 @@ impl Environment {
                 .transpose()?,
             env_override,
             cache: Mutex::new(None),
+            built_dict: Mutex::new(None),
         })
     }
 
@@ -449,12 +456,19 @@ impl Environment {
     ///     EnvironmentBuildError: Env files, command expansion, or executable
     ///         resolution failed.
     fn build(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let mut dict_guard = lock_mutex(&self.built_dict)?;
+        if let Some(cached_dict) = dict_guard.as_ref() {
+            return Ok(cached_dict.clone_ref(py).into_any());
+        }
+
         let cached = self.ensure_cache()?;
         let dict = PyDict::new_bound(py);
         for (key, value) in &cached.env {
             dict.set_item(key, value)?;
         }
-        Ok(dict.into_any().unbind())
+        let dict: Py<PyDict> = dict.unbind();
+        *dict_guard = Some(dict.clone_ref(py));
+        Ok(dict.into_any())
     }
 
     /// Launch the command asynchronously and return a Popen-like object.
@@ -1300,14 +1314,36 @@ fn exit_status_code(status: ExitStatus) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_stream_spec, validate_call_kwargs, SpawnOptions, StreamSpec, DEVNULL_SENTINEL,
-        PIPE_SENTINEL, STDOUT_SENTINEL,
+        parse_stream_spec, validate_call_kwargs, Environment, SpawnOptions, StreamSpec,
+        DEVNULL_SENTINEL, PIPE_SENTINEL, STDOUT_SENTINEL,
     };
+    use pyo3::types::PyAnyMethods;
     use pyo3::{IntoPy, Python};
 
     fn with_python<T>(test_fn: impl FnOnce(Python<'_>) -> T) -> T {
         pyo3::prepare_freethreaded_python();
         Python::with_gil(test_fn)
+    }
+
+    #[test]
+    fn build_returns_same_python_dict_object_on_repeated_calls() {
+        with_python(|py| {
+            // A raw path (contains '/') bypasses registry/bundle discovery
+            // entirely, so this test needs no filesystem fixtures.
+            let env = Environment::new(py, "a/b".to_string(), false, None, None, None, None, None)
+                .expect("Environment should construct");
+
+            let first = env.build(py).expect("first build() should succeed");
+            let second = env.build(py).expect("second build() should succeed");
+
+            // Mirrors py/envoy/proc.py's Environment.build(), documented as
+            // idempotent: "after the first call the cached result is
+            // returned" -- i.e. the *same* dict object, not just an equal one.
+            assert!(
+                first.bind(py).is(second.bind(py)),
+                "build() should return the same cached dict object on repeated calls"
+            );
+        });
     }
 
     #[test]

@@ -112,26 +112,42 @@ impl ExecutionResult {
 
 #[pyclass(module = "envoy")]
 pub struct WrapperConfig {
+    // executable/env_files/cwd get manual #[getter]/#[setter] methods below
+    // (path-like normalization); callbacks get manual accessors too
+    // (callable validation + the camelCase Python names below).
     executable: String,
+    #[pyo3(get, set)]
     args: Vec<String>,
+    #[pyo3(get, set)]
     env: Option<HashMap<String, String>>,
     env_files: Option<Vec<String>>,
+    #[pyo3(get, set)]
     inherit_env: bool,
+    #[pyo3(get, set)]
     env_allowlist: Option<HashSet<String>>,
     cwd: Option<String>,
+    #[pyo3(get, set)]
     capture_output: bool,
+    #[pyo3(get, set)]
     stream_output: bool,
+    #[pyo3(get, set)]
     timeout: Option<f64>,
+    #[pyo3(get, set)]
     shell: bool,
     pre_run: Option<Py<PyAny>>,
     post_run: Option<Py<PyAny>>,
     on_start: Option<Py<PyAny>>,
     on_output: Option<Py<PyAny>>,
     on_error: Option<Py<PyAny>>,
+    #[pyo3(get, set)]
     raise_on_error: bool,
+    #[pyo3(get, set)]
     continue_on_pre_run_error: bool,
+    #[pyo3(get, set)]
     continue_on_post_run_error: bool,
+    #[pyo3(get, set)]
     log_execution: bool,
+    #[pyo3(get, set)]
     log_level: i32,
 }
 
@@ -258,6 +274,96 @@ stream_output={}, timeout={:?}, shell={})",
 
     fn __str__(&self) -> String {
         self.__repr__()
+    }
+
+    #[getter]
+    fn executable(&self) -> String {
+        self.executable.clone()
+    }
+
+    #[setter]
+    fn set_executable(&mut self, value: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.executable = path_like_to_string(value.py(), value)?;
+        Ok(())
+    }
+
+    #[getter]
+    fn env_files(&self) -> Option<Vec<String>> {
+        self.env_files.clone()
+    }
+
+    #[setter]
+    fn set_env_files(&mut self, py: Python<'_>, value: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
+        self.env_files = normalize_env_files(py, value)?;
+        Ok(())
+    }
+
+    #[getter]
+    fn cwd(&self) -> Option<String> {
+        self.cwd.clone()
+    }
+
+    #[setter]
+    fn set_cwd(&mut self, value: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
+        self.cwd = value
+            .map(|value| path_like_to_string(value.py(), value))
+            .transpose()?;
+        Ok(())
+    }
+
+    #[getter(preRun)]
+    fn get_pre_run(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.pre_run.as_ref().map(|value| value.clone_ref(py))
+    }
+
+    #[setter(preRun)]
+    fn set_pre_run(&mut self, value: Option<Py<PyAny>>) -> PyResult<()> {
+        self.pre_run = validate_callable("preRun", value)?;
+        Ok(())
+    }
+
+    #[getter(postRun)]
+    fn get_post_run(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.post_run.as_ref().map(|value| value.clone_ref(py))
+    }
+
+    #[setter(postRun)]
+    fn set_post_run(&mut self, value: Option<Py<PyAny>>) -> PyResult<()> {
+        self.post_run = validate_callable("postRun", value)?;
+        Ok(())
+    }
+
+    #[getter(onStart)]
+    fn get_on_start(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.on_start.as_ref().map(|value| value.clone_ref(py))
+    }
+
+    #[setter(onStart)]
+    fn set_on_start(&mut self, value: Option<Py<PyAny>>) -> PyResult<()> {
+        self.on_start = validate_callable("onStart", value)?;
+        Ok(())
+    }
+
+    #[getter(onOutput)]
+    fn get_on_output(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.on_output.as_ref().map(|value| value.clone_ref(py))
+    }
+
+    #[setter(onOutput)]
+    fn set_on_output(&mut self, value: Option<Py<PyAny>>) -> PyResult<()> {
+        self.on_output = validate_callable("onOutput", value)?;
+        Ok(())
+    }
+
+    #[getter(onError)]
+    fn get_on_error(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.on_error.as_ref().map(|value| value.clone_ref(py))
+    }
+
+    #[setter(onError)]
+    fn set_on_error(&mut self, value: Option<Py<PyAny>>) -> PyResult<()> {
+        self.on_error = validate_callable("onError", value)?;
+        Ok(())
     }
 }
 
@@ -1096,6 +1202,60 @@ mod tests {
             assert!(!config.capture_output);
             assert!(config.stream_output);
             assert!(config.raise_on_error);
+        });
+    }
+
+    #[test]
+    fn wrapper_config_fields_are_mutable_from_python() {
+        with_python(|py| {
+            let config = WrapperConfig::new(
+                PyString::new_bound(py, "cmd").as_any(),
+                Vec::new(),
+                None,
+                None,
+                false,
+                None,
+                None,
+                false,
+                true,
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+                None,
+                true,
+                false,
+                true,
+                true,
+                envoy_core::models::LOG_LEVEL_INFO,
+            )
+            .expect("WrapperConfig should construct");
+
+            let py_config = Py::new(py, config).expect("should wrap in Py<WrapperConfig>");
+            let bound = py_config.bind(py);
+
+            // Mirrors py/envoy's @dataclass WrapperConfig, whose fields are
+            // freely mutable after construction (e.g.
+            // `config.raise_on_error = True` in test_error_handling.py).
+            bound
+                .setattr("raise_on_error", false)
+                .expect("raise_on_error should be settable");
+            let value: bool = bound
+                .getattr("raise_on_error")
+                .expect("raise_on_error should be readable")
+                .extract()
+                .expect("raise_on_error should be a bool");
+            assert!(!value, "raise_on_error should reflect the mutation");
+
+            // preRun/postRun/onStart/onOutput/onError keep their camelCase
+            // Python-facing names and callable validation on assignment.
+            let non_callable = PyDict::new_bound(py);
+            let error = bound
+                .setattr("preRun", non_callable.as_any())
+                .expect_err("non-callable preRun should be rejected");
+            assert!(error.to_string().contains("preRun"));
         });
     }
 }
