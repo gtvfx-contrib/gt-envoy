@@ -22,7 +22,7 @@ if exist "%~dp0..\rust\target\debug\envoy.exe" (
     exit /b %errorlevel%
 )
 
-REM Fall back to running from source (development mode, pure Python).
-set "PYTHONPATH=%~dp0..\py;%PYTHONPATH%"
+REM Fall back to `python -m envoy` (pip-installed `envoy` package, built
+REM from rust/envoy-py via maturin -- see pyproject.toml).
 python -m envoy %*
 exit /b %errorlevel%

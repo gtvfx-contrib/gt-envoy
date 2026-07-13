@@ -17,7 +17,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history so hatch-vcs can derive the version from the tag
+          fetch-depth: 0   # full history so `git describe` can derive the version from the tag
 
       - name: Set up Python 3.14
         uses: actions/setup-python@v5
@@ -32,14 +32,13 @@ jobs:
         with:
           workspaces: rust
 
-      - name: Install envoy (editable, with docs extras) so hatch-vcs writes _version.py
-        # The pure-Python py/envoy package remains the distributed Python
-        # library (pip-installable `envoy` wheel) until the PyO3 port in
-        # rust/envoy-py reaches full parity with py/envoy's public API
-        # surface (tracked separately -- see rust/README.md). This step is
-        # unrelated to the native envoy/engit executables built below.
-        working-directory: ${{ github.workspace }}/py
-        run: pip install -e ..[docs]
+      - name: Install envoy (with docs extras)
+        # Builds+installs the maturin-backed envoy-py wheel (compiling the
+        # Rust extension via cargo, which the Rust toolchain step above set
+        # up), so mkdocstrings can introspect its docstrings below.
+        # envoy.__version__ is derived from `git describe` at build time via
+        # rust/envoy-py/build.rs, independent of this install step.
+        run: pip install .[docs]
 
       - name: Build documentation
         working-directory: ${{ github.workspace }}
@@ -63,26 +62,27 @@ jobs:
           .\dist\envoy.exe --version
           .\dist\engit.exe --help
 
-      - name: Build envoy-py wheel (verification only, not yet a release asset)
-        # Builds the PyO3-backed envoy-py wheel as a CI correctness check so
-        # regressions are caught early, without publishing it as the
-        # distributed `envoy` package yet -- see the parity note above.
+      - name: Build envoy Python wheel for release
+        # The envoy-py (PyO3) wheel is now the distributed `envoy` Python
+        # package (see pyproject.toml's maturin build-backend). Built
+        # directly into dist/ so it's picked up by the release-upload step
+        # below alongside the native executables.
         run: |
           pip install maturin
-          python -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml
+          python -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml --out dist
 
       - name: Create publish zip
         # Staged publish: copy only deployment-relevant items into a clean
         # staging directory, place EXEs into bin/ (replacing their bat
-        # counterparts), strip dev/test artefacts, then zip the result.
-        # en.bat is kept as a tiny alias wrapper that calls envoy.exe directly.
+        # counterparts), then zip the result. en.bat is kept as a tiny alias
+        # wrapper that calls envoy.exe directly.
         run: |
           $version   = "${{ github.ref_name }}"
           $workspace = "${{ github.workspace }}"
           $staging   = "$workspace\_publish_staging"
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
-          foreach ($item in @('bin', '.envoy', 'py', 'LICENSE', 'README.md')) {
+          foreach ($item in @('bin', '.envoy', 'LICENSE', 'README.md')) {
               $src = "$workspace\$item"
               if (Test-Path $src) {
                   Copy-Item $src "$staging\" -Recurse -Force
@@ -97,10 +97,6 @@ jobs:
           # Remove bat launchers that are replaced by EXEs in the publish layout
           Remove-Item "$staging\bin\envoy.bat" -Force -ErrorAction SilentlyContinue
           Remove-Item "$staging\bin\engit.bat" -Force -ErrorAction SilentlyContinue
-
-          # Remove dev/test-only files
-          Remove-Item "$staging\py\envoy\test_bundle" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item "$staging\py\envoy\testing.py"  -Force        -ErrorAction SilentlyContinue
 
           # Place EXEs into bin/ (envoy.exe also serves as the target for en.bat)
           Copy-Item "$workspace\dist\envoy.exe" "$staging\bin\envoy.exe" -Force
@@ -128,16 +124,6 @@ jobs:
           $zipPath = "$workspace\dist\envoy-$version.zip"
           Compress-Archive -Path "$staging\*" -DestinationPath $zipPath
           Remove-Item $staging -Recurse -Force
-
-      - name: Build Python wheel
-        # pip wheel is used instead of python -m build for reliability.
-        # --no-deps builds only the envoy wheel, not dependency wheels.
-        # Runs after the bundle zip so the wheel is not included in the zip.
-        # This remains the pure-Python py/envoy package -- see the parity
-        # note on the "Install envoy" step above for why the PyO3 wheel
-        # isn't the published artifact yet.
-        working-directory: ${{ github.workspace }}
-        run: pip wheel . -w dist --no-deps
 
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2

@@ -9,7 +9,7 @@ Usage:
 
 import sys
 
-from ._cli import main
+from . import cli_main
 
 if __name__ == '__main__':
-    sys.exit(main())
+    sys.exit(cli_main())

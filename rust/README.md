@@ -1,19 +1,19 @@
 # envoy / engit — Rust workspace
 
-Rust re-implementation of `envoy` and `engit`, migrated incrementally
-(module-by-module) from `py/envoy` and `py/engit`. This file documents the
-workspace layout for contributors; it will grow into the canonical reference
-as the migration progresses.
+Rust re-implementation of `envoy` and `engit`, migrated module-by-module
+from the retired `py/envoy` and `py/engit` packages (both fully removed —
+see git history for the original Python sources). This file documents the
+workspace layout for contributors.
 
 ## Crates
 
-| Crate         | Kind                 | Replaces (Python)      | Notes |
-|---------------|----------------------|-------------------------|-------|
-| `envoy-core`  | lib                  | `py/envoy/_*.py` (core) | Framework-agnostic: discovery, environment, commands, executor, wrapper, config registry, user config. No Python or CLI dependency. |
-| `envoy-py`    | cdylib (PyO3)        | `py/envoy/__init__.py`, `proc.py`, `_api.py` | Built with `maturin`. Preserves `import envoy`, `envoy.proc`, `envoy.testing` for existing consumers. |
-| `envoy-cli`   | bin (`envoy`)        | `py/envoy/_cli.py`      | Native binary, no Python runtime dependency. Replaces the PyInstaller-built `dist/envoy.exe`. |
-| `engit-core`  | lib                  | `py/engit/_*.py`        | Git/GitHub tooling logic. Depends on `envoy-core` for bundle discovery / named-config resolution. |
-| `engit-cli`   | bin (`engit`)        | `py/engit/_cli.py`      | Native binary. No Python API — `engit` is CLI-only. |
+| Crate         | Kind                 | Replaced (Python)       | Notes |
+|---------------|----------------------|--------------------------|-------|
+| `envoy-core`  | lib                  | `py/envoy/_*.py` (core)  | Framework-agnostic: discovery, environment, commands, executor, wrapper, config registry, user config. No Python or CLI dependency. |
+| `envoy-py`    | cdylib (PyO3)        | `py/envoy/__init__.py`, `proc.py`, `_api.py`, `_cli.py` | Built with `maturin`. This is now the distributed `envoy` Python package (`pip install envoy`) — preserves `import envoy`, `envoy.proc`, `envoy.testing`, `envoy.cli_main` for existing consumers. |
+| `envoy-cli`   | bin (`envoy`)        | `py/envoy/_cli.py`       | Native binary, no Python runtime dependency. Replaces the PyInstaller-built `dist/envoy.exe`. `envoy-py`'s `cli_main()` binding calls into this crate's library function, so both share the same CLI dispatch logic. |
+| `engit-core`  | lib                  | `py/engit/_*.py`         | Git/GitHub tooling logic. Depends on `envoy-core` for bundle discovery / named-config resolution. |
+| `engit-cli`   | bin (`engit`)        | `py/engit/_cli.py`       | Native binary. No Python API — `engit` is CLI-only. |
 
 ## Versioning
 
@@ -21,11 +21,13 @@ as the migration progresses.
 `envoy-py`) are derived from `git describe --tags --always --dirty` at
 *build time* via each crate's `build.rs`, falling back to the static
 `Cargo.toml` version if `git` is unavailable (e.g. building from a
-source-only tarball with no `.git/`). This mirrors `py/envoy`'s
+source-only tarball with no `.git/`). This mirrors `py/envoy`'s former
 `hatch-vcs`-derived versioning without requiring `Cargo.toml`'s
 `[workspace.package] version` (which must stay a fixed placeholder, since
 Cargo requires a static valid semver there) to be hand-maintained per
-release.
+release. The wheel's own static metadata version (in `pyproject.toml`
+/ `rust/envoy-py/pyproject.toml`) stays `0.0.0` for the same reason — it's
+`envoy.__version__` at runtime that carries the real git-derived version.
 
 ## Building
 
@@ -33,10 +35,11 @@ release.
 # Native binaries + core/engit libs
 cargo build --workspace --exclude envoy-py --release
 
-# Python extension wheel (envoy-py), from its own directory
-cd envoy-py
-python -m maturin build --release
-# or, for local development against a venv:
+# Python extension wheel (envoy-py) -- the distributed `envoy` package.
+# From the repo root (uses the root pyproject.toml's maturin config):
+pip install .
+# or, for local development against a venv, from rust/envoy-py directly:
+cd rust/envoy-py
 python -m maturin develop
 ```
 
@@ -46,44 +49,49 @@ python -m maturin develop
 cargo test --workspace --exclude envoy-py
 cargo clippy --workspace --exclude envoy-py -- -D warnings
 cargo fmt --check
+
+# envoy-py itself (requires linking against a Python interpreter):
+cd rust/envoy-py
+cargo test --lib
+cargo clippy --all-targets -- -D warnings
+
+# Python-facing contract/consumer tests against a built wheel -- see
+# rust/envoy-py/tests/python_contract/README.md and
+# rust/envoy-py/tests/consumer_smoke/README.md
+maturin develop --release
+python -m pytest tests
 ```
 
 `envoy-py` is excluded from the plain `cargo build`/`test`/`clippy` workspace
 commands above because it requires linking against a Python interpreter
-(via `pyo3-build-config`); build/test it with `maturin` as shown above, or
+(via `pyo3-build-config`); build/test it separately as shown above, or
 `cargo check -p envoy-py` if a Python dev environment is available.
 
-## Migration status
+## Migration status: complete
 
-`envoy-core`, `envoy-cli`, `engit-core`, and `engit-cli` are functionally
-complete (full test coverage, ported module-for-module from `py/envoy`'s
-core and `py/engit`). `envoy-py` (the PyO3 bindings preserving `import
-envoy`) currently exposes `envoy.proc`, `envoy.testing`, `envoy.exceptions`,
-and a subset of top-level functions (`getEnvironment`, `getAllowlist`,
-`traceEnvironment`, `setApiVerbosity`, `loadUserConfig`,
-`getCurrentBundleConfig`) — but **not yet** the full `py/envoy/__init__.py`
-surface (e.g. `Bundle`, `BundleConfig` full construction, `ApplicationWrapper`,
-`CommandRegistry`, `discoverBundlesAuto()`, etc., which
-`gt/globals/py/gt/vscode/wrapper` calls directly today).
+All modules have been ported and `envoy-py` now exposes the full
+`py/envoy/__init__.py` public surface: `envoy.proc`, `envoy.testing`,
+`envoy.exceptions`, the top-level `_api.py` functions, `Bundle`/
+`BundleInfo`/`BundleConfig` discovery, `CommandDefinition`/`CommandRegistry`,
+the named-config registry, `ApplicationWrapper`/`WrapperConfig` (including
+real Python callback support), and `cli_main()`. `py/envoy` and `py/engit`
+have both been deleted — the root `pyproject.toml` now builds `envoy` via
+the `maturin` backend from this workspace, and `engit` is native-only (no
+Python package).
 
-**Distribution status:**
-- `envoy`/`engit` **native binaries** (`bin/envoy.bat`, `bin/engit.bat`) now
-  prefer the Rust builds (`rust/target/release/*.exe`, falling back to
-  `dist/*.exe` in published bundles, falling back to `python -m envoy`/
-  `python -m engit` from `py/` in dev checkouts). `.github/workflows/
-  build-release.yml` builds these via `cargo build --release`, replacing
-  the old PyInstaller (`envoy.spec`) step.
-- The **`envoy` Python package** (`pip install envoy`, used as a library by
-  `gt/globals`, `gt/devtools`, `gt/krita`, `gt/unreal`) is still built from
-  `py/envoy` (pure Python, `hatchling` backend) — **not** yet cut over to
-  the `envoy-py` PyO3 wheel — because `envoy-py` doesn't have full parity
-  with `py/envoy`'s public API yet. CI builds the PyO3 wheel too (via
-  `maturin`) as a build-correctness check, but does not publish it as a
-  release asset until parity is verified against real consumers.
+- Native binaries (`bin/envoy.bat`, `bin/engit.bat`) prefer the Rust builds
+  (`rust/target/release/*.exe`, falling back to `dist/*.exe` in published
+  bundles). `.github/workflows/build-release.yml` builds these via `cargo
+  build --release` and builds the `envoy` wheel via `maturin`, both as
+  release assets.
+- Full parity was verified via `rust/envoy-py/tests/python_contract` (the
+  subset of `py/envoy`'s original pytest suite that exercises the public
+  API, run against the compiled wheel) and
+  `rust/envoy-py/tests/consumer_smoke` (real `gt/globals`, `gt/devtools`,
+  `gt/krita`, `gt/unreal` call patterns run against the compiled wheel).
 - Cross-platform (Linux/macOS) builds of the native binaries are verified
   in CI (`build-native-cross-platform` job) but not yet distributed as
   release assets, since Linux/macOS distribution isn't an established
   workflow for this project yet (bin/*.bat, the bundle-publish zip layout,
   etc. are still Windows-oriented).
 
-See the `todos` tracked for this effort for granular per-module status.

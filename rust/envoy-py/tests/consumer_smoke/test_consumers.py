@@ -27,13 +27,20 @@ def test_globals_vscode_wrapper_write_local_bundles(tmp_path, monkeypatch):
     """``gt/globals/py/gt/vscode/wrapper/_wrapper.py``'s real code path:
     ``envoy.discoverBundlesAuto()`` (via ``write_local_bundles()``) followed
     by ``envoy.proc.spawn()``.
+
+    Skipped when ``gt/globals`` isn't checked out as a sibling directory
+    (e.g. in the standalone ``envoy`` repo's own CI, which only checks out
+    ``envoy`` itself, not the full ``gtvfx-contrib/gt`` monorepo layout).
     """
-    globals_py = str(Path(__file__).parents[5] / "globals" / "py")
-    sys.path.insert(0, globals_py)
+    globals_py = Path(__file__).parents[5] / "globals" / "py"
+    if not (globals_py / "gt" / "vscode" / "wrapper" / "_wrapper.py").is_file():
+        pytest.skip("gt/globals is not checked out as a sibling directory")
+
+    sys.path.insert(0, str(globals_py))
     try:
         from gt.vscode.wrapper import _wrapper
     finally:
-        sys.path.remove(globals_py)
+        sys.path.remove(str(globals_py))
 
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("ENVOY_BNDL_ROOTS", str(Path(__file__).parents[5]))

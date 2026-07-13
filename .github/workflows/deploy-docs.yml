@@ -31,19 +31,27 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Install envoy with docs extras
-        # Installing envoy itself lets mkdocstrings introspect envoy/engit
+      - name: Install stable Rust toolchain
+        # Needed because `pip install .` below compiles the maturin-backed
+        # envoy-py (PyO3) extension via cargo.
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry/build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Install envoy (with docs extras)
+        # Installing envoy itself lets mkdocstrings introspect its
         # docstrings; the [docs] extra brings properdocs, mkdocstrings, and
         # the gen-files/literate-nav plugins used for auto-generated API
         # reference pages under docs/reference/ (see docs/gen_ref_pages.py).
         #
-        # This introspects the pure-Python py/envoy package, which remains
-        # the distributed `envoy` library until the envoy-py PyO3 port
-        # reaches full API parity (see rust/README.md). The Rust crate docs
-        # are built separately below as an internal-only artifact, not
-        # published to this site.
-        working-directory: ${{ github.workspace }}/py
-        run: pip install -e ..[docs]
+        # This builds+installs the maturin-backed envoy-py (PyO3) wheel --
+        # the distributed `envoy` package -- compiling the Rust extension
+        # via cargo. The Rust crate docs are built separately below as an
+        # internal-only artifact, not published to this site.
+        run: pip install .[docs]
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

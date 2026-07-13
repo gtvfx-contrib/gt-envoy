@@ -23,15 +23,14 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Install envoy with dev extras
-        working-directory: ${{ github.workspace }}/py
-        run: python -m pip install --upgrade pip && pip install -e ..[dev]
+      - name: Install ruff
+        run: python -m pip install --upgrade pip && pip install ruff
 
       - name: Run ruff check
-        run: ruff check py
+        run: ruff check rust/envoy-py/python rust/envoy-py/tests
 
       - name: Run ruff format --check
-        run: ruff format --check py
+        run: ruff format --check rust/envoy-py/python rust/envoy-py/tests
 
   rust:
     name: Rust (fmt + clippy + test)
@@ -105,3 +104,15 @@ jobs:
         run: |
           pip install maturin
           python -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml
+
+      - name: Install built wheel + pytest
+        run: |
+          pip install pytest
+          pip install --no-index --find-links rust/target/wheels envoy
+
+      - name: Run Python contract + consumer smoke tests against the wheel
+        # These prove envoy-py's Python-facing behavior (not just that the
+        # crate compiles/its own Rust unit tests pass) -- see
+        # rust/envoy-py/tests/python_contract/README.md and
+        # rust/envoy-py/tests/consumer_smoke/README.md for scope/rationale.
+        run: python -m pytest rust/envoy-py/tests -v

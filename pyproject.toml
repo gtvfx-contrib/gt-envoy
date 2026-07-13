@@ -1,17 +1,21 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "envoy"
-dynamic = ["version"]
+version = "0.0.0"
 requires-python = ">=3.10"
 description = "Environment orchestration for managed application execution."
 readme = "README.md"
 license = { file = "LICENSE" }
 
 [project.scripts]
-envoy = "envoy._cli:main"
+# Backed by rust/envoy-py's cli_main() PyO3 binding, which delegates to the
+# same envoy-cli library function as the native envoy.exe binary (see
+# rust/envoy-py/src/cli.rs) -- so `pip install envoy` keeps providing an
+# `envoy` command with no separate implementation to maintain.
+envoy = "envoy:cli_main"
 
 [project.optional-dependencies]
 dev = [
@@ -25,25 +29,21 @@ docs = [
     "mkdocs-literate-nav",
 ]
 
-[tool.hatch.version]
-source = "vcs"
-
-[tool.hatch.build.hooks.vcs]
-# Written automatically at install/build time — committed _version.py is not needed.
-version-file = "py/envoy/_version.py"
-
-[tool.hatch.build.targets.wheel]
-# Package sources live under py/, not the project root.
-packages = ["py/envoy"]
-exclude = [
-    "py/envoy/test_bundle",
-    "py/envoy/examples",
-]
+[tool.maturin]
+# Mixed Rust/Python layout: python/envoy/__init__.py re-exports symbols from
+# the compiled extension built from rust/envoy-py/src/lib.rs (module name
+# `envoy._envoy`). The actual wheel version is static here (0.0.0) --
+# runtime `envoy.__version__` is derived from `git describe` at build time
+# via rust/envoy-py/build.rs instead (see that file for rationale).
+manifest-path = "rust/envoy-py/Cargo.toml"
+python-source = "rust/envoy-py/python"
+module-name = "envoy._envoy"
+features = ["pyo3/extension-module"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-src = ["py"]
+src = ["rust/envoy-py/python", "rust/envoy-py/tests"]
 
 [tool.ruff.lint]
 select = [
@@ -67,9 +67,8 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# Missing-docstring rules are noisy for test fixtures and example scripts.
-"py/envoy/test_bundle/**" = ["D"]
-"py/envoy/examples/**" = ["D"]
+# Missing-docstring rules are noisy for test fixtures.
+"rust/envoy-py/tests/**" = ["D"]
 
 [tool.ruff.format]
 quote-style = "preserve"
