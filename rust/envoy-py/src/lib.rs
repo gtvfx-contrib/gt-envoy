@@ -7,14 +7,17 @@
 //! `gt/globals/py/gt/vscode/wrapper`, `gt/devtools/py/cleanup_branches.py`,
 //! and the `gt/krita` / `gt/unreal` wrapper packages.
 //!
-//! Current bindings include the `envoy.proc` subprocess surface plus the
-//! top-level `_api.py` convenience functions and supporting wrapper types
-//! (`UserConfig`, `BundleConfig`, and trace-event records). Additional
-//! bundle/discovery/wrapper APIs land in later migration phases.
+//! Current bindings expose the full `py/envoy/__init__.py` public surface:
+//! the `envoy.proc` subprocess module, top-level `_api.py` convenience
+//! functions, `CommandDefinition`/`CommandRegistry`, the named-config
+//! registry (`_config_registry.py`/`_user_config.py`), `Bundle`/
+//! `BundleInfo`/`BundleConfig` discovery, `ApplicationWrapper`/
+//! `WrapperConfig`, the PyO3 exception hierarchy, and `cli_main`.
 
 use pyo3::prelude::*;
 
 mod api;
+mod cli;
 mod commands;
 mod config_registry;
 mod exceptions;
@@ -43,6 +46,7 @@ fn _envoy(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(_git_version, m)?)?;
     exceptions::register_exception_bindings(py, m)?;
     api::register_api_bindings(py, m)?;
+    cli::register_cli_bindings(py, m)?;
     commands::register_command_bindings(py, m)?;
     config_registry::register_config_registry_bindings(py, m)?;
     proc::register_proc_module(py, m)?;

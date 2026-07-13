@@ -1,4 +1,4 @@
-#![allow(clippy::too_many_arguments)]
+#![allow(clippy::too_many_arguments, clippy::useless_conversion)]
 
 //! PyO3 bindings for `ApplicationWrapper`, `WrapperConfig`,
 //! `ExecutionResult`, and `createWrapper`.

@@ -63,6 +63,7 @@ traceEnvironment = _native.traceEnvironment
 setApiVerbosity = _native.setApiVerbosity
 loadUserConfig = _native.loadUserConfig
 getCurrentBundleConfig = _native.getCurrentBundleConfig
+cli_main = _native.cli_main
 proc = _native.proc
 exceptions = _native.exceptions
 EnvoyError = exceptions.EnvoyError
@@ -115,6 +116,7 @@ __all__ = [
     "setApiVerbosity",
     "loadUserConfig",
     "getCurrentBundleConfig",
+    "cli_main",
     "discoverBundlesAuto",
     "getBundles",
     "loadBundlesFromConfig",

@@ -338,6 +338,7 @@ dependencies = [
 name = "envoy-py"
 version = "0.0.0"
 dependencies = [
+ "envoy-cli",
  "envoy-core",
  "pyo3",
  "serde_json",
