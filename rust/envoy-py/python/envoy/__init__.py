@@ -66,6 +66,8 @@ getCurrentBundleConfig = _native.getCurrentBundleConfig
 cli_main = _native.cli_main
 proc = _native.proc
 exceptions = _native.exceptions
+# New top-level Environment class (dict-like, auto-initializing).
+Environment = _native.Environment
 EnvoyError = exceptions.EnvoyError
 WrapperError = exceptions.WrapperError
 PreRunError = exceptions.PreRunError
@@ -123,6 +125,7 @@ __all__ = [
     "proc",
     "testing",
     "exceptions",
+    "Environment",
     "EnvoyError",
     "WrapperError",
     "PreRunError",

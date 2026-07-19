@@ -20,6 +20,7 @@ mod api;
 mod cli;
 mod commands;
 mod config_registry;
+mod environment;
 mod exceptions;
 mod proc;
 mod wrapper;
@@ -49,6 +50,7 @@ fn _envoy(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     cli::register_cli_bindings(py, m)?;
     commands::register_command_bindings(py, m)?;
     config_registry::register_config_registry_bindings(py, m)?;
+    environment::register_environment_module(py, m)?;
     proc::register_proc_module(py, m)?;
     wrapper::register_wrapper_bindings(py, m)?;
     Ok(())
