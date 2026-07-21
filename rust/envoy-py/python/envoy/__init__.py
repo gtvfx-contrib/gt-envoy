@@ -60,6 +60,7 @@ publishConfig = _native.publishConfig
 getEnvironment = _native.getEnvironment
 getAllowlist = _native.getAllowlist
 traceEnvironment = _native.traceEnvironment
+diagnoseEnvironment = _native.diagnoseEnvironment
 setApiVerbosity = _native.setApiVerbosity
 loadUserConfig = _native.loadUserConfig
 getCurrentBundleConfig = _native.getCurrentBundleConfig
@@ -115,6 +116,7 @@ __all__ = [
     "getEnvironment",
     "getAllowlist",
     "traceEnvironment",
+    "diagnoseEnvironment",
     "setApiVerbosity",
     "loadUserConfig",
     "getCurrentBundleConfig",

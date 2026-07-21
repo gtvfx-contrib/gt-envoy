@@ -752,6 +752,179 @@ impl EnvironmentManager {
 
         Ok(result_env)
     }
+
+    /// Produce a full diagnostic trace of how every variable in `env_files`
+    /// was resolved.
+    ///
+    /// Unlike [`prepare_environment`](Self::prepare_environment), which traces
+    /// a single variable, this walks **all** entries across all files and emits
+    /// one [`TraceEvent`] per entry plus allowlist pre-pass events. The result
+    /// is suitable for diagnostic / debugging output: callers can render it as
+    /// a human-readable report showing the complete resolution chain for every
+    /// variable that appeared in any env file.
+    pub fn diagnose_environment(
+        &self,
+        env_files: &[PathBuf],
+        base_env: Option<&HashMap<String, String>>,
+    ) -> Result<(HashMap<String, String>, Vec<TraceEvent>)> {
+        if env_files.is_empty() {
+            let base = base_env.cloned().unwrap_or_default();
+            return Ok((base, Vec::new()));
+        }
+
+        let mut merged_env = base_env.cloned().unwrap_or_default();
+        let mut parsed_files = Vec::new();
+        let mut all_trace_events = Vec::new();
+        let mut allowlist_additions = Vec::new();
+
+        // Parse all files first (same error handling as load_env_from_files).
+        for env_file in env_files {
+            if !env_file.exists() {
+                return Err(environment_build(format!(
+                    "Environment file not found: {}",
+                    env_file.display()
+                )));
+            }
+
+            let contents = fs::read_to_string(env_file).map_err(|error| {
+                environment_build(format!(
+                    "Error reading environment file {}: {error}",
+                    env_file.display()
+                ))
+            })?;
+            let parsed = serde_json::from_str::<OrderedValue>(&contents).map_err(|error| {
+                environment_build(format!(
+                    "Invalid JSON in environment file {}: {error}",
+                    env_file.display()
+                ))
+            })?;
+
+            parsed_files.push((env_file.clone(), parsed));
+        }
+
+        // Allowlist pre-pass across all files.
+        for (path, file_data) in &parsed_files {
+            if let OrderedValue::Object(entries) = file_data {
+                for allowlisted_var in object_field(entries, "environment_allowlist")
+                    .and_then(as_array)
+                    .into_iter()
+                    .flatten()
+                {
+                    let var_name = ordered_value_to_env_string(allowlisted_var);
+                    let already_set = merged_env.contains_key(&var_name);
+                    let os_value = env::var_os(&var_name)
+                        .map(|value| value.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let seeded = !already_set && !os_value.is_empty();
+
+                    if seeded {
+                        merged_env.insert(var_name.clone(), os_value.clone());
+                    }
+
+                    allowlist_additions.push(var_name.clone());
+
+                    all_trace_events.push(TraceEvent::Allowlist(TraceAllowlistEvent {
+                        file_path: path.clone(),
+                        var_name: var_name.clone(),
+                        seeded,
+                        os_value,
+                        already_set,
+                    }));
+                }
+            }
+        }
+
+        // Extend merged env with allowlist additions.
+        if !allowlist_additions.is_empty() {
+            let existing = merged_env
+                .get("ENVOY_ALLOWLIST")
+                .cloned()
+                .unwrap_or_default();
+            let mut combined: BTreeSet<String> = existing
+                .replace(',', ";")
+                .split(';')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+                .collect();
+            combined.extend(allowlist_additions);
+
+            merged_env.insert(
+                String::from("ENVOY_ALLOWLIST"),
+                combined.into_iter().collect::<Vec<_>>().join(";"),
+            );
+        }
+
+        // Trace every variable entry across all files using the same
+        // processing pipeline as `load_env_from_files`.
+        let path_sep = path_separator();
+        for (path, file_data) in parsed_files {
+            let special_vars = Self::get_special_variables(&path);
+            let items = env_items_from_value(&path, &file_data)?;
+
+            for (key, value) in items {
+                let (operator, var_name) = parse_operator(&key);
+
+                if matches!(value, OrderedValue::Null) {
+                    continue;
+                }
+
+                // Process the value through the same pipeline as normal loading.
+                let processed_value = self.process_env_value(&value, &merged_env, Some(&special_vars));
+                let value_before = merged_env.get(&var_name).cloned().unwrap_or_default();
+
+                let was_applied = match operator {
+                    Operator::Default => {
+                        if !merged_env.contains_key(&var_name) {
+                            merged_env.insert(var_name.clone(), processed_value.clone());
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Operator::Append => {
+                        let current = merged_env.get(&var_name).cloned().unwrap_or_default();
+                        let new_val = if current.is_empty() {
+                            processed_value.clone()
+                        } else {
+                            format!("{current}{path_sep}{processed_value}")
+                        };
+                        merged_env.insert(var_name.clone(), new_val);
+                        true
+                    }
+                    Operator::Prepend => {
+                        let current = merged_env.get(&var_name).cloned().unwrap_or_default();
+                        let new_val = if current.is_empty() {
+                            processed_value.clone()
+                        } else {
+                            format!("{processed_value}{path_sep}{current}")
+                        };
+                        merged_env.insert(var_name.clone(), new_val);
+                        true
+                    }
+                    Operator::Replace => {
+                        merged_env.insert(var_name.clone(), processed_value.clone());
+                        true
+                    }
+                };
+
+                let value_after = merged_env.get(&var_name).cloned().unwrap_or_default();
+
+                all_trace_events.push(TraceEvent::Step(TraceStepEvent {
+                    file_path: path.clone(),
+                    var_name: var_name.clone(),
+                    operator: operator.as_str().to_string(),
+                    raw_value: value.json_dump(),
+                    expanded_value: processed_value,
+                    value_before,
+                    value_after,
+                    was_applied,
+                }));
+            }
+        }
+
+        Ok((merged_env, all_trace_events))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

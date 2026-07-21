@@ -24,6 +24,7 @@ use crate::commands::{find_commands_file, CommandDefinition, CommandRegistry};
 use crate::discovery::{discover_bundles_auto, discover_bundles_from_roots, BundleInfo};
 use crate::environment::EnvironmentManager;
 use crate::error::{EnvoyError, Result};
+use crate::retry::{retry_sync, RetryConfig};
 
 /// Return `true` when `spec` should be treated as a direct executable path.
 ///
@@ -81,6 +82,17 @@ pub fn resolve_envoy_exe() -> Vec<String> {
 /// `Ok((registry, bundles))` is returned even when no bundles and no commands
 /// were found; an empty registry is a valid outcome matching Python. Errors are
 /// only returned for genuine discovery, I/O, or parse failures.
+/// Retry configuration for bundle discovery and config file I/O.
+///
+/// File-system operations on network shares or under heavy lock contention
+/// can fail transiently; a short exponential-backoff retry avoids spurious
+/// failures without adding noticeable latency for local files.
+const IO_RETRY_CONFIG: RetryConfig = RetryConfig {
+    max_attempts: 3,
+    initial_delay: std::time::Duration::from_millis(50),
+    max_delay: std::time::Duration::from_secs(2),
+};
+
 pub fn load_registry(
     bundle_roots: Option<&[String]>,
     commands_file: Option<&Path>,
@@ -89,13 +101,18 @@ pub fn load_registry(
     let mut bundles = None;
 
     if let Some(bundle_roots) = bundle_roots {
-        let discovered = discover_bundles_from_roots(bundle_roots);
+        // `discover_bundles_from_roots` is infallible (returns Vec directly),
+        // but we still wrap it for consistency with the retry pattern.
+        let discovered: Vec<_> = retry_sync(&IO_RETRY_CONFIG, || -> std::result::Result<Vec<BundleInfo>, EnvoyError> {
+            Ok(discover_bundles_from_roots(bundle_roots))
+        }).map_err(|e| EnvoyError::EnvironmentBuild(format!("Bundle discovery failed: {e}")))?;
         if !discovered.is_empty() {
             registry.load_from_bundles(&discovered);
             bundles = Some(discovered);
         }
     } else {
-        let discovered = discover_bundles_auto()?;
+        let discovered = retry_sync(&IO_RETRY_CONFIG, || discover_bundles_auto())
+            .map_err(|e| EnvoyError::EnvironmentBuild(format!("Bundle discovery failed: {e}")))?;
         if !discovered.is_empty() {
             registry.load_from_bundles(&discovered);
             bundles = Some(discovered);
@@ -109,7 +126,8 @@ pub fn load_registry(
         };
 
         if let Some(commands_file) = commands_file {
-            registry.load_from_file(&commands_file, None)?;
+            retry_sync(&IO_RETRY_CONFIG, || registry.load_from_file(&commands_file, None))
+                .map_err(|e| EnvoyError::EnvironmentBuild(format!("Failed to load commands file: {e}")))?;
         }
     }
 

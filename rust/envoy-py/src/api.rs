@@ -526,6 +526,49 @@ fn trace_environment(
     Ok((final_env, trace_out))
 }
 
+/// Build the environment for `command` and return a full diagnostic trace of
+/// how every variable was resolved across all env files.
+///
+/// Unlike [`trace_environment`](trace_environment), which traces a single
+/// variable, this walks **all** entries in all env files and returns one
+/// trace event per entry plus allowlist pre-pass events. Suitable for
+/// diagnostic / debugging output.
+#[pyfunction(name = "diagnoseEnvironment")]
+#[pyo3(signature = (command, *, inherit_env=false, allowlist=None, bundle_roots=None, commands_file=None))]
+fn diagnose_environment(
+    py: Python<'_>,
+    command: &str,
+    inherit_env: bool,
+    allowlist: Option<Vec<String>>,
+    bundle_roots: Option<Vec<String>>,
+    commands_file: Option<&Bound<'_, PyAny>>,
+) -> PyResult<(HashMap<String, String>, Vec<PyObject>)> {
+    let allowlist_set = allowlist_to_hashset(allowlist.clone());
+    let env_manager = EnvironmentManager::new(inherit_env, allowlist_set);
+
+    let (final_env, trace_events) = if is_raw_path(command) {
+        env_manager
+            .diagnose_environment(&[], None)
+            .map_err(envoy_error_to_pyerr)?
+    } else {
+        let commands_file = resolve_optional_path(commands_file)?;
+        let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref())
+            .map_err(envoy_error_to_pyerr)?;
+        let env_files = collect_env_files(command, &registry, bundles.as_deref())
+            .map_err(envoy_error_to_pyerr)?;
+        env_manager
+            .diagnose_environment(&env_files, None)
+            .map_err(envoy_error_to_pyerr)?
+    };
+
+    let trace_out = trace_events
+        .into_iter()
+        .map(|event| trace_event_to_pyobject(py, event))
+        .collect::<PyResult<Vec<_>>>()?;
+
+    Ok((final_env, trace_out))
+}
+
 /// Set the logging verbosity for the `envoy` logger.
 #[pyfunction(name = "setApiVerbosity")]
 fn set_api_verbosity(level: &Bound<'_, PyAny>) -> PyResult<()> {
@@ -608,6 +651,7 @@ pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResul
     m.add_function(wrap_pyfunction!(get_environment, m)?)?;
     m.add_function(wrap_pyfunction!(get_allowlist, m)?)?;
     m.add_function(wrap_pyfunction!(trace_environment, m)?)?;
+    m.add_function(wrap_pyfunction!(diagnose_environment, m)?)?;
     m.add_function(wrap_pyfunction!(set_api_verbosity, m)?)?;
     m.add_function(wrap_pyfunction!(load_user_config, m)?)?;
     m.add_function(wrap_pyfunction!(get_current_bundle_config, m)?)?;
