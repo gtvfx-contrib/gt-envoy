@@ -28,8 +28,10 @@ pub mod environment;
 pub mod error;
 pub mod executor;
 pub mod models;
+pub mod package_cache;
 pub mod retry;
 pub mod runtime;
+pub mod semver;
 pub mod user_config;
 pub mod wrapper;
 

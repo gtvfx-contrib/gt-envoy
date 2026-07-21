@@ -26,6 +26,7 @@ use envoy_core::environment::{
 use envoy_core::error::EnvoyError;
 use envoy_core::runtime::{collect_env_files, is_raw_path, load_registry, prepare_env};
 use envoy_core::user_config::UserConfig as CoreUserConfig;
+use envoy_core::package_cache::{PackageCache as CorePackageCache, PackageCacheError};
 use pyo3::exceptions::{PyOSError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyModule, PyTuple, PyType};
@@ -648,6 +649,7 @@ pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResul
     m.add_class::<Bundle>()?;
     m.add_class::<BundleInfo>()?;
     m.add_class::<BundleConfig>()?;
+    m.add_class::<PackageCache>()?;
     m.add_function(wrap_pyfunction!(get_environment, m)?)?;
     m.add_function(wrap_pyfunction!(get_allowlist, m)?)?;
     m.add_function(wrap_pyfunction!(trace_environment, m)?)?;
@@ -754,6 +756,91 @@ fn user_config_save_to_pyerr(error: EnvoyError) -> PyErr {
 
 fn bundle_config_to_pyerr(error: EnvoyError) -> PyErr {
     envoy_error_to_pyerr(error)
+}
+
+/// Python wrapper for the content-addressed package cache.
+///
+/// Packages are stored under `<cache_root>/<content_hash>/` and indexed by
+/// logical package ID + version in a JSON manifest at `<cache_root>/.index.json`.
+#[pyclass(module = "envoy")]
+struct PackageCache {
+    inner: CorePackageCache,
+}
+
+#[pymethods]
+impl PackageCache {
+    /// Open (or create) a package cache at `root`.
+    #[new]
+    fn new(root: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let path = path_like_to_pathbuf(root)?;
+        let inner = CorePackageCache::new(&path).map_err(|e| PyOSError::new_err(e.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// Store a package directory in the cache and return its metadata.
+    fn store(
+        &mut self,
+        py: Python<'_>,
+        package_id: &str,
+        version: &str,
+        source_dir: &Bound<'_, PyAny>,
+    ) -> PyResult<PyObject> {
+        let path = path_like_to_pathbuf(source_dir)?;
+        let cached = self.inner.store(package_id, version, &path).map_err(|e| PyOSError::new_err(e.to_string()))?;
+
+        // Return a dict with content_hash, path, and last_accessed.
+        let dict = PyDict::new_bound(py);
+        dict.set_item("content_hash", cached.content_hash)?;
+        dict.set_item(
+            "path",
+            path_to_py_path(py, &cached.path).map_err(|e| PyOSError::new_err(e.to_string()))?,
+        )?;
+        dict.set_item("last_accessed", cached.last_accessed)?;
+        Ok(dict.into_any().unbind())
+    }
+
+    /// Retrieve a previously stored package by ID and version.
+    fn get(&self, py: Python<'_>, package_id: &str, version: &str) -> PyResult<Option<PyObject>> {
+        match self.inner.get(package_id, version) {
+            Ok(cached) => {
+                let dict = PyDict::new_bound(py);
+                dict.set_item("content_hash", cached.content_hash)?;
+                dict.set_item(
+                    "path",
+                    path_to_py_path(py, &cached.path).map_err(|e| PyOSError::new_err(e.to_string()))?,
+                )?;
+                dict.set_item("last_accessed", cached.last_accessed)?;
+                Ok(Some(dict.into_any().unbind()))
+            }
+            Err(PackageCacheError::NotFound { .. }) => Ok(None),
+            Err(e) => Err(PyOSError::new_err(e.to_string())),
+        }
+    }
+
+    /// List all packages in the cache.
+    fn list(&self) -> Vec<(String, String)> {
+        self.inner.list().into_iter().map(|(id, ver)| (id.to_string(), ver.to_string())).collect()
+    }
+
+    /// Remove a package from the cache by ID and version.
+    fn remove(&mut self, package_id: &str, version: &str) -> PyResult<bool> {
+        match self.inner.remove(package_id, version) {
+            Ok(removed) => Ok(removed),
+            Err(e) => Err(PyOSError::new_err(e.to_string())),
+        }
+    }
+
+    /// Compact the cache by removing unreferenced content and applying retention policies.
+    fn compact(&mut self) -> PyResult<usize> {
+        let evicted = self.inner.compact().map_err(|e| PyOSError::new_err(e.to_string()))?;
+        Ok(evicted)
+    }
+
+    /// Get the cache root path.
+    #[getter]
+    fn root(&self, py: Python<'_>) -> PyResult<PyObject> {
+        path_to_py_path(py, &self.inner.root()).map_err(|e| PyOSError::new_err(e.to_string()))
+    }
 }
 
 #[cfg(test)]

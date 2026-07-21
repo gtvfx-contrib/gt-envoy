@@ -11,9 +11,11 @@ name = "envoy_core"
 
 [dependencies]
 ctrlc = "3"
+hex = "0.4"
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true
+sha2 = "0.10"
 thiserror.workspace = true
 
 [dev-dependencies]
