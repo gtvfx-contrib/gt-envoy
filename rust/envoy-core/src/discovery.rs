@@ -699,9 +699,8 @@ fn load_cached_discovery_results(
     let mut manifest = load_discovery_cache_manifest();
     let cache_entry = manifest.entries.remove(&cache_key)?;
 
-    if current_timestamp().saturating_sub(cache_entry.created_at)
-        > DISCOVERY_CACHE_MAX_AGE.as_secs()
-    {
+    let age = current_timestamp().saturating_sub(cache_entry.created_at);
+    if age > DISCOVERY_CACHE_MAX_AGE.as_secs() {
         return None;
     }
 
@@ -1263,13 +1262,14 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        discover_bundles_auto, discover_bundles_from_roots, discovery_cache_key,
-        discovery_cache_path, expand_bundle_path, find_bundle_roots, find_git_repos,
-        get_bundle_commands_files, get_bundle_env_files, get_bundles, has_envoy_env,
-        infer_namespace, is_bndlid, is_git_repo, is_published_bundle, load_bundles_from_config,
-        load_discovery_cache_manifest, resolve_bndlid, validate_bundle, Bundle, BundleConfig,
-        BundleInfo, EnvoyError, BUNDLES_CONFIG_VAR, BUNDLE_CHECKOUT, BUNDLE_ENV_DIR,
-        BUNDLE_MARKER_FILE, BUNDLE_ROOTS_VAR, DISCOVERY_CACHE_DISABLE_VAR,
+        current_timestamp, discover_bundles_auto, discover_bundles_from_roots,
+        discovery_cache_key, discovery_cache_path, expand_bundle_path, find_bundle_roots,
+        find_git_repos, get_bundle_commands_files, get_bundle_env_files, get_bundles,
+        has_envoy_env, infer_namespace, is_bndlid, is_git_repo, is_published_bundle,
+        load_bundles_from_config, load_discovery_cache_manifest, resolve_bndlid,
+        save_discovery_cache_manifest, validate_bundle, Bundle, BundleConfig, BundleInfo,
+        EnvoyError, BUNDLES_CONFIG_VAR, BUNDLE_CHECKOUT, BUNDLE_ENV_DIR, BUNDLE_MARKER_FILE,
+        BUNDLE_ROOTS_VAR, DISCOVERY_CACHE_DISABLE_VAR,
     };
 
     struct EnvVarGuard {
@@ -1388,6 +1388,27 @@ mod tests {
             .entries
             .get(&cache_key)
             .map(|entry| entry.created_at)
+    }
+
+    /// Directly overwrite a cache entry's recorded `created_at`, bypassing
+    /// real time entirely. Used to make cache-freshness/-staleness tests
+    /// deterministic instead of relying on `thread::sleep` against a real
+    /// wall clock, which is flaky under heavy parallel test load: sleeps
+    /// only guarantee a *minimum* duration and can overshoot arbitrarily
+    /// when the OS scheduler is contended, occasionally pushing a "should
+    /// still be fresh" entry past the TTL and causing a spurious re-scan.
+    fn set_cache_entry_created_at(root_dirs: &[String], max_depth: usize, created_at: u64) {
+        let roots = root_dirs
+            .iter()
+            .map(|root| super::resolve_input_path(Path::new(root)))
+            .collect::<Vec<_>>();
+
+        let cache_key = discovery_cache_key(&roots, max_depth);
+        let mut manifest = load_discovery_cache_manifest();
+        if let Some(entry) = manifest.entries.get_mut(&cache_key) {
+            entry.created_at = created_at;
+        }
+        save_discovery_cache_manifest(&manifest);
     }
 
     #[test]
@@ -1526,23 +1547,37 @@ mod tests {
 
     #[test]
     fn discover_bundles_from_roots_uses_marker_bndlid_for_published_bundles() {
-        let temp = tempdir().expect("failed to create temp dir");
-        let root = temp.path();
+        // Disable the discovery cache and serialize via `with_env_lock`: this
+        // test only cares about bndlid inference, not caching, but
+        // `discover_bundles_from_roots` always consults the shared on-disk
+        // discovery cache keyed off `LOCALAPPDATA`. Without this guard, this
+        // test can run concurrently with the cache-focused tests below
+        // while they have `LOCALAPPDATA` temporarily pointed at an isolated
+        // tempdir, racing on that same cache file and corrupting/losing
+        // their entries (a classic concurrent read-modify-write/lost-update
+        // race on the shared manifest file).
+        with_env_lock(|| {
+            let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, Some(OsStr::new("1")));
 
-        let checkout = create_checkout_bundle(root, "gt", "pythoncore", &["python_env.json"], None);
-        let published = create_published_bundle(
-            &root.join("releases"),
-            "v1.2.3",
-            json!({"bndlid": "tools:render", "version": "1.2.3"}),
-            &["render_env.json"],
-            None,
-        );
+            let temp = tempdir().expect("failed to create temp dir");
+            let root = temp.path();
 
-        let bundles = discover_bundles_from_roots(&[root.display().to_string()]);
-        let discovered = namespaced_map(&bundles);
+            let checkout =
+                create_checkout_bundle(root, "gt", "pythoncore", &["python_env.json"], None);
+            let published = create_published_bundle(
+                &root.join("releases"),
+                "v1.2.3",
+                json!({"bndlid": "tools:render", "version": "1.2.3"}),
+                &["render_env.json"],
+                None,
+            );
 
-        assert_eq!(discovered.get("gt:pythoncore"), Some(&checkout));
-        assert_eq!(discovered.get("tools:render"), Some(&published));
+            let bundles = discover_bundles_from_roots(&[root.display().to_string()]);
+            let discovered = namespaced_map(&bundles);
+
+            assert_eq!(discovered.get("gt:pythoncore"), Some(&checkout));
+            assert_eq!(discovered.get("tools:render"), Some(&published));
+        });
     }
 
     #[test]
@@ -1562,17 +1597,19 @@ mod tests {
             assert_eq!(first.len(), 1);
             assert!(discovery_cache_path().is_file());
 
-            let first_created_at = cache_entry_created_at(&root_dirs, 5)
-                .expect("cache entry should exist after discovery");
-
-            thread::sleep(Duration::from_secs(1));
+            // Backdate the entry by 1 second (well inside the 5-second TTL)
+            // deterministically instead of sleeping in real time -- see
+            // `set_cache_entry_created_at`'s doc comment for why a real
+            // sleep here would be flaky under parallel test load.
+            let backdated = current_timestamp().saturating_sub(1);
+            set_cache_entry_created_at(&root_dirs, 5, backdated);
 
             let second = discover_bundles_from_roots(&root_dirs);
             let second_created_at = cache_entry_created_at(&root_dirs, 5)
                 .expect("cache entry should remain after cache hit");
 
             assert_eq!(namespaced_map(&first), namespaced_map(&second));
-            assert_eq!(second_created_at, first_created_at);
+            assert_eq!(second_created_at, backdated);
         });
     }
 
