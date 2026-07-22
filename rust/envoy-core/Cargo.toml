@@ -11,6 +11,7 @@ name = "envoy_core"
 
 [dependencies]
 ctrlc = "3"
+fs4 = { version = "1", features = ["sync"] }
 hex = "0.4"
 json_comments = "0.2"
 opentelemetry = "0.32"

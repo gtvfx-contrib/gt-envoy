@@ -25,6 +25,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use fs4::FileExt;
 use rayon::prelude::*;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
@@ -696,6 +697,7 @@ fn load_cached_discovery_results(
         return None;
     }
 
+    let _cache_lock = lock_discovery_cache()?;
     let cache_key = discovery_cache_key(root_dirs, max_depth);
     let mut manifest = load_discovery_cache_manifest();
     let cache_entry = manifest.entries.remove(&cache_key)?;
@@ -738,6 +740,9 @@ fn store_cached_discovery_results(root_dirs: &[PathBuf], bundles: &[BundleInfo],
         return;
     }
 
+    let Some(_cache_lock) = lock_discovery_cache() else {
+        return;
+    };
     let mut manifest = load_discovery_cache_manifest();
     manifest.entries.insert(
         discovery_cache_key(root_dirs, max_depth),
@@ -756,6 +761,22 @@ fn store_cached_discovery_results(root_dirs: &[PathBuf], bundles: &[BundleInfo],
     );
 
     save_discovery_cache_manifest(&manifest);
+}
+
+fn lock_discovery_cache() -> Option<fs::File> {
+    let lock_path = discovery_cache_lock_path();
+    let parent = lock_path.parent()?;
+    fs::create_dir_all(parent).ok()?;
+
+    let lock_file = fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+        .ok()?;
+    FileExt::lock(&lock_file).ok()?;
+
+    Some(lock_file)
 }
 
 fn discovery_cache_key(root_dirs: &[PathBuf], max_depth: usize) -> String {
@@ -803,6 +824,10 @@ fn discovery_cache_path() -> PathBuf {
         .unwrap_or(package_cache_root);
 
     envoy_cache_root.join(DISCOVERY_CACHE_FILENAME)
+}
+
+fn discovery_cache_lock_path() -> PathBuf {
+    discovery_cache_path().with_extension("lock")
 }
 
 fn fingerprint_root(root: &Path, max_depth: usize) -> Option<CachedRootFingerprint> {
@@ -1255,6 +1280,7 @@ mod tests {
     use std::ffi::{OsStr, OsString};
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Barrier};
     use std::thread;
     use std::time::Duration;
 
@@ -1263,8 +1289,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        current_timestamp, discover_bundles_auto, discover_bundles_from_roots,
-        discovery_cache_key, discovery_cache_path, expand_bundle_path, find_bundle_roots,
+        current_timestamp, discover_bundles_auto, discover_bundles_from_roots, discovery_cache_key,
+        discovery_cache_lock_path, discovery_cache_path, expand_bundle_path, find_bundle_roots,
         find_git_repos, get_bundle_commands_files, get_bundle_env_files, get_bundles,
         has_envoy_env, infer_namespace, is_bndlid, is_git_repo, is_published_bundle,
         load_bundles_from_config, load_discovery_cache_manifest, resolve_bndlid,
@@ -1558,7 +1584,8 @@ mod tests {
         // their entries (a classic concurrent read-modify-write/lost-update
         // race on the shared manifest file).
         with_env_lock(|| {
-            let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, Some(OsStr::new("1")));
+            let _disable_guard =
+                EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, Some(OsStr::new("1")));
 
             let temp = tempdir().expect("failed to create temp dir");
             let root = temp.path();
@@ -1611,6 +1638,76 @@ mod tests {
 
             assert_eq!(namespaced_map(&first), namespaced_map(&second));
             assert_eq!(second_created_at, backdated);
+        });
+    }
+
+    #[test]
+    fn discover_bundles_from_roots_creates_cache_lock_file() {
+        with_env_lock(|| {
+            let temp = tempdir().expect("failed to create temp dir");
+            let cache_temp = tempdir().expect("failed to create cache temp dir");
+            let cache_root = cache_temp.path().join("cache-root");
+            fs::create_dir_all(&cache_root).expect("failed to create cache root");
+            let _cache_root_guard = EnvVarGuard::set("LOCALAPPDATA", Some(cache_root.as_os_str()));
+            let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, None);
+
+            create_checkout_bundle(temp.path(), "gt", "pythoncore", &["python_env.json"], None);
+            let root_dirs = vec![temp.path().display().to_string()];
+
+            let bundles = discover_bundles_from_roots(&root_dirs);
+            assert_eq!(bundles.len(), 1);
+            assert!(discovery_cache_path().is_file());
+            assert!(discovery_cache_lock_path().is_file());
+        });
+    }
+
+    #[test]
+    fn discover_bundles_from_roots_preserves_concurrent_cache_entries() {
+        with_env_lock(|| {
+            let temp = tempdir().expect("failed to create temp dir");
+            let cache_temp = tempdir().expect("failed to create cache temp dir");
+            let cache_root = cache_temp.path().join("cache-root");
+            fs::create_dir_all(&cache_root).expect("failed to create cache root");
+            let _cache_root_guard = EnvVarGuard::set("LOCALAPPDATA", Some(cache_root.as_os_str()));
+            let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, None);
+
+            let first_root = temp.path().join("first-root");
+            let second_root = temp.path().join("second-root");
+            create_checkout_bundle(&first_root, "gt", "pythoncore", &["python_env.json"], None);
+            create_checkout_bundle(&second_root, "tools", "render", &["render_env.json"], None);
+
+            let barrier = Arc::new(Barrier::new(2));
+            let first_root_dirs = vec![first_root.display().to_string()];
+            let second_root_dirs = vec![second_root.display().to_string()];
+
+            let first_barrier = Arc::clone(&barrier);
+            let first_handle = thread::spawn(move || {
+                first_barrier.wait();
+                discover_bundles_from_roots(&first_root_dirs)
+            });
+
+            let second_barrier = Arc::clone(&barrier);
+            let second_handle = thread::spawn(move || {
+                second_barrier.wait();
+                discover_bundles_from_roots(&second_root_dirs)
+            });
+
+            let first = first_handle
+                .join()
+                .expect("first discovery thread should succeed");
+            let second = second_handle
+                .join()
+                .expect("second discovery thread should succeed");
+
+            assert_eq!(first.len(), 1);
+            assert_eq!(second.len(), 1);
+
+            let manifest = load_discovery_cache_manifest();
+            let first_key = discovery_cache_key(&[super::resolve_input_path(&first_root)], 5);
+            let second_key = discovery_cache_key(&[super::resolve_input_path(&second_root)], 5);
+
+            assert!(manifest.entries.contains_key(&first_key));
+            assert!(manifest.entries.contains_key(&second_key));
         });
     }
 
