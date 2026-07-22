@@ -32,6 +32,7 @@ use serde_json::Value;
 
 use crate::config_registry::{is_config_name, resolve_named_config};
 use crate::error::{EnvoyError, Result};
+use crate::json_util::parse_json_with_comments;
 use crate::user_config::UserConfig;
 
 const BUNDLE_ROOTS_VAR: &str = "ENVOY_BNDL_ROOTS";
@@ -979,7 +980,7 @@ pub fn load_bundles_from_config(config_file: &Path) -> Result<Vec<BundleInfo>> {
     let contents = fs::read_to_string(&config_file).map_err(|source| {
         EnvoyError::EnvironmentBuild(format!("Error reading config file: {source}"))
     })?;
-    let data = serde_json::from_str::<Value>(&contents).map_err(|source| {
+    let data = parse_json_with_comments::<Value>(&contents).map_err(|source| {
         EnvoyError::EnvironmentBuild(format!("Invalid JSON in config file: {source}"))
     })?;
 
@@ -1753,6 +1754,44 @@ mod tests {
             let _bundle_guard =
                 EnvVarGuard::set("TEST_DISCOVERY_BUNDLE", Some(checkout.as_os_str()));
             let _missing_guard = EnvVarGuard::set("TEST_DISCOVERY_MISSING", None);
+
+            let bundles = load_bundles_from_config(&config).expect("config should load");
+            assert_eq!(bundles.len(), 1);
+            assert_eq!(bundles[0].bndlid(), "gt:pythoncore");
+        });
+    }
+
+    #[test]
+    fn load_bundles_from_config_accepts_comment_annotated_json() {
+        with_env_lock(|| {
+            let temp = tempdir().expect("failed to create temp dir");
+            let checkout = create_checkout_bundle(
+                temp.path(),
+                "gt",
+                "pythoncore",
+                &["python_env.json"],
+                Some(json!({"python_dev": {}})),
+            );
+            let config = temp.path().join("bundles.json");
+            let bundle_path_json = serde_json::to_string(&checkout.display().to_string())
+                .expect("bundle path should serialize");
+            fs::write(
+                &config,
+                format!(
+                    concat!(
+                        "{{\n",
+                        "  // bundle list\n",
+                        "  \"bundles\": [\n",
+                        "    {} /* active bundle */, \n",
+                        "    # ignored invalid entry\n",
+                        "    123\n",
+                        "  ]\n",
+                        "}}\n"
+                    ),
+                    bundle_path_json
+                ),
+            )
+            .expect("failed to write comment-annotated bundle config");
 
             let bundles = load_bundles_from_config(&config).expect("config should load");
             assert_eq!(bundles.len(), 1);

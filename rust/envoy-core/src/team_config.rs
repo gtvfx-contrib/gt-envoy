@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::json_util::parse_json_with_comments;
+
 /// Error type for team configuration operations.
 #[derive(Debug, Error)]
 pub enum TeamConfigError {
@@ -79,7 +81,7 @@ impl TeamConfig {
         })?;
 
         let value: serde_json::Value =
-            serde_json::from_str(&content).map_err(|e| TeamConfigError::Json {
+            parse_json_with_comments(&content).map_err(|e| TeamConfigError::Json {
                 path: path.to_path_buf(),
                 source: e,
             })?;
@@ -178,7 +180,7 @@ impl UserHostConfig {
         })?;
 
         let value: serde_json::Value =
-            serde_json::from_str(&content).map_err(|e| TeamConfigError::Json {
+            parse_json_with_comments(&content).map_err(|e| TeamConfigError::Json {
                 path: path.to_path_buf(),
                 source: e,
             })?;
@@ -399,6 +401,42 @@ mod tests {
     }
 
     #[test]
+    fn load_team_config_accepts_comment_annotated_json() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("team.json");
+        fs::write(
+            &path,
+            r#"{
+                // Team identifier.
+                "name": "bfd",
+                "prodPackagesRoot": "\\\\server\\packages", /* package share */
+                "prodPipelinesRoot": "\\\\server\\pipelines",
+                # extra metadata
+                "customSetting": true
+            }"#,
+        )
+        .unwrap();
+
+        let config = TeamConfig::load_from_file(&path).unwrap();
+        assert_eq!(config.name, "bfd");
+        assert_eq!(
+            config.prod_packages_root.as_deref(),
+            Some(PathBuf::from("\\\\server\\packages").as_path())
+        );
+        assert_eq!(
+            config.prod_pipelines_root.as_deref(),
+            Some(PathBuf::from("\\\\server\\pipelines").as_path())
+        );
+        assert_eq!(
+            config
+                .metadata
+                .get("customSetting")
+                .and_then(|value| value.as_bool()),
+            Some(true)
+        );
+    }
+
+    #[test]
     fn discover_team_configs_finds_all_in_bundles() {
         let temp = TempDir::new().unwrap();
         let bundles = vec![
@@ -494,6 +532,32 @@ mod tests {
         let user = UserHostConfig::load_from_file(&path).unwrap();
         assert_eq!(user.prod_packages_root, "\\\\local\\packages");
         assert_eq!(user.metadata.len(), 1);
+    }
+
+    #[test]
+    fn load_user_host_config_accepts_comment_annotated_json() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("user.json");
+        fs::write(
+            &path,
+            r#"{
+                "prodPackagesRoot": "\\\\local\\packages", // override packages
+                "prodPipelinesRoot": "\\\\local\\pipelines", /* override pipelines */
+                # retained as metadata
+                "customKey": 42
+            }"#,
+        )
+        .unwrap();
+
+        let user = UserHostConfig::load_from_file(&path).unwrap();
+        assert_eq!(user.prod_packages_root, "\\\\local\\packages");
+        assert_eq!(user.prod_pipelines_root, "\\\\local\\pipelines");
+        assert_eq!(
+            user.metadata
+                .get("customKey")
+                .and_then(|value| value.as_i64()),
+            Some(42)
+        );
     }
 
     #[test]

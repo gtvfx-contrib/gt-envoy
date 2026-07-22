@@ -19,6 +19,7 @@ use serde_json::Value;
 use crate::discovery::{Bundle, BundleInfo, BUNDLE_ENV_DIR};
 use crate::environment::EnvironmentManager;
 use crate::error::{EnvoyError, Result};
+use crate::json_util::parse_json_with_comments;
 
 /// A command definition loaded from `commands.json`.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -233,7 +234,7 @@ impl CommandRegistry {
                 commands_file.display()
             ))
         })?;
-        let commands_data = serde_json::from_str::<Value>(&text).map_err(|error| {
+        let commands_data = parse_json_with_comments::<Value>(&text).map_err(|error| {
             EnvoyError::EnvironmentBuild(format!(
                 "Invalid JSON in commands file {}: {error}",
                 commands_file.display()
@@ -705,6 +706,51 @@ mod tests {
                 .as_ref()
                 .expect("source file should be set"),
             &commands_file
+        );
+    }
+
+    #[test]
+    fn load_from_file_accepts_comment_annotated_commands_json() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let envoy_env_dir = temp_dir.path().join(BUNDLE_ENV_DIR);
+        fs::create_dir_all(&envoy_env_dir).expect("failed to create .envoy directory");
+        let commands_file = envoy_env_dir.join("commands.json");
+        fs::write(
+            &commands_file,
+            r#"{
+                // Main Python entry point.
+                "python": {
+                    "environment": [
+                        "base_env.json", /* shared bootstrap */
+                        "python_env.json" # interpreter-specific
+                    ],
+                    "alias": ["python.exe", "-m", "pip"]
+                }
+            }"#,
+        )
+        .expect("failed to write comment-annotated commands file");
+
+        let registry =
+            CommandRegistry::new(Some(&commands_file)).expect("failed to load commands file");
+        let command = registry
+            .get("python")
+            .expect("python command should be present");
+
+        assert_eq!(registry.len(), 1);
+        assert_eq!(
+            command.environment,
+            vec![
+                String::from("base_env.json"),
+                String::from("python_env.json"),
+            ]
+        );
+        assert_eq!(
+            command.alias.as_ref().expect("alias should be present"),
+            &vec![
+                String::from("python.exe"),
+                String::from("-m"),
+                String::from("pip"),
+            ]
         );
     }
 

@@ -27,6 +27,7 @@ pub mod discovery;
 pub mod environment;
 pub mod error;
 pub mod executor;
+pub mod json_util;
 pub mod models;
 pub mod package_cache;
 pub mod pipeline;

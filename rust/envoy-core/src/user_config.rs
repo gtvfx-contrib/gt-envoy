@@ -20,6 +20,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use crate::error::{EnvoyError, Result};
+use crate::json_util::parse_json_with_comments;
 
 /// Metadata describing one supported user-config setting.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -133,7 +134,7 @@ impl UserConfig {
             }
         };
 
-        let value = match serde_json::from_str::<Value>(&text) {
+        let value = match parse_json_with_comments::<Value>(&text) {
             Ok(value) => value,
             Err(_) => {
                 return Self {
@@ -395,6 +396,33 @@ mod tests {
         );
         assert_eq!(reloaded.get("verbosity"), Some("verbose"));
         assert_eq!(reloaded.path, path);
+    }
+
+    #[test]
+    fn load_comment_annotated_json_returns_expected_settings() {
+        let temp_dir = tempdir().expect("tempdir should be created");
+        let path = temp_dir.path().join("user_config.json");
+        fs::write(
+            &path,
+            r#"{
+                // default bundle config
+                "bundles_config": "C:\\studio\\envoy\\studio_bundles.json",
+                "verbosity": "verbose", /* CLI default */
+                # cache override
+                "package_cache_dir": "C:\\cache"
+            }"#,
+        )
+        .expect("commented config should be written");
+
+        let config = UserConfig::load(Some(path.clone()));
+
+        assert_eq!(
+            config.get("bundles_config"),
+            Some("C:\\studio\\envoy\\studio_bundles.json")
+        );
+        assert_eq!(config.get("verbosity"), Some("verbose"));
+        assert_eq!(config.get("package_cache_dir"), Some("C:\\cache"));
+        assert_eq!(config.path, path);
     }
 
     #[test]

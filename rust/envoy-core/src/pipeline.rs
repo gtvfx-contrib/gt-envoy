@@ -31,6 +31,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::json_util::parse_json_with_comments;
+
 /// Error type for pipeline resolution operations.
 #[derive(Debug, Error)]
 pub enum PipelineError {
@@ -188,7 +190,7 @@ pub fn load_pipeline_from_file(
     })?;
 
     let value: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| PipelineError::Json {
+        parse_json_with_comments(&content).map_err(|e| PipelineError::Json {
             file_path: path.to_path_buf(),
             source: e,
         })?;
@@ -391,6 +393,34 @@ mod tests {
         assert_eq!(pipeline.namespace, "bfd");
         assert!(matches!(&pipeline.source, PipelineSource::Local { .. }));
         assert!(pipeline.pinned_version.is_none());
+    }
+
+    #[test]
+    fn load_pipeline_from_file_accepts_comment_annotated_json() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("pipeline.json");
+        fs::write(
+            &path,
+            r#"{
+                // Pipeline name.
+                "name": "build",
+                "namespace": "bfd",
+                "source": {"type": "local"}, /* local file */
+                "pinned_version": null,
+                # optional metadata
+                "description": "Build pipeline"
+            }"#,
+        )
+        .unwrap();
+
+        let pipeline = load_pipeline_from_file(&path, "gt").unwrap();
+        assert_eq!(pipeline.name, "build");
+        assert_eq!(pipeline.namespace, "bfd");
+        assert!(matches!(&pipeline.source, PipelineSource::Local { .. }));
+        assert_eq!(
+            pipeline.metadata.get("description"),
+            Some(&serde_json::Value::String(String::from("Build pipeline")))
+        );
     }
 
     #[test]

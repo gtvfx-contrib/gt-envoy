@@ -24,6 +24,7 @@ use std::sync::LazyLock;
 use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
 
 use crate::error::{EnvoyError, Result};
+use crate::json_util::parse_json_with_comments;
 
 const BUNDLE_ENV_DIR: &str = ".envoy";
 
@@ -504,7 +505,7 @@ impl EnvironmentManager {
                     env_file.display()
                 ))
             })?;
-            let parsed = serde_json::from_str::<OrderedValue>(&contents).map_err(|error| {
+            let parsed = parse_json_with_comments::<OrderedValue>(&contents).map_err(|error| {
                 environment_build(format!(
                     "Invalid JSON in environment file {}: {error}",
                     env_file.display()
@@ -792,7 +793,7 @@ impl EnvironmentManager {
                     env_file.display()
                 ))
             })?;
-            let parsed = serde_json::from_str::<OrderedValue>(&contents).map_err(|error| {
+            let parsed = parse_json_with_comments::<OrderedValue>(&contents).map_err(|error| {
                 environment_build(format!(
                     "Invalid JSON in environment file {}: {error}",
                     env_file.display()
@@ -1422,6 +1423,37 @@ mod tests {
     }
 
     #[test]
+    fn load_env_from_files_accepts_comment_annotated_json() {
+        let temp = tempdir().expect("failed to create temp dir");
+        let env_file = write_env_file(
+            temp.path(),
+            "commented.json",
+            r#"{
+  // base value
+  "MY_VAR":"base",
+  "+=MY_VAR":"tail", /* appended segment */
+  # default when missing
+  "?=OTHER_VAR":"fallback"
+}"#,
+        );
+        let manager = EnvironmentManager::new(false, None);
+        let expected_my_var = format!("base{}tail", path_separator());
+
+        let result = manager
+            .load_env_from_files(&[env_file], None, None, None, None)
+            .expect("env file should load");
+
+        assert_eq!(
+            result.get("MY_VAR").map(String::as_str),
+            Some(expected_my_var.as_str())
+        );
+        assert_eq!(
+            result.get("OTHER_VAR").map(String::as_str),
+            Some("fallback")
+        );
+    }
+
+    #[test]
     fn load_env_from_files_filters_null_and_unresolved_list_items() {
         let temp = tempdir().expect("failed to create temp dir");
         let env_file = write_env_file(
@@ -1677,6 +1709,38 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Invalid JSON in environment file"));
+    }
+
+    #[test]
+    fn diagnose_environment_accepts_comment_annotated_json() {
+        let temp = tempdir().expect("failed to create temp dir");
+        let env_file = write_env_file(
+            temp.path(),
+            "diagnose.json",
+            r#"{
+  // traced value
+  "MY_VAR":"base",
+  "^=MY_VAR":"head", /* prefix segment */
+  # fallback entry
+  "?=OTHER_VAR":"fallback"
+}"#,
+        );
+        let manager = EnvironmentManager::new(false, None);
+        let expected_my_var = format!("head{}base", path_separator());
+
+        let (result, trace) = manager
+            .diagnose_environment(&[env_file], None)
+            .expect("diagnostic trace should load");
+
+        assert_eq!(
+            result.get("MY_VAR").map(String::as_str),
+            Some(expected_my_var.as_str())
+        );
+        assert_eq!(
+            result.get("OTHER_VAR").map(String::as_str),
+            Some("fallback")
+        );
+        assert_eq!(trace.len(), 3);
     }
 
     #[test]
