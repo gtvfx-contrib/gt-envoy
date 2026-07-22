@@ -29,6 +29,10 @@ use envoy_core::runtime::{
     resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
 };
 use envoy_core::user_config::UserConfig as CoreUserConfig;
+use envoy_core::vcs::{
+    detect as core_detect_vcs, VcsAdapter as CoreVcsAdapter, VcsChange as CoreVcsChange,
+    VcsKind as CoreVcsKind, VcsStatus as CoreVcsStatus,
+};
 use envoy_core::package_cache::{
     open_default_package_cache, PackageCache as CorePackageCache, PackageCacheError,
 };
@@ -51,6 +55,10 @@ const SUPPORTED_OPERATING_SYSTEMS: &[&str] = &["Windows", "Linux", "Darwin"];
 #[pyclass(module = "envoy")]
 struct TraceAllowlistEvent {
     inner: CoreTraceAllowlistEvent,
+}
+
+fn vcs_kind_name(kind: CoreVcsKind) -> String {
+    kind.as_str().to_string()
 }
 
 #[pymethods]
@@ -733,6 +741,9 @@ pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResul
     m.add_class::<PipelineConfig>()?;
     m.add_class::<TeamConfig>()?;
     m.add_class::<UserHostConfig>()?;
+    m.add_class::<Vcs>()?;
+    m.add_class::<VcsChange>()?;
+    m.add_class::<VcsStatus>()?;
     m.add_class::<SemVer>()?;
     m.add_class::<Constraint>()?;
     m.add_class::<VersionSpec>()?;
@@ -1288,6 +1299,141 @@ impl TeamConfig {
     }
 }
 
+/// Python wrapper for a normalized VCS change entry.
+#[pyclass(module = "envoy")]
+struct VcsChange {
+    inner: CoreVcsChange,
+}
+
+#[pymethods]
+impl VcsChange {
+    /// Repository-relative path for the changed item.
+    #[getter]
+    fn path(&self) -> String {
+        self.inner.path.clone()
+    }
+
+    /// Normalized change status.
+    #[getter]
+    fn status(&self) -> String {
+        self.inner.status.clone()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "VcsChange(path='{}', status='{}')",
+            self.inner.path, self.inner.status
+        )
+    }
+
+    fn __str__(&self) -> String {
+        self.__repr__()
+    }
+}
+
+/// Python wrapper for a normalized VCS status snapshot.
+#[pyclass(module = "envoy")]
+struct VcsStatus {
+    inner: CoreVcsStatus,
+}
+
+#[pymethods]
+impl VcsStatus {
+    /// Backend kind for this status snapshot.
+    #[getter]
+    fn kind(&self) -> String {
+        vcs_kind_name(self.inner.kind)
+    }
+
+    /// Working-copy root used for the status query.
+    #[getter]
+    fn root(&self, py: Python<'_>) -> PyResult<PyObject> {
+        path_to_py_path(py, &self.inner.root).map_err(|e| PyOSError::new_err(e.to_string()))
+    }
+
+    /// Normalized change entries returned by the backend.
+    #[getter]
+    fn changes(&self, py: Python<'_>) -> PyResult<Vec<Py<VcsChange>>> {
+        self.inner
+            .changes
+            .iter()
+            .cloned()
+            .map(|inner| Py::new(py, VcsChange { inner }))
+            .collect()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "VcsStatus(kind='{}', root='{}', changes={})",
+            vcs_kind_name(self.inner.kind),
+            self.inner.root.display(),
+            self.inner.changes.len()
+        )
+    }
+
+    fn __str__(&self) -> String {
+        self.__repr__()
+    }
+}
+
+/// Python wrapper for VCS detection and status queries.
+#[pyclass(module = "envoy")]
+struct Vcs {
+    inner: Box<dyn CoreVcsAdapter>,
+}
+
+#[pymethods]
+impl Vcs {
+    /// Detect the backend for the current working directory.
+    #[classmethod]
+    fn detect(_cls: &Bound<'_, PyType>) -> PyResult<Option<Self>> {
+        let current_dir = std::env::current_dir().map_err(|e| PyOSError::new_err(e.to_string()))?;
+        Ok(core_detect_vcs(&current_dir).map(|inner| Self { inner }))
+    }
+
+    /// Detected backend kind.
+    #[getter]
+    fn kind(&self) -> String {
+        vcs_kind_name(self.inner.kind())
+    }
+
+    /// Working-copy root for the detected backend.
+    #[getter]
+    fn root(&self, py: Python<'_>) -> PyResult<PyObject> {
+        path_to_py_path(py, self.inner.root()).map_err(|e| PyOSError::new_err(e.to_string()))
+    }
+
+    /// Return a normalized status snapshot for the working copy.
+    fn status(&self, py: Python<'_>) -> PyResult<Py<VcsStatus>> {
+        let inner = self
+            .inner
+            .status()
+            .map_err(|e| PyOSError::new_err(e.to_string()))?;
+        Py::new(py, VcsStatus { inner })
+    }
+
+    /// Return normalized change entries for the working copy.
+    fn get_changes(&self, py: Python<'_>) -> PyResult<Vec<Py<VcsChange>>> {
+        self.inner
+            .get_changes()
+            .map_err(|e| PyOSError::new_err(e.to_string()))?
+            .into_iter()
+            .map(|inner| Py::new(py, VcsChange { inner }))
+            .collect()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Vcs(kind='{}', root='{}')",
+            vcs_kind_name(self.inner.kind()),
+            self.inner.root().display()
+        )
+    }
+
+    fn __str__(&self) -> String {
+        self.__repr__()
+    }
+}
 /// Python wrapper for per-user/host configuration that overrides team defaults.
 #[pyclass(module = "envoy")]
 struct UserHostConfig {

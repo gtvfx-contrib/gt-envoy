@@ -35,6 +35,7 @@ pub mod team_config;
 pub mod runtime;
 pub mod semver;
 pub mod user_config;
+pub mod vcs;
 pub mod wrapper;
 
 pub use error::{EnvoyError, Result};

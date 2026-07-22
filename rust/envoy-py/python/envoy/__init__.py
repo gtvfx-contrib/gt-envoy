@@ -52,6 +52,9 @@ PipelineConfig = _native.PipelineConfig
 # Team configuration bindings.
 TeamConfig = _native.TeamConfig
 UserHostConfig = _native.UserHostConfig
+Vcs = _native.Vcs
+VcsChange = _native.VcsChange
+VcsStatus = _native.VcsStatus
 
 # SemVer bindings.
 SemVer = _native.SemVer
@@ -151,6 +154,9 @@ __all__ = [
     "PipelineConfig",
     "TeamConfig",
     "UserHostConfig",
+    "Vcs",
+    "VcsChange",
+    "VcsStatus",
     "SemVer",
     "Constraint",
     "VersionSpec",
