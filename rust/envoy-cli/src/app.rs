@@ -211,7 +211,7 @@ fn load_registry_for_cli(
     // consistently. Honors `--ignore-config` the same way `bundles_config`
     // does: skip the user-config-sourced cache directory, but still allow
     // the `ENVOY_PACKAGE_CACHE` / `ENVOY_DISABLE_PACKAGE_CACHE` env vars.
-    let package_cache = open_default_package_cache(!cli.ignore_config);
+    let mut package_cache = open_default_package_cache(!cli.ignore_config);
 
     if let Some(raw_value) = cli.bundles_config.as_deref() {
         let resolved = resolve_config_value(raw_value, verbose)?;
@@ -238,8 +238,12 @@ fn load_registry_for_cli(
                 if discovered_bundles.is_empty() {
                     debug(verbose, "No bundles found in config file");
                 } else {
-                    let discovered_bundles =
-                        resolve_cached_bundles(discovered_bundles, package_cache.as_ref());
+                    let team_config = resolve_team_config_for_bundles(Some(&discovered_bundles));
+                    let discovered_bundles = resolve_cached_bundles(
+                        discovered_bundles,
+                        package_cache.as_mut(),
+                        team_config.as_ref(),
+                    );
                     debug(
                         verbose,
                         &format!(
@@ -276,8 +280,12 @@ fn load_registry_for_cli(
     } else {
         match get_bundles(None) {
             Ok(discovered_bundles) if !discovered_bundles.is_empty() => {
-                let discovered_bundles =
-                    resolve_cached_bundles(discovered_bundles, package_cache.as_ref());
+                let team_config = resolve_team_config_for_bundles(Some(&discovered_bundles));
+                let discovered_bundles = resolve_cached_bundles(
+                    discovered_bundles,
+                    package_cache.as_mut(),
+                    team_config.as_ref(),
+                );
                 debug(
                     verbose,
                     &format!("Auto-discovered {} bundle(s)", discovered_bundles.len()),
@@ -400,9 +408,7 @@ fn run_diagnose(
                 println!("  - {:<24} {}", bundle.bndlid(), bundle.root.display());
             }
         }
-        _ => println!(
-            "Bundles discovered: 0 (legacy single-.envoy-directory mode, or none found)"
-        ),
+        _ => println!("Bundles discovered: 0 (legacy single-.envoy-directory mode, or none found)"),
     }
     println!();
 
@@ -429,10 +435,7 @@ fn run_diagnose(
     println!();
 
     match resolve_current_pipeline_for_bundles(bundles) {
-        Some(pipeline) => println!(
-            "Current pipeline: {}:{}",
-            pipeline.namespace, pipeline.name
-        ),
+        Some(pipeline) => println!("Current pipeline: {}:{}", pipeline.namespace, pipeline.name),
         None => println!(
             "Current pipeline: none discovered (.envoy/pipeline.json not found, or no match)"
         ),
@@ -489,7 +492,11 @@ fn run_diagnose(
             let root = &bundle.root;
             let is_network = root.to_string_lossy().starts_with("\\\\");
             let kind = if is_network { "network (UNC)" } else { "local" };
-            let status = if root.exists() { "reachable" } else { "UNREACHABLE" };
+            let status = if root.exists() {
+                "reachable"
+            } else {
+                "UNREACHABLE"
+            };
             println!(
                 "  - {:<24} [{kind:<13}] {status}: {}",
                 bundle.bndlid(),
@@ -500,8 +507,11 @@ fn run_diagnose(
     }
 
     let Some(command_name) = command_name else {
-        println!("(Pass a COMMAND, e.g. --diagnose {}, to also see its full \
-resolved environment.)", commands.first().map(String::as_str).unwrap_or("mycommand"));
+        println!(
+            "(Pass a COMMAND, e.g. --diagnose {}, to also see its full \
+resolved environment.)",
+            commands.first().map(String::as_str).unwrap_or("mycommand")
+        );
         return 0;
     };
 
