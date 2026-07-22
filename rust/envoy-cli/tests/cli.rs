@@ -121,13 +121,16 @@ fn set_config_and_get_config_round_trip() {
 
 #[test]
 fn raw_absolute_path_executable_runs_successfully() {
+    #[cfg(windows)]
     let comspec =
         env::var("ComSpec").unwrap_or_else(|_| String::from(r"C:\Windows\System32\cmd.exe"));
+    #[cfg(windows)]
+    let args = [comspec.as_str(), "/c", "exit", "0"];
 
-    base_command()
-        .args([comspec.as_str(), "/c", "exit", "0"])
-        .assert()
-        .success();
+    #[cfg(not(windows))]
+    let args = ["/bin/sh", "-c", "exit 0"];
+
+    base_command().args(args).assert().success();
 }
 
 #[test]

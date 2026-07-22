@@ -14,11 +14,11 @@ import os
 import sys
 from pathlib import Path
 
-import pytest
-
 import envoy.proc as proc
-from envoy import CalledProcessError, CommandNotFoundError
+import pytest
 from envoy.proc import PIPE, Environment
+
+from envoy import CalledProcessError, CommandNotFoundError
 
 # ---------------------------------------------------------------------------
 # Helpers

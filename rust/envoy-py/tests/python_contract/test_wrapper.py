@@ -212,6 +212,6 @@ def test_working_directory():
         # Normalize paths for comparison
         actual_cwd = os.path.normpath(result.stdout.strip())  # type: ignore
         expected_cwd = os.path.normpath(tmpdir)
-        assert (
-            actual_cwd == expected_cwd
-        ), f"Working directory should match: {actual_cwd} != {expected_cwd}"
+        assert actual_cwd == expected_cwd, (
+            f"Working directory should match: {actual_cwd} != {expected_cwd}"
+        )
