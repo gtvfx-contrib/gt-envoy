@@ -136,7 +136,7 @@ pub fn load_registry(
             bundles = Some(resolved);
         }
     } else {
-        let discovered = retry_sync(&IO_RETRY_CONFIG, || discover_bundles_auto())
+        let discovered = retry_sync(&IO_RETRY_CONFIG, discover_bundles_auto)
             .map_err(|e| EnvoyError::EnvironmentBuild(format!("Bundle discovery failed: {e}")))?;
         if !discovered.is_empty() {
             // Try to resolve cached versions for each discovered bundle.

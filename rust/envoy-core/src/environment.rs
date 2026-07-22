@@ -871,7 +871,8 @@ impl EnvironmentManager {
                 }
 
                 // Process the value through the same pipeline as normal loading.
-                let processed_value = self.process_env_value(&value, &merged_env, Some(&special_vars));
+                let processed_value =
+                    self.process_env_value(&value, &merged_env, Some(&special_vars));
                 let value_before = merged_env.get(&var_name).cloned().unwrap_or_default();
 
                 let was_applied = match operator {

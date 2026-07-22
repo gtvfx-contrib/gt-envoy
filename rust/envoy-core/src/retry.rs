@@ -153,7 +153,7 @@ mod tests {
         let result: std::result::Result<u32, String> = retry_sync(&config, || {
             let count = call_count.fetch_add(1, Ordering::SeqCst) + 1;
             if count < 3 {
-                Err(format!("resource temporarily unavailable"))
+                Err("resource temporarily unavailable".to_string())
             } else {
                 Ok(count)
             }

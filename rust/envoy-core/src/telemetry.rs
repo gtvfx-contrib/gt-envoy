@@ -187,7 +187,9 @@ fn sink_lock() -> &'static RwLock<Box<dyn TelemetrySink>> {
 /// active before (including the default [`NullSink`]).
 pub fn set_sink(sink: Box<dyn TelemetrySink>) {
     let lock = sink_lock();
-    let mut guard = lock.write().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = lock
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     *guard = sink;
 }
 
@@ -258,7 +260,10 @@ mod tests {
 
     impl TelemetrySink for RecordingSink {
         fn record(&self, event: &TelemetryEvent) {
-            self.events.lock().unwrap_or_else(|e| e.into_inner()).push(event.clone());
+            self.events
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(event.clone());
         }
     }
 
@@ -283,12 +288,17 @@ mod tests {
     fn set_sink_and_track_delivers_events_with_attributes() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let events = Arc::new(Mutex::new(Vec::new()));
-        enable(Box::new(RecordingSink { events: events.clone() }));
+        enable(Box::new(RecordingSink {
+            events: events.clone(),
+        }));
 
         assert!(is_enabled());
 
         let mut attrs = HashMap::new();
-        attrs.insert("command".to_string(), TelemetryValue::Str("unreal".to_string()));
+        attrs.insert(
+            "command".to_string(),
+            TelemetryValue::Str("unreal".to_string()),
+        );
         attrs.insert("duration_ms".to_string(), TelemetryValue::Int(1500));
         attrs.insert("success".to_string(), TelemetryValue::Bool(true));
         track("command_run", attrs.clone());
@@ -306,7 +316,9 @@ mod tests {
     fn disable_reverts_to_discarding_events() {
         let _guard = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let events = Arc::new(Mutex::new(Vec::new()));
-        enable(Box::new(RecordingSink { events: events.clone() }));
+        enable(Box::new(RecordingSink {
+            events: events.clone(),
+        }));
         disable_and_clear_flag();
 
         assert!(!is_enabled());

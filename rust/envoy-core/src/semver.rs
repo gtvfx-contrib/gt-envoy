@@ -22,7 +22,10 @@ pub enum SemVerError {
     InvalidConstraint(String),
 
     #[error("no version matched the constraint '{constraint}' among: {versions}")]
-    NoMatch { constraint: String, versions: String },
+    NoMatch {
+        constraint: String,
+        versions: String,
+    },
 }
 
 fn semver_regex() -> &'static Regex {
@@ -163,7 +166,9 @@ impl Ord for SemVer {
             .cmp(&other.major)
             .then(self.minor.cmp(&other.minor))
             .then(self.patch.cmp(&other.patch))
-            .then_with(|| compare_prerelease(self.prerelease.as_deref(), other.prerelease.as_deref()))
+            .then_with(|| {
+                compare_prerelease(self.prerelease.as_deref(), other.prerelease.as_deref())
+            })
     }
 }
 
@@ -176,7 +181,8 @@ fn compare_prerelease(left: Option<&str>, right: Option<&str>) -> Ordering {
             let left_parts = split_prerelease(left);
             let right_parts = split_prerelease(right);
 
-            left_parts.0
+            left_parts
+                .0
                 .cmp(right_parts.0)
                 .then_with(|| match (left_parts.1, right_parts.1) {
                     (None, None) => Ordering::Equal,
@@ -384,7 +390,11 @@ pub fn resolve_latest(versions: &[SemVer], spec: &VersionSpec) -> Option<SemVer>
 
 /// Resolve the latest **stable** (non-prerelease) version from a list that satisfies the given spec.
 pub fn resolve_latest_stable(versions: &[SemVer], spec: &VersionSpec) -> Option<SemVer> {
-    let mut stable: Vec<SemVer> = versions.iter().filter(|v| !v.is_prerelease()).cloned().collect();
+    let mut stable: Vec<SemVer> = versions
+        .iter()
+        .filter(|v| !v.is_prerelease())
+        .cloned()
+        .collect();
     stable.sort_unstable_by(|a, b| b.cmp(a)); // descending
     stable.into_iter().find(|v| spec.matches(v))
 }

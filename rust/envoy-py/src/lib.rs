@@ -14,6 +14,15 @@
 //! `BundleInfo`/`BundleConfig` discovery, `ApplicationWrapper`/
 //! `WrapperConfig`, the PyO3 exception hierarchy, and `cli_main`.
 
+// pyo3's `#[pyfunction]`/`#[pymethods]` macros generate return-value
+// conversion code inside a `quote_spanned!` block that reuses the spans of
+// the annotated function's own tokens (e.g. its return type), so clippy
+// attributes the resulting `.into()` call to our source instead of to
+// pyo3's generated glue. This is a known upstream false positive tracked
+// at https://github.com/PyO3/pyo3/pull/4944 (open/unreleased as of pyo3
+// 0.22) -- suppressed crate-wide rather than annotating every binding.
+#![allow(clippy::useless_conversion)]
+
 use pyo3::prelude::*;
 
 mod api;

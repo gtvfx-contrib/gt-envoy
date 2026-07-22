@@ -24,15 +24,6 @@ use envoy_core::environment::{
     TraceStepEvent as CoreTraceStepEvent,
 };
 use envoy_core::error::EnvoyError;
-use envoy_core::runtime::{
-    collect_env_files, is_raw_path, load_registry, prepare_env,
-    resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
-};
-use envoy_core::user_config::UserConfig as CoreUserConfig;
-use envoy_core::vcs::{
-    detect as core_detect_vcs, VcsAdapter as CoreVcsAdapter, VcsChange as CoreVcsChange,
-    VcsKind as CoreVcsKind, VcsStatus as CoreVcsStatus,
-};
 use envoy_core::package_cache::{
     open_default_package_cache, PackageCache as CorePackageCache, PackageCacheError,
 };
@@ -40,11 +31,18 @@ use envoy_core::pipeline::{
     ContextHierarchy as CoreContextHierarchy, Pipeline as CorePipeline,
     PipelineConfig as CorePipelineConfig, PipelineSource as CorePipelineSource,
 };
-use envoy_core::team_config::{
-    TeamConfig as CoreTeamConfig, UserHostConfig as CoreUserHostConfig,
+use envoy_core::runtime::{
+    collect_env_files, is_raw_path, load_registry, prepare_env,
+    resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
 };
 use envoy_core::semver::{
     Constraint as CoreConstraint, SemVer as CoreSemVer, VersionSpec as CoreVersionSpec,
+};
+use envoy_core::team_config::{TeamConfig as CoreTeamConfig, UserHostConfig as CoreUserHostConfig};
+use envoy_core::user_config::UserConfig as CoreUserConfig;
+use envoy_core::vcs::{
+    detect as core_detect_vcs, VcsAdapter as CoreVcsAdapter, VcsChange as CoreVcsChange,
+    VcsKind as CoreVcsKind, VcsStatus as CoreVcsStatus,
 };
 use pyo3::exceptions::{PyOSError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
@@ -491,7 +489,7 @@ fn get_environment(
         commands_file.as_deref(),
         open_default_package_cache(true).as_ref(),
     )
-        .map_err(envoy_error_to_pyerr)?;
+    .map_err(envoy_error_to_pyerr)?;
     let (env, _) = prepare_env(
         command,
         &registry,
@@ -542,7 +540,7 @@ fn trace_environment(
             commands_file.as_deref(),
             open_default_package_cache(true).as_ref(),
         )
-            .map_err(envoy_error_to_pyerr)?;
+        .map_err(envoy_error_to_pyerr)?;
         let env_files = collect_env_files(command, &registry, bundles.as_deref())
             .map_err(envoy_error_to_pyerr)?;
         env_manager
@@ -589,7 +587,7 @@ fn diagnose_environment(
             commands_file.as_deref(),
             open_default_package_cache(true).as_ref(),
         )
-            .map_err(envoy_error_to_pyerr)?;
+        .map_err(envoy_error_to_pyerr)?;
         let env_files = collect_env_files(command, &registry, bundles.as_deref())
             .map_err(envoy_error_to_pyerr)?;
         env_manager
@@ -891,17 +889,23 @@ impl SemVer {
 
     /// Return a copy with `major` incremented and lower parts reset.
     fn bump_major(&self) -> Self {
-        Self { inner: self.inner.bump_major() }
+        Self {
+            inner: self.inner.bump_major(),
+        }
     }
 
     /// Return a copy with `minor` incremented and lower parts reset.
     fn bump_minor(&self) -> Self {
-        Self { inner: self.inner.bump_minor() }
+        Self {
+            inner: self.inner.bump_minor(),
+        }
     }
 
     /// Return a copy with `patch` incremented and prerelease cleared.
     fn bump_patch(&self) -> Self {
-        Self { inner: self.inner.bump_patch() }
+        Self {
+            inner: self.inner.bump_patch(),
+        }
     }
 
     /// Render the version as a git tag string with a leading `v`.
@@ -977,7 +981,8 @@ impl Constraint {
     /// Parse a single constraint from a string like `>=1.0.0`, `^1.2`, etc.
     #[staticmethod]
     fn parse(input: &str) -> PyResult<Self> {
-        let parsed = CoreConstraint::parse(input).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let parsed =
+            CoreConstraint::parse(input).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self { inner: parsed })
     }
 
@@ -1007,7 +1012,8 @@ impl VersionSpec {
     /// Parse a version spec string like `>=1.0.0,<2.0.0` or `^1.2`.
     #[staticmethod]
     fn parse(input: &str) -> PyResult<Self> {
-        let parsed = CoreVersionSpec::parse(input).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        let parsed =
+            CoreVersionSpec::parse(input).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self { inner: parsed })
     }
 
@@ -1054,7 +1060,10 @@ impl PackageCache {
         source_dir: &Bound<'_, PyAny>,
     ) -> PyResult<PyObject> {
         let path = path_like_to_pathbuf(source_dir)?;
-        let cached = self.inner.store(package_id, version, &path).map_err(|e| PyOSError::new_err(e.to_string()))?;
+        let cached = self
+            .inner
+            .store(package_id, version, &path)
+            .map_err(|e| PyOSError::new_err(e.to_string()))?;
 
         // Return a dict with content_hash, path, and last_accessed.
         let dict = PyDict::new_bound(py);
@@ -1075,7 +1084,8 @@ impl PackageCache {
                 dict.set_item("content_hash", cached.content_hash)?;
                 dict.set_item(
                     "path",
-                    path_to_py_path(py, &cached.path).map_err(|e| PyOSError::new_err(e.to_string()))?,
+                    path_to_py_path(py, &cached.path)
+                        .map_err(|e| PyOSError::new_err(e.to_string()))?,
                 )?;
                 dict.set_item("last_accessed", cached.last_accessed)?;
                 Ok(Some(dict.into_any().unbind()))
@@ -1087,7 +1097,11 @@ impl PackageCache {
 
     /// List all packages in the cache.
     fn list(&self) -> Vec<(String, String)> {
-        self.inner.list().into_iter().map(|(id, ver)| (id.to_string(), ver.to_string())).collect()
+        self.inner
+            .list()
+            .into_iter()
+            .map(|(id, ver)| (id.to_string(), ver.to_string()))
+            .collect()
     }
 
     /// Remove a package from the cache by ID and version.
@@ -1100,14 +1114,17 @@ impl PackageCache {
 
     /// Compact the cache by removing unreferenced content and applying retention policies.
     fn compact(&mut self) -> PyResult<usize> {
-        let evicted = self.inner.compact().map_err(|e| PyOSError::new_err(e.to_string()))?;
+        let evicted = self
+            .inner
+            .compact()
+            .map_err(|e| PyOSError::new_err(e.to_string()))?;
         Ok(evicted)
     }
 
     /// Get the cache root path.
     #[getter]
     fn root(&self, py: Python<'_>) -> PyResult<PyObject> {
-        path_to_py_path(py, &self.inner.root()).map_err(|e| PyOSError::new_err(e.to_string()))
+        path_to_py_path(py, self.inner.root()).map_err(|e| PyOSError::new_err(e.to_string()))
     }
 }
 
@@ -1156,7 +1173,9 @@ impl Pipeline {
     /// Arbitrary metadata attached by the bundle author.
     #[getter]
     fn metadata(&self) -> HashMap<String, String> {
-        self.inner.metadata.iter()
+        self.inner
+            .metadata
+            .iter()
             .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap_or_default()))
             .collect()
     }
@@ -1182,7 +1201,9 @@ impl ContextHierarchy {
     /// Create from a colon-separated string.
     #[new]
     fn new(raw: &str) -> Self {
-        Self { inner: CoreContextHierarchy::new(raw) }
+        Self {
+            inner: CoreContextHierarchy::new(raw),
+        }
     }
 
     /// Return the individual context levels from broadest to most specific.
@@ -1221,7 +1242,9 @@ impl PipelineConfig {
     /// Create a new config with default settings.
     #[new]
     fn new() -> Self {
-        Self { inner: CorePipelineConfig::default() }
+        Self {
+            inner: CorePipelineConfig::default(),
+        }
     }
 
     /// Default namespace for fallback resolution.
@@ -1266,13 +1289,19 @@ impl TeamConfig {
     /// Absolute path to the production packages root directory.
     #[getter]
     fn prod_packages_root(&self) -> Option<String> {
-        self.inner.prod_packages_root.as_ref().map(|p| p.to_string_lossy().into_owned())
+        self.inner
+            .prod_packages_root
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
     }
 
     /// Absolute path to the production pipelines root directory.
     #[getter]
     fn prod_pipelines_root(&self) -> Option<String> {
-        self.inner.prod_pipelines_root.as_ref().map(|p| p.to_string_lossy().into_owned())
+        self.inner
+            .prod_pipelines_root
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned())
     }
 
     /// Path (possibly with `~` expansion) to a user/host config JSON file.
@@ -1284,7 +1313,9 @@ impl TeamConfig {
     /// Arbitrary additional settings from team.json.
     #[getter]
     fn metadata(&self) -> HashMap<String, String> {
-        self.inner.metadata.iter()
+        self.inner
+            .metadata
+            .iter()
             .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap_or_default()))
             .collect()
     }
@@ -1469,14 +1500,25 @@ impl UserHostConfig {
     /// Arbitrary additional settings from user/host config.
     #[getter]
     fn metadata(&self) -> HashMap<String, String> {
-        self.inner.metadata.iter()
+        self.inner
+            .metadata
+            .iter()
             .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap_or_default()))
             .collect()
     }
 
     /// Return the user/host config as a dict.
     fn __repr__(&self) -> String {
-        format!("UserHostConfig(prod_packages_root='{}', prod_pipelines_root='{}/{})", self.inner.prod_packages_root, self.inner.prod_pipelines_root, if !self.inner.metadata.is_empty() { "..." } else { "" })
+        format!(
+            "UserHostConfig(prod_packages_root='{}', prod_pipelines_root='{}/{})",
+            self.inner.prod_packages_root,
+            self.inner.prod_pipelines_root,
+            if !self.inner.metadata.is_empty() {
+                "..."
+            } else {
+                ""
+            }
+        )
     }
 
     fn __str__(&self) -> String {

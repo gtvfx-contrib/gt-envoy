@@ -12,7 +12,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use envoy_core::commands::CommandDefinition;
 use envoy_core::package_cache::open_default_package_cache;
 use envoy_core::runtime::{is_raw_path, load_registry, prepare_env};
 use pyo3::exceptions::{PyKeyError, PyValueError};
@@ -23,7 +22,6 @@ use pyo3::types::{PyDict, PyList, PyString};
 #[derive(Clone)]
 struct CachedEnv {
     env: HashMap<String, String>,
-    command_definition: CommandDefinition,
 }
 
 /// Top-level `envoy.Environment` class.
@@ -43,8 +41,6 @@ pub struct Environment {
     bundle_roots: Option<Vec<String>>,
     /// Optional fallback commands.json path.
     commands_file: Option<PathBuf>,
-    /// Optional registered command name whose env files should be loaded.
-    env_override: Option<String>,
     /// Cached built environment (built on first access).
     cached: Mutex<Option<CachedEnv>>,
 }
@@ -83,7 +79,6 @@ impl Environment {
             commands_file: commands_file
                 .map(|value| path_like_to_pathbuf(py, value))
                 .transpose()?,
-            env_override: None,
             cached: Mutex::new(None),
         })
     }
@@ -156,7 +151,8 @@ impl Environment {
     /// Return (key, value) pairs.
     fn items(&self, py: Python<'_>) -> PyResult<PyObject> {
         let env = self.get_env(py)?;
-        let items: Vec<(String, String)> = env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let items: Vec<(String, String)> =
+            env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         Ok(PyList::new_bound(py, &items).into_any().unbind())
     }
 
@@ -229,9 +225,10 @@ impl Environment {
 
     /// Get the cached environment, building it if necessary.
     fn get_env(&self, _py: Python<'_>) -> PyResult<HashMap<String, String>> {
-        let mut cached = self.cached.lock().map_err(|e| {
-            PyValueError::new_err(format!("Failed to acquire lock: {}", e))
-        })?;
+        let mut cached = self
+            .cached
+            .lock()
+            .map_err(|e| PyValueError::new_err(format!("Failed to acquire lock: {}", e)))?;
 
         if let Some(cached_env) = cached.as_ref() {
             return Ok(cached_env.env.clone());
@@ -263,21 +260,12 @@ fn build_environment(
         // For raw paths, just use the parent environment with allowlist
         let mut env = HashMap::new();
         for (key, value) in std::env::vars() {
-            if inherit_env || allowlist.map_or(false, |al| al.contains(&key)) {
+            if inherit_env || allowlist.is_some_and(|al| al.contains(&key)) {
                 env.insert(key, value);
             }
         }
 
-        let command_definition = CommandDefinition {
-            name: command.to_string(),
-            environment: Vec::new(),
-            alias: Some(vec![command.to_string()]),
-            bundle: None,
-            envoy_env_dir: None,
-            source_file: None,
-        };
-
-        return Ok(CachedEnv { env, command_definition });
+        return Ok(CachedEnv { env });
     }
 
     // Load registry and build environment through the standard path
@@ -286,9 +274,9 @@ fn build_environment(
         commands_file,
         open_default_package_cache(true).as_ref(),
     )
-        .map_err(|e| PyValueError::new_err(format!("Failed to load registry: {}", e)))?;
+    .map_err(|e| PyValueError::new_err(format!("Failed to load registry: {}", e)))?;
 
-    let (env, command_definition) = prepare_env(
+    let (env, _command_definition) = prepare_env(
         command,
         &registry,
         bundles.as_deref(),
@@ -298,19 +286,18 @@ fn build_environment(
     )
     .map_err(|e| PyValueError::new_err(format!("Failed to build environment: {}", e)))?;
 
-    Ok(CachedEnv { env, command_definition })
+    Ok(CachedEnv { env })
 }
 
 /// Convert a Python path-like object to a Rust PathBuf.
-fn path_like_to_pathbuf(
-    _py: Python<'_>,
-    value: &Bound<'_, PyAny>,
-) -> PyResult<PathBuf> {
+fn path_like_to_pathbuf(_py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<PathBuf> {
     if let Ok(s) = value.extract::<String>() {
         return Ok(PathBuf::from(s));
     }
     if let Ok(p) = value.downcast::<pyo3::types::PyString>() {
-        let s = p.to_str().map_err(|e| PyValueError::new_err(format!("Invalid UTF-8 in path: {}", e)))?;
+        let s = p
+            .to_str()
+            .map_err(|e| PyValueError::new_err(format!("Invalid UTF-8 in path: {}", e)))?;
         return Ok(PathBuf::from(s));
     }
     Err(PyValueError::new_err(

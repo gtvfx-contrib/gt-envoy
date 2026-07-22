@@ -334,10 +334,7 @@ fn diagnose_without_command_summarizes_bundles_team_and_pipeline() {
         stdout.contains("Current pipeline: bfd:build"),
         "stdout was:\n{stdout}"
     );
-    assert!(
-        stdout.contains("Package cache:"),
-        "stdout was:\n{stdout}"
-    );
+    assert!(stdout.contains("Package cache:"), "stdout was:\n{stdout}");
     assert!(stdout.contains("VCS detected:"), "stdout was:\n{stdout}");
     assert!(
         stdout.contains("Telemetry: disabled"),

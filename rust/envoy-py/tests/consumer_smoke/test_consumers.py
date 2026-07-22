@@ -153,9 +153,7 @@ def test_unreal_wrapper_environment_build_then_spawn_pattern(tmp_path):
     envoy_dir = tmp_path / ".envoy"
     envoy_dir.mkdir()
     (envoy_dir / "commands.json").write_text(
-        json.dumps(
-            {"UnrealEditor": {"environment": ["ue_env.json"], "alias": [sys.executable]}}
-        ),
+        json.dumps({"UnrealEditor": {"environment": ["ue_env.json"], "alias": [sys.executable]}}),
         encoding="utf-8",
     )
     (envoy_dir / "ue_env.json").write_text(

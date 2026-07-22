@@ -390,8 +390,8 @@ impl PackageCache {
         let mut evictable: Vec<(String, String)> = self
             .index
             .entries
-            .iter()
-            .filter_map(|(key, entry)| {
+            .values()
+            .filter_map(|entry| {
                 // Skip if this content hash is referenced by another package.
                 let is_referenced = self.index.entries.values().any(|e| {
                     e.content_hash == entry.content_hash
@@ -443,11 +443,9 @@ impl PackageCache {
 
             // Check size-based retention.
             if let Some(max_size) = self.retention.max_size_bytes {
-                if total_size > max_size {
-                    if self.remove(&package_id, &version).unwrap_or(false) {
-                        evicted += 1;
-                        total_size = total_size.saturating_sub(1); // approximate
-                    }
+                if total_size > max_size && self.remove(&package_id, &version).unwrap_or(false) {
+                    evicted += 1;
+                    total_size = total_size.saturating_sub(1); // approximate
                 }
             }
         }
@@ -663,6 +661,7 @@ fn open_lock_file(lock_path: &Path) -> Result<fs::File, PackageCacheError> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(lock_path)
         .map_err(|source| PackageCacheError::Io {
             path: lock_path.to_path_buf(),
@@ -729,7 +728,7 @@ fn collect_files(dir: &Path) -> Result<Vec<PathBuf>, PackageCacheError> {
 }
 
 fn collect_files_recursive(
-    base: &Path,
+    _base: &Path,
     dir: &Path,
     files: &mut Vec<PathBuf>,
 ) -> Result<(), PackageCacheError> {
@@ -745,8 +744,8 @@ fn collect_files_recursive(
         })?;
         let path = entry.path();
         if path.is_dir() {
-            collect_files_recursive(base, &path, files)?;
-        } else if !path.file_name().map_or(false, |name| name == ".meta.json") {
+            collect_files_recursive(_base, &path, files)?;
+        } else if !path.file_name().is_some_and(|name| name == ".meta.json") {
             files.push(path);
         }
     }
@@ -1011,6 +1010,7 @@ mod tests {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&lock_path)
             .unwrap();
         FileExt::lock(&lock_file).unwrap();
@@ -1093,7 +1093,7 @@ mod tests {
         assert_eq!(hash1, hash2);
 
         // Cleanup.
-        let _ = fs::remove_dir_all(&temp_cache_dir().join("hash_test"));
-        let _ = fs::remove_dir_all(&temp_cache_dir().join("hash_test2"));
+        let _ = fs::remove_dir_all(temp_cache_dir().join("hash_test"));
+        let _ = fs::remove_dir_all(temp_cache_dir().join("hash_test2"));
     }
 }

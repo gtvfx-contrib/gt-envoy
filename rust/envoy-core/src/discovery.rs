@@ -770,6 +770,7 @@ fn lock_discovery_cache() -> Option<fs::File> {
 
     let lock_file = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(lock_path)
