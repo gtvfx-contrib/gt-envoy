@@ -786,7 +786,7 @@ fn build_cached_environment(
     }
 
     let (registry, bundles) =
-        load_registry(bundle_roots, commands_file).map_err(envoy_error_to_pyerr)?;
+        load_registry(bundle_roots, commands_file, None).map_err(envoy_error_to_pyerr)?;
     let (env, command_definition) = prepare_env(
         command,
         &registry,

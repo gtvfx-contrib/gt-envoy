@@ -27,7 +27,10 @@ use envoy_core::error::EnvoyError;
 use envoy_core::runtime::{collect_env_files, is_raw_path, load_registry, prepare_env};
 use envoy_core::user_config::UserConfig as CoreUserConfig;
 use envoy_core::package_cache::{PackageCache as CorePackageCache, PackageCacheError};
-use pyo3::exceptions::{PyOSError, PyTypeError};
+use envoy_core::semver::{
+    Constraint as CoreConstraint, SemVer as CoreSemVer, VersionSpec as CoreVersionSpec,
+};
+use pyo3::exceptions::{PyOSError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyModule, PyTuple, PyType};
 
@@ -463,7 +466,7 @@ fn get_environment(
     }
 
     let commands_file = resolve_optional_path(commands_file)?;
-    let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref())
+    let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref(), None)
         .map_err(envoy_error_to_pyerr)?;
     let (env, _) = prepare_env(
         command,
@@ -510,7 +513,7 @@ fn trace_environment(
             .map_err(envoy_error_to_pyerr)?
     } else {
         let commands_file = resolve_optional_path(commands_file)?;
-        let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref())
+        let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref(), None)
             .map_err(envoy_error_to_pyerr)?;
         let env_files = collect_env_files(command, &registry, bundles.as_deref())
             .map_err(envoy_error_to_pyerr)?;
@@ -553,7 +556,7 @@ fn diagnose_environment(
             .map_err(envoy_error_to_pyerr)?
     } else {
         let commands_file = resolve_optional_path(commands_file)?;
-        let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref())
+        let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref(), None)
             .map_err(envoy_error_to_pyerr)?;
         let env_files = collect_env_files(command, &registry, bundles.as_deref())
             .map_err(envoy_error_to_pyerr)?;
@@ -650,6 +653,9 @@ pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResul
     m.add_class::<BundleInfo>()?;
     m.add_class::<BundleConfig>()?;
     m.add_class::<PackageCache>()?;
+    m.add_class::<SemVer>()?;
+    m.add_class::<Constraint>()?;
+    m.add_class::<VersionSpec>()?;
     m.add_function(wrap_pyfunction!(get_environment, m)?)?;
     m.add_function(wrap_pyfunction!(get_allowlist, m)?)?;
     m.add_function(wrap_pyfunction!(trace_environment, m)?)?;
@@ -756,6 +762,175 @@ fn user_config_save_to_pyerr(error: EnvoyError) -> PyErr {
 
 fn bundle_config_to_pyerr(error: EnvoyError) -> PyErr {
     envoy_error_to_pyerr(error)
+}
+
+// ---------------------------------------------------------------------------
+// SemVer Python bindings
+// ---------------------------------------------------------------------------
+
+/// Python wrapper for semantic versions.
+#[pyclass(module = "envoy")]
+#[derive(Clone)]
+struct SemVer {
+    inner: CoreSemVer,
+}
+
+#[pymethods]
+impl SemVer {
+    /// Parse a version string with or without a leading `v`.
+    #[staticmethod]
+    fn parse(value: &str) -> PyResult<Self> {
+        let parsed = CoreSemVer::parse(value).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner: parsed })
+    }
+
+    /// Return the prerelease label without the numeric suffix.
+    #[getter]
+    fn prerelease_label(&self) -> Option<String> {
+        self.inner.prerelease_label().map(|s| s.to_string())
+    }
+
+    /// Return the numeric prerelease suffix, if present.
+    #[getter]
+    fn prerelease_number(&self) -> Option<u64> {
+        self.inner.prerelease_number()
+    }
+
+    /// Return a copy with `major` incremented and lower parts reset.
+    fn bump_major(&self) -> Self {
+        Self { inner: self.inner.bump_major() }
+    }
+
+    /// Return a copy with `minor` incremented and lower parts reset.
+    fn bump_minor(&self) -> Self {
+        Self { inner: self.inner.bump_minor() }
+    }
+
+    /// Return a copy with `patch` incremented and prerelease cleared.
+    fn bump_patch(&self) -> Self {
+        Self { inner: self.inner.bump_patch() }
+    }
+
+    /// Render the version as a git tag string with a leading `v`.
+    fn to_tag(&self) -> String {
+        self.inner.to_tag()
+    }
+
+    /// Return `true` if this is a prerelease version.
+    #[getter]
+    fn is_prerelease(&self) -> bool {
+        self.inner.is_prerelease()
+    }
+
+    // Comparison operators
+    fn __eq__(&self, other: &Self) -> bool {
+        self.inner == other.inner
+    }
+
+    fn __ne__(&self, other: &Self) -> bool {
+        self.inner != other.inner
+    }
+
+    fn __lt__(&self, other: &Self) -> bool {
+        self.inner < other.inner
+    }
+
+    fn __le__(&self, other: &Self) -> bool {
+        self.inner <= other.inner
+    }
+
+    fn __gt__(&self, other: &Self) -> bool {
+        self.inner > other.inner
+    }
+
+    fn __ge__(&self, other: &Self) -> bool {
+        self.inner >= other.inner
+    }
+
+    // Display
+    fn __repr__(&self) -> String {
+        format!("SemVer('{}')", self.inner)
+    }
+
+    fn __str__(&self) -> String {
+        self.inner.to_string()
+    }
+
+    // Attribute accessors for major, minor, patch
+    #[getter]
+    fn major(&self) -> u64 {
+        self.inner.major
+    }
+
+    #[getter]
+    fn minor(&self) -> u64 {
+        self.inner.minor
+    }
+
+    #[getter]
+    fn patch(&self) -> u64 {
+        self.inner.patch
+    }
+}
+
+/// Python wrapper for version constraints.
+#[pyclass(module = "envoy")]
+struct Constraint {
+    inner: CoreConstraint,
+}
+
+#[pymethods]
+impl Constraint {
+    /// Parse a single constraint from a string like `>=1.0.0`, `^1.2`, etc.
+    #[staticmethod]
+    fn parse(input: &str) -> PyResult<Self> {
+        let parsed = CoreConstraint::parse(input).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner: parsed })
+    }
+
+    /// Test whether `version` satisfies this constraint.
+    fn matches(&self, version: &SemVer) -> bool {
+        self.inner.matches(&version.inner)
+    }
+
+    // Display
+    fn __repr__(&self) -> String {
+        format!("Constraint('{}')", self.inner)
+    }
+
+    fn __str__(&self) -> String {
+        self.inner.to_string()
+    }
+}
+
+/// Python wrapper for version specs (comma-separated constraints).
+#[pyclass(module = "envoy")]
+struct VersionSpec {
+    inner: CoreVersionSpec,
+}
+
+#[pymethods]
+impl VersionSpec {
+    /// Parse a version spec string like `>=1.0.0,<2.0.0` or `^1.2`.
+    #[staticmethod]
+    fn parse(input: &str) -> PyResult<Self> {
+        let parsed = CoreVersionSpec::parse(input).map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(Self { inner: parsed })
+    }
+
+    /// Test whether `version` satisfies all constraints in this spec.
+    fn matches(&self, version: &SemVer) -> bool {
+        self.inner.matches(&version.inner)
+    }
+
+    // Display
+    fn __repr__(&self) -> String {
+        format!("VersionSpec('{}')", self.inner)
+    }
+
+    fn __str__(&self) -> String {
+        self.inner.to_string()
+    }
 }
 
 /// Python wrapper for the content-addressed package cache.

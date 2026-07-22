@@ -1,8 +1,8 @@
 //! Semantic version parsing, validation, comparison, and constraint matching.
 //!
-//! This module implements bl's `spec.py` logic in Rust: semver parsing with
-//! optional `v` prefix, prerelease handling per [SEMVER 2.0.0], and a simple
-//! constraint language (`>=1.0.0`, `<2.0.0`, `^1.2`, `~1.2.3`, `==1.0.0`).
+//! This module implements semver parsing with optional `v` prefix, prerelease
+//! handling per [SEMVER 2.0.0], and a simple constraint language (`>=1.0.0`,
+//! `<2.0.0`, `^1.2`, `~1.2.3`, `==1.0.0`).
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -196,7 +196,7 @@ fn split_prerelease(value: &str) -> (&str, Option<u64>) {
 }
 
 // ---------------------------------------------------------------------------
-// Constraint matching (bl's `spec.py` equivalent)
+// Constraint matching
 // ---------------------------------------------------------------------------
 
 /// A single version constraint such as `>=1.0.0`, `<2.0.0`, `^1.2`, etc.

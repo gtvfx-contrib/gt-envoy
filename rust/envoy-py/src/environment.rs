@@ -250,7 +250,7 @@ fn build_environment(
     }
 
     // Load registry and build environment through the standard path
-    let (registry, bundles) = load_registry(bundle_roots, commands_file)
+    let (registry, bundles) = load_registry(bundle_roots, commands_file, None)
         .map_err(|e| PyValueError::new_err(format!("Failed to load registry: {}", e)))?;
 
     let (env, command_definition) = prepare_env(

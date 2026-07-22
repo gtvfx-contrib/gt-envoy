@@ -24,7 +24,9 @@ use crate::commands::{find_commands_file, CommandDefinition, CommandRegistry};
 use crate::discovery::{discover_bundles_auto, discover_bundles_from_roots, BundleInfo};
 use crate::environment::EnvironmentManager;
 use crate::error::{EnvoyError, Result};
+use crate::package_cache::PackageCache;
 use crate::retry::{retry_sync, RetryConfig};
+use crate::semver::VersionSpec;
 
 /// Return `true` when `spec` should be treated as a direct executable path.
 ///
@@ -96,6 +98,7 @@ const IO_RETRY_CONFIG: RetryConfig = RetryConfig {
 pub fn load_registry(
     bundle_roots: Option<&[String]>,
     commands_file: Option<&Path>,
+    package_cache: Option<&PackageCache>,
 ) -> Result<(CommandRegistry, Option<Vec<BundleInfo>>)> {
     let mut registry = CommandRegistry::empty();
     let mut bundles = None;
@@ -107,15 +110,19 @@ pub fn load_registry(
             Ok(discover_bundles_from_roots(bundle_roots))
         }).map_err(|e| EnvoyError::EnvironmentBuild(format!("Bundle discovery failed: {e}")))?;
         if !discovered.is_empty() {
-            registry.load_from_bundles(&discovered);
-            bundles = Some(discovered);
+            // Try to resolve cached versions for each discovered bundle.
+            let resolved = resolve_cached_bundles(discovered, package_cache);
+            registry.load_from_bundles(&resolved);
+            bundles = Some(resolved);
         }
     } else {
         let discovered = retry_sync(&IO_RETRY_CONFIG, || discover_bundles_auto())
             .map_err(|e| EnvoyError::EnvironmentBuild(format!("Bundle discovery failed: {e}")))?;
         if !discovered.is_empty() {
-            registry.load_from_bundles(&discovered);
-            bundles = Some(discovered);
+            // Try to resolve cached versions for each discovered bundle.
+            let resolved = resolve_cached_bundles(discovered, package_cache);
+            registry.load_from_bundles(&resolved);
+            bundles = Some(resolved);
         }
     }
 
@@ -132,6 +139,40 @@ pub fn load_registry(
     }
 
     Ok((registry, bundles))
+}
+
+/// Resolve cached versions for discovered bundles.
+///
+/// For each bundle, attempts to find a matching entry in the package cache using
+/// the bundle's bndlid as the package_id. If found, returns a new BundleInfo with
+/// the cached path; otherwise returns the original BundleInfo unchanged.
+fn resolve_cached_bundles(
+    bundles: Vec<BundleInfo>,
+    package_cache: Option<&PackageCache>,
+) -> Vec<BundleInfo> {
+    let Some(cache) = package_cache else {
+        return bundles;
+    };
+
+    // Parse a wildcard version spec that matches any version.
+    let wildcard_spec = match VersionSpec::parse(">=0.0.0") {
+        Ok(spec) => spec,
+        Err(_) => return bundles, // Fallback to original if parsing fails
+    };
+
+    bundles
+        .into_iter()
+        .map(|bundle| {
+            let bndlid = bundle.bndlid();
+            match cache.resolve(&bndlid, &wildcard_spec) {
+                Ok(Some(cached)) => {
+                    // Replace the bundle root with the cached path.
+                    BundleInfo::new(cached.path, bundle.name.clone(), bundle.namespace.clone())
+                }
+                _ => bundle, // Keep original if not found in cache
+            }
+        })
+        .collect()
 }
 
 /// Collect the ordered env-file list for `command_name`.

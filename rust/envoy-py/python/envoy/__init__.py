@@ -40,6 +40,14 @@ BundleInfo = _native.BundleInfo
 discoverBundlesAuto = _native.discoverBundlesAuto
 getBundles = _native.getBundles
 loadBundlesFromConfig = _native.loadBundlesFromConfig
+
+# Package cache bindings.
+PackageCache = _native.PackageCache
+
+# SemVer bindings.
+SemVer = _native.SemVer
+Constraint = _native.Constraint
+VersionSpec = _native.VersionSpec
 # Command bindings.
 CommandDefinition = _native.CommandDefinition
 CommandRegistry = _native.CommandRegistry
@@ -124,6 +132,10 @@ __all__ = [
     "discoverBundlesAuto",
     "getBundles",
     "loadBundlesFromConfig",
+    "PackageCache",
+    "SemVer",
+    "Constraint",
+    "VersionSpec",
     "proc",
     "testing",
     "exceptions",
