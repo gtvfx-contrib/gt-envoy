@@ -32,7 +32,7 @@ pub struct KnownSetting {
 
 const VERBOSITY_CHOICES: &[&str] = &["quiet", "normal", "verbose"];
 
-const KNOWN_SETTINGS: [(&str, KnownSetting); 2] = [
+const KNOWN_SETTINGS: [(&str, KnownSetting); 3] = [
     (
         "bundles_config",
         KnownSetting {
@@ -46,6 +46,15 @@ const KNOWN_SETTINGS: [(&str, KnownSetting); 2] = [
         KnownSetting {
             description: "Default verbosity level for all envoy invocations.",
             choices: Some(VERBOSITY_CHOICES),
+        },
+    ),
+    (
+        "package_cache_dir",
+        KnownSetting {
+            description: "Directory used for the local package cache. Set to an empty \
+string to fall back to the platform default location. See also the ENVOY_PACKAGE_CACHE \
+and ENVOY_DISABLE_PACKAGE_CACHE environment variables.",
+            choices: None,
         },
     ),
 ];
@@ -402,7 +411,7 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "validation error: Unknown config setting \"unknown_setting\". Known settings: \
-bundles_config, verbosity"
+bundles_config, verbosity, package_cache_dir"
         );
     }
 

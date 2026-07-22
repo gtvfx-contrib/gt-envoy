@@ -26,7 +26,16 @@ use envoy_core::environment::{
 use envoy_core::error::EnvoyError;
 use envoy_core::runtime::{collect_env_files, is_raw_path, load_registry, prepare_env};
 use envoy_core::user_config::UserConfig as CoreUserConfig;
-use envoy_core::package_cache::{PackageCache as CorePackageCache, PackageCacheError};
+use envoy_core::package_cache::{
+    open_default_package_cache, PackageCache as CorePackageCache, PackageCacheError,
+};
+use envoy_core::pipeline::{
+    ContextHierarchy as CoreContextHierarchy, Pipeline as CorePipeline,
+    PipelineConfig as CorePipelineConfig, PipelineSource as CorePipelineSource,
+};
+use envoy_core::team_config::{
+    TeamConfig as CoreTeamConfig, UserHostConfig as CoreUserHostConfig,
+};
 use envoy_core::semver::{
     Constraint as CoreConstraint, SemVer as CoreSemVer, VersionSpec as CoreVersionSpec,
 };
@@ -466,7 +475,11 @@ fn get_environment(
     }
 
     let commands_file = resolve_optional_path(commands_file)?;
-    let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref(), None)
+    let (registry, bundles) = load_registry(
+        bundle_roots.as_deref(),
+        commands_file.as_deref(),
+        open_default_package_cache(true).as_ref(),
+    )
         .map_err(envoy_error_to_pyerr)?;
     let (env, _) = prepare_env(
         command,
@@ -513,7 +526,11 @@ fn trace_environment(
             .map_err(envoy_error_to_pyerr)?
     } else {
         let commands_file = resolve_optional_path(commands_file)?;
-        let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref(), None)
+        let (registry, bundles) = load_registry(
+            bundle_roots.as_deref(),
+            commands_file.as_deref(),
+            open_default_package_cache(true).as_ref(),
+        )
             .map_err(envoy_error_to_pyerr)?;
         let env_files = collect_env_files(command, &registry, bundles.as_deref())
             .map_err(envoy_error_to_pyerr)?;
@@ -556,7 +573,11 @@ fn diagnose_environment(
             .map_err(envoy_error_to_pyerr)?
     } else {
         let commands_file = resolve_optional_path(commands_file)?;
-        let (registry, bundles) = load_registry(bundle_roots.as_deref(), commands_file.as_deref(), None)
+        let (registry, bundles) = load_registry(
+            bundle_roots.as_deref(),
+            commands_file.as_deref(),
+            open_default_package_cache(true).as_ref(),
+        )
             .map_err(envoy_error_to_pyerr)?;
         let env_files = collect_env_files(command, &registry, bundles.as_deref())
             .map_err(envoy_error_to_pyerr)?;
@@ -653,6 +674,11 @@ pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResul
     m.add_class::<BundleInfo>()?;
     m.add_class::<BundleConfig>()?;
     m.add_class::<PackageCache>()?;
+    m.add_class::<Pipeline>()?;
+    m.add_class::<ContextHierarchy>()?;
+    m.add_class::<PipelineConfig>()?;
+    m.add_class::<TeamConfig>()?;
+    m.add_class::<UserHostConfig>()?;
     m.add_class::<SemVer>()?;
     m.add_class::<Constraint>()?;
     m.add_class::<VersionSpec>()?;
@@ -1015,6 +1041,244 @@ impl PackageCache {
     #[getter]
     fn root(&self, py: Python<'_>) -> PyResult<PyObject> {
         path_to_py_path(py, &self.inner.root()).map_err(|e| PyOSError::new_err(e.to_string()))
+    }
+}
+
+/// Python wrapper for a resolved pipeline definition.
+#[pyclass(module = "envoy")]
+struct Pipeline {
+    inner: CorePipeline,
+}
+
+#[pymethods]
+impl Pipeline {
+    /// Human-readable name (e.g., `"build"`, `"test"`).
+    #[getter]
+    fn name(&self) -> String {
+        self.inner.name.clone()
+    }
+
+    /// Namespace this pipeline belongs to.
+    #[getter]
+    fn namespace(&self) -> String {
+        self.inner.namespace.clone()
+    }
+
+    /// Optional pinned version string for reproducible builds.
+    #[getter]
+    fn pinned_version(&self) -> Option<String> {
+        self.inner.pinned_version.clone()
+    }
+
+    /// Where the pipeline definition was loaded from (as a dict).
+    #[getter]
+    fn source_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
+        match &self.inner.source {
+            CorePipelineSource::Local { path } => {
+                let dict = PyDict::new_bound(py);
+                dict.set_item("type", "local")?;
+                dict.set_item(
+                    "path",
+                    path_to_py_path(py, path).map_err(|e| PyOSError::new_err(e.to_string()))?,
+                )?;
+                Ok(dict.into_any().unbind())
+            }
+        }
+    }
+
+    /// Arbitrary metadata attached by the bundle author.
+    #[getter]
+    fn metadata(&self) -> HashMap<String, String> {
+        self.inner.metadata.iter()
+            .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap_or_default()))
+            .collect()
+    }
+
+    /// Return the namespaced pipeline identifier (`namespace:name`).
+    fn __repr__(&self) -> String {
+        format!("Pipeline('{}:{}')", self.inner.namespace, self.inner.name)
+    }
+
+    fn __str__(&self) -> String {
+        self.__repr__()
+    }
+}
+
+/// Python wrapper for a context hierarchy path like `"team:project"`.
+#[pyclass(module = "envoy")]
+struct ContextHierarchy {
+    inner: CoreContextHierarchy,
+}
+
+#[pymethods]
+impl ContextHierarchy {
+    /// Create from a colon-separated string.
+    #[new]
+    fn new(raw: &str) -> Self {
+        Self { inner: CoreContextHierarchy::new(raw) }
+    }
+
+    /// Return the individual context levels from broadest to most specific.
+    fn levels(&self) -> Vec<String> {
+        self.inner.levels()
+    }
+
+    /// Return `true` if this is a parent of another hierarchy.
+    fn contains(&self, other: &ContextHierarchy) -> bool {
+        self.inner.contains(&other.inner)
+    }
+
+    /// Return the top-level (broadest) context.
+    #[getter]
+    fn root_context(&self) -> String {
+        self.inner.root_context()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("ContextHierarchy('{}')", self.inner.raw)
+    }
+
+    fn __str__(&self) -> String {
+        self.__repr__()
+    }
+}
+
+/// Python wrapper for pipeline resolution configuration.
+#[pyclass(module = "envoy")]
+struct PipelineConfig {
+    inner: CorePipelineConfig,
+}
+
+#[pymethods]
+impl PipelineConfig {
+    /// Create a new config with default settings.
+    #[new]
+    fn new() -> Self {
+        Self { inner: CorePipelineConfig::default() }
+    }
+
+    /// Default namespace for fallback resolution.
+    #[getter]
+    fn default_namespace(&self) -> String {
+        self.inner.default_namespace.clone()
+    }
+
+    /// Set the default namespace.
+    #[setter]
+    fn set_default_namespace(&mut self, ns: &str) {
+        self.inner.default_namespace = ns.to_string();
+    }
+
+    /// Maximum depth of context hierarchy traversal (0 = unlimited).
+    #[getter]
+    fn max_depth(&self) -> usize {
+        self.inner.max_depth
+    }
+
+    /// Set the maximum depth.
+    #[setter]
+    fn set_max_depth(&mut self, depth: usize) {
+        self.inner.max_depth = depth;
+    }
+}
+
+/// Python wrapper for a resolved team configuration.
+#[pyclass(module = "envoy")]
+struct TeamConfig {
+    inner: CoreTeamConfig,
+}
+
+#[pymethods]
+impl TeamConfig {
+    /// Human-readable team name (e.g., `"bfd"`).
+    #[getter]
+    fn name(&self) -> String {
+        self.inner.name.clone()
+    }
+
+    /// Absolute path to the production packages root directory.
+    #[getter]
+    fn prod_packages_root(&self) -> Option<String> {
+        self.inner.prod_packages_root.as_ref().map(|p| p.to_string_lossy().into_owned())
+    }
+
+    /// Absolute path to the production pipelines root directory.
+    #[getter]
+    fn prod_pipelines_root(&self) -> Option<String> {
+        self.inner.prod_pipelines_root.as_ref().map(|p| p.to_string_lossy().into_owned())
+    }
+
+    /// Path (possibly with `~` expansion) to a user/host config JSON file.
+    #[getter]
+    fn user_host_config_file(&self) -> Option<String> {
+        self.inner.user_host_config_file.clone()
+    }
+
+    /// Arbitrary additional settings from team.json.
+    #[getter]
+    fn metadata(&self) -> HashMap<String, String> {
+        self.inner.metadata.iter()
+            .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap_or_default()))
+            .collect()
+    }
+
+    /// Return the team name.
+    fn __repr__(&self) -> String {
+        format!("TeamConfig('{}')", self.inner.name)
+    }
+
+    fn __str__(&self) -> String {
+        self.__repr__()
+    }
+}
+
+/// Python wrapper for per-user/host configuration that overrides team defaults.
+#[pyclass(module = "envoy")]
+struct UserHostConfig {
+    inner: CoreUserHostConfig,
+}
+
+#[pymethods]
+impl UserHostConfig {
+    /// Override for the production packages root (empty string = use team default).
+    #[getter]
+    fn prod_packages_root(&self) -> String {
+        self.inner.prod_packages_root.clone()
+    }
+
+    /// Set override for the production packages root.
+    #[setter]
+    fn set_prod_packages_root(&mut self, path: &str) {
+        self.inner.prod_packages_root = path.to_string();
+    }
+
+    /// Override for the production pipelines root (empty string = use team default).
+    #[getter]
+    fn prod_pipelines_root(&self) -> String {
+        self.inner.prod_pipelines_root.clone()
+    }
+
+    /// Set override for the production pipelines root.
+    #[setter]
+    fn set_prod_pipelines_root(&mut self, path: &str) {
+        self.inner.prod_pipelines_root = path.to_string();
+    }
+
+    /// Arbitrary additional settings from user/host config.
+    #[getter]
+    fn metadata(&self) -> HashMap<String, String> {
+        self.inner.metadata.iter()
+            .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap_or_default()))
+            .collect()
+    }
+
+    /// Return the user/host config as a dict.
+    fn __repr__(&self) -> String {
+        format!("UserHostConfig(prod_packages_root='{}', prod_pipelines_root='{}/{})", self.inner.prod_packages_root, self.inner.prod_pipelines_root, if !self.inner.metadata.is_empty() { "..." } else { "" })
+    }
+
+    fn __str__(&self) -> String {
+        self.__repr__()
     }
 }
 

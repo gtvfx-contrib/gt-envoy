@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use envoy_core::commands::CommandDefinition;
+use envoy_core::package_cache::open_default_package_cache;
 use envoy_core::runtime::{is_raw_path, load_registry, prepare_env};
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
@@ -250,7 +251,11 @@ fn build_environment(
     }
 
     // Load registry and build environment through the standard path
-    let (registry, bundles) = load_registry(bundle_roots, commands_file, None)
+    let (registry, bundles) = load_registry(
+        bundle_roots,
+        commands_file,
+        open_default_package_cache(true).as_ref(),
+    )
         .map_err(|e| PyValueError::new_err(format!("Failed to load registry: {}", e)))?;
 
     let (env, command_definition) = prepare_env(

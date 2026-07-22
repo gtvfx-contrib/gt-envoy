@@ -146,7 +146,14 @@ pub fn load_registry(
 /// For each bundle, attempts to find a matching entry in the package cache using
 /// the bundle's bndlid as the package_id. If found, returns a new BundleInfo with
 /// the cached path; otherwise returns the original BundleInfo unchanged.
-fn resolve_cached_bundles(
+///
+/// Public so callers with their own bundle-discovery path (e.g. `envoy-cli`'s
+/// `load_registry_for_cli`, which does not go through [`load_registry`]) can
+/// still apply package-cache resolution consistently. Pass `None` to skip
+/// caching entirely; see [`crate::package_cache::open_default_package_cache`]
+/// for the standard way to obtain a cache honoring `ENVOY_PACKAGE_CACHE` /
+/// `ENVOY_DISABLE_PACKAGE_CACHE` / the `package_cache_dir` user setting.
+pub fn resolve_cached_bundles(
     bundles: Vec<BundleInfo>,
     package_cache: Option<&PackageCache>,
 ) -> Vec<BundleInfo> {
@@ -553,7 +560,7 @@ mod tests {
 
         let roots = vec![temp_dir.path().display().to_string()];
         let (registry, bundles) =
-            load_registry(Some(&roots), None).expect("explicit bundle roots should load");
+            load_registry(Some(&roots), None, None).expect("explicit bundle roots should load");
 
         assert!(registry.contains("python_dev"));
         let bundles = bundles.expect("bundle discovery should be present");
@@ -583,7 +590,7 @@ mod tests {
             ]);
 
             let (registry, bundles) =
-                load_registry(None, None).expect("auto-discovery should load");
+                load_registry(None, None, None).expect("auto-discovery should load");
 
             assert!(registry.contains("maya_dev"));
             let bundles = bundles.expect("bundle discovery should be present");
@@ -610,7 +617,7 @@ mod tests {
                 ("ENVOY_BUNDLES_CONFIG", None),
             ]);
 
-            let (registry, bundles) = load_registry(None, Some(&commands_file))
+            let (registry, bundles) = load_registry(None, Some(&commands_file), None)
                 .expect("commands file fallback should load");
 
             assert!(registry.contains("houdini_dev"));

@@ -44,6 +44,15 @@ loadBundlesFromConfig = _native.loadBundlesFromConfig
 # Package cache bindings.
 PackageCache = _native.PackageCache
 
+# Pipeline & context bindings.
+Pipeline = _native.Pipeline
+ContextHierarchy = _native.ContextHierarchy
+PipelineConfig = _native.PipelineConfig
+
+# Team configuration bindings.
+TeamConfig = _native.TeamConfig
+UserHostConfig = _native.UserHostConfig
+
 # SemVer bindings.
 SemVer = _native.SemVer
 Constraint = _native.Constraint
@@ -133,6 +142,11 @@ __all__ = [
     "getBundles",
     "loadBundlesFromConfig",
     "PackageCache",
+    "Pipeline",
+    "ContextHierarchy",
+    "PipelineConfig",
+    "TeamConfig",
+    "UserHostConfig",
     "SemVer",
     "Constraint",
     "VersionSpec",

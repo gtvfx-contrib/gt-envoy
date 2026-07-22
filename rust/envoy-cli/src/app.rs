@@ -12,7 +12,8 @@ use envoy_core::environment::{EnvironmentManager, TraceEvent};
 use envoy_core::error::EnvoyError;
 use envoy_core::executor::ProcessExecutor;
 use envoy_core::models::WrapperConfig;
-use envoy_core::runtime::{collect_env_files, is_raw_path, prepare_env};
+use envoy_core::package_cache::open_default_package_cache;
+use envoy_core::runtime::{collect_env_files, is_raw_path, prepare_env, resolve_cached_bundles};
 use envoy_core::user_config::{known_settings, UserConfig};
 use envoy_core::wrapper::ApplicationWrapper;
 
@@ -147,6 +148,13 @@ fn load_registry_for_cli(
     let mut bundles = None;
     let mut effective_bundles_config = None;
 
+    // Resolve the local package cache once up front so both the explicit
+    // bundles-config path and the auto-discovery path below apply it
+    // consistently. Honors `--ignore-config` the same way `bundles_config`
+    // does: skip the user-config-sourced cache directory, but still allow
+    // the `ENVOY_PACKAGE_CACHE` / `ENVOY_DISABLE_PACKAGE_CACHE` env vars.
+    let package_cache = open_default_package_cache(!cli.ignore_config);
+
     if let Some(raw_value) = cli.bundles_config.as_deref() {
         let resolved = resolve_config_value(raw_value, verbose)?;
         effective_bundles_config = Some(resolved);
@@ -172,6 +180,8 @@ fn load_registry_for_cli(
                 if discovered_bundles.is_empty() {
                     debug(verbose, "No bundles found in config file");
                 } else {
+                    let discovered_bundles =
+                        resolve_cached_bundles(discovered_bundles, package_cache.as_ref());
                     debug(
                         verbose,
                         &format!(
@@ -208,6 +218,8 @@ fn load_registry_for_cli(
     } else {
         match get_bundles(None) {
             Ok(discovered_bundles) if !discovered_bundles.is_empty() => {
+                let discovered_bundles =
+                    resolve_cached_bundles(discovered_bundles, package_cache.as_ref());
                 debug(
                     verbose,
                     &format!("Auto-discovered {} bundle(s)", discovered_bundles.len()),

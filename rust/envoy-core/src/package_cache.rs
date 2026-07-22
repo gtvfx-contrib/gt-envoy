@@ -467,6 +467,122 @@ impl PackageCache {
 }
 
 // ---------------------------------------------------------------------------
+// Default cache resolution
+// ---------------------------------------------------------------------------
+//
+// These helpers wire a [`PackageCache`] into envoy's default runtime flow
+// (CLI + Python API) so bundles resolved via `runtime::load_registry` and
+// `runtime::resolve_cached_bundles` are automatically checked against a local
+// cache without every caller needing to construct one by hand.
+
+/// Environment variable that, when set, overrides the package cache directory.
+pub const PACKAGE_CACHE_DIR_VAR: &str = "ENVOY_PACKAGE_CACHE";
+
+/// Environment variable that, when set to a truthy value (`1`, `true`, or
+/// `yes`, case-insensitively), disables the automatic package cache entirely.
+pub const PACKAGE_CACHE_DISABLE_VAR: &str = "ENVOY_DISABLE_PACKAGE_CACHE";
+
+/// User config setting key for an explicit package cache directory. Set to
+/// an empty string to fall back to the platform default location.
+pub const PACKAGE_CACHE_DIR_SETTING: &str = "package_cache_dir";
+
+/// Return the platform-appropriate default package cache directory.
+///
+/// Mirrors [`crate::user_config::default_config_path`]'s platform-detection
+/// strategy, but resolves to a *cache*-appropriate location:
+/// - Windows reads `%LOCALAPPDATA%`, falling back to `%USERPROFILE%`
+/// - non-Windows reads `$XDG_CACHE_HOME`, falling back to `$HOME/.cache`
+pub fn default_cache_root() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("envoy")
+            .join("package_cache")
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let xdg_cache = std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty());
+        if let Some(cache_home) = xdg_cache {
+            return cache_home.join("envoy").join("package_cache");
+        }
+
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".cache")
+            .join("envoy")
+            .join("package_cache")
+    }
+}
+
+/// Return whether an environment variable holds a truthy value (`"1"`,
+/// `"true"`, or `"yes"`, case-insensitively).
+fn env_flag_enabled(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
+}
+
+/// Resolve the effective package cache directory, or `None` when the cache
+/// is disabled.
+///
+/// Precedence order:
+/// 1. [`PACKAGE_CACHE_DISABLE_VAR`] truthy -> disabled (`None`)
+/// 2. [`PACKAGE_CACHE_DIR_VAR`] -> explicit path override
+/// 3. `package_cache_dir` user config setting (only when `use_user_config`
+///    is `true`; callers that need to honor an `--ignore-config`-style flag
+///    should pass `false`)
+/// 4. [`default_cache_root`]
+pub fn resolve_package_cache_dir(use_user_config: bool) -> Option<PathBuf> {
+    if env_flag_enabled(PACKAGE_CACHE_DISABLE_VAR) {
+        return None;
+    }
+
+    if let Some(path) = std::env::var_os(PACKAGE_CACHE_DIR_VAR) {
+        return Some(PathBuf::from(path));
+    }
+
+    if use_user_config {
+        let user_cfg = crate::user_config::UserConfig::load(None);
+        if let Some(configured) = user_cfg.get(PACKAGE_CACHE_DIR_SETTING) {
+            if !configured.is_empty() {
+                return Some(PathBuf::from(configured));
+            }
+        }
+    }
+
+    Some(default_cache_root())
+}
+
+/// Open the default package cache for this environment, or `None` when the
+/// cache is disabled or fails to open.
+///
+/// Opening the cache is treated as best-effort: an I/O failure (e.g. a
+/// read-only or unavailable cache directory) is logged as a warning and
+/// results in `None` rather than aborting the caller, matching the graceful
+/// degradation used elsewhere in envoy (e.g. team config discovery).
+pub fn open_default_package_cache(use_user_config: bool) -> Option<PackageCache> {
+    let dir = resolve_package_cache_dir(use_user_config)?;
+    match PackageCache::new(&dir) {
+        Ok(cache) => Some(cache),
+        Err(error) => {
+            eprintln!(
+                "Warning: failed to open package cache at {}: {}",
+                dir.display(),
+                error
+            );
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
