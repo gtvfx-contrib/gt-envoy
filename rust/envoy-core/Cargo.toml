@@ -10,6 +10,8 @@ description = "Environment orchestration core logic for envoy (bundle discovery,
 name = "envoy_core"
 
 [dependencies]
+age = "0.10"
+base64 = "0.22"
 ctrlc = "3"
 fs4 = { version = "1", features = ["sync"] }
 hex = "0.4"

@@ -33,12 +33,21 @@ pub struct KnownSetting {
 
 const VERBOSITY_CHOICES: &[&str] = &["quiet", "normal", "verbose"];
 
-const KNOWN_SETTINGS: [(&str, KnownSetting); 3] = [
+const KNOWN_SETTINGS: [(&str, KnownSetting); 4] = [
     (
         "bundles_config",
         KnownSetting {
             description: "Path to the default bundles config JSON file.  Used when \
 --bundles-config is not supplied on the command line.",
+            choices: None,
+        },
+    ),
+    (
+        "config_key_file",
+        KnownSetting {
+            description: "Path to an age identity file used to decrypt opt-in \
+encrypted values in `.envoy/*.json` config files. Set to an empty string to leave config \
+decryption disabled unless ENVOY_CONFIG_KEY_FILE is set.",
             choices: None,
         },
     ),
@@ -439,7 +448,7 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "validation error: Unknown config setting \"unknown_setting\". Known settings: \
-bundles_config, verbosity, package_cache_dir"
+bundles_config, config_key_file, verbosity, package_cache_dir"
         );
     }
 
@@ -465,6 +474,22 @@ normal, verbose"
             .expect("valid verbosity should succeed");
 
         assert_eq!(config.get("verbosity"), Some("quiet"));
+    }
+
+    #[test]
+    fn set_accepts_config_key_file() {
+        let temp_dir = tempdir().expect("tempdir should be created");
+        let path = temp_dir.path().join("user_config.json");
+        let mut config = UserConfig::load(Some(path));
+
+        config
+            .set("config_key_file", "C:\\keys\\envoy.agekey")
+            .expect("config_key_file should be accepted");
+
+        assert_eq!(
+            config.get("config_key_file"),
+            Some("C:\\keys\\envoy.agekey")
+        );
     }
 
     #[test]

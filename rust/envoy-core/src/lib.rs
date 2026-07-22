@@ -22,6 +22,7 @@
 //! | [`wrapper`]          | `_wrapper.py`            |
 
 pub mod commands;
+pub mod config_crypto;
 pub mod config_registry;
 pub mod discovery;
 pub mod environment;

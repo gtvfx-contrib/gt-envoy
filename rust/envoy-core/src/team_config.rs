@@ -9,9 +9,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::config_crypto::{
+    configured_key_file_path, decrypt_value, is_encrypted_value, ConfigCryptoError,
+};
 use crate::json_util::parse_json_with_comments;
 
 /// Error type for team configuration operations.
@@ -34,6 +36,13 @@ pub enum TeamConfigError {
 
     #[error("missing required field '{field}' in team config at {path}")]
     MissingField { field: String, path: PathBuf },
+
+    #[error("failed to decrypt field '{field}' in user config at {path}: {source}")]
+    DecryptUserField {
+        field: String,
+        path: PathBuf,
+        source: ConfigCryptoError,
+    },
 }
 
 /// A resolved team configuration with all settings merged.
@@ -192,17 +201,15 @@ impl UserHostConfig {
             });
         }
 
-        let prod_packages_root = value
-            .get("prodPackagesRoot")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        let prod_pipelines_root = value
-            .get("prodPipelinesRoot")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+        let key_file_path = configured_key_file_path();
+        let prod_packages_root =
+            Self::resolve_string_field(&value, "prodPackagesRoot", path, key_file_path.as_deref())?;
+        let prod_pipelines_root = Self::resolve_string_field(
+            &value,
+            "prodPipelinesRoot",
+            path,
+            key_file_path.as_deref(),
+        )?;
 
         // Collect remaining fields as metadata.
         let mut metadata = HashMap::new();
@@ -217,6 +224,29 @@ impl UserHostConfig {
             prod_pipelines_root,
             metadata,
         })
+    }
+
+    fn resolve_string_field(
+        value: &serde_json::Value,
+        field: &str,
+        path: &Path,
+        key_file_path: Option<&Path>,
+    ) -> Result<String, TeamConfigError> {
+        let Some(raw_value) = value.get(field).and_then(|item| item.as_str()) else {
+            return Ok(String::new());
+        };
+
+        if is_encrypted_value(raw_value) {
+            return decrypt_value(raw_value, key_file_path).map_err(|source| {
+                TeamConfigError::DecryptUserField {
+                    field: field.to_string(),
+                    path: path.to_path_buf(),
+                    source,
+                }
+            });
+        }
+
+        Ok(raw_value.to_string())
     }
 }
 
@@ -271,6 +301,9 @@ pub fn resolve_team_config(
         if user_path.is_file() {
             match UserHostConfig::load_from_file(user_path) {
                 Ok(user) => active = active.merge_with_user(&user),
+                Err(error @ TeamConfigError::DecryptUserField { .. }) => {
+                    return Err(error);
+                }
                 Err(e) => tracing::warn!(
                     path = %user_path.display(),
                     error = %e,
@@ -283,6 +316,9 @@ pub fn resolve_team_config(
             if expanded.is_file() {
                 match UserHostConfig::load_from_file(&expanded) {
                     Ok(user) => active = active.merge_with_user(&user),
+                    Err(error @ TeamConfigError::DecryptUserField { .. }) => {
+                        return Err(error);
+                    }
                     Err(e) => tracing::warn!(
                         path = %expanded.display(),
                         error = %e,
@@ -299,8 +335,54 @@ pub fn resolve_team_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config_crypto::{
+        encrypt_value, generate_keypair, CONFIG_KEY_FILE_ENV_VAR, CONFIG_KEY_FILE_SETTING,
+    };
+    use crate::user_config::UserConfig;
+    use age::secrecy::ExposeSecret;
+    use serde_json::json;
+    use std::env;
+    use std::ffi::OsString;
     use std::io::Write;
     use tempfile::TempDir;
+
+    struct EnvVarGuard {
+        previous: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvVarGuard {
+        fn set_many(entries: &[(&'static str, Option<&Path>)]) -> Self {
+            let mut previous = Vec::new();
+
+            for (key, value) in entries {
+                previous.push((*key, env::var_os(key)));
+                match value {
+                    Some(value) => env::set_var(key, value),
+                    None => env::remove_var(key),
+                }
+            }
+
+            Self { previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            for (key, previous) in &self.previous {
+                match previous {
+                    Some(value) => env::set_var(key, value),
+                    None => env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    fn with_env_lock<T>(test_fn: impl FnOnce() -> T) -> T {
+        let _lock = crate::env_test_lock::MUTEX
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        test_fn()
+    }
 
     fn create_test_bundle(
         temp: &TempDir,
@@ -347,22 +429,23 @@ mod tests {
 
     #[test]
     fn load_team_config_expands_tilde() {
-        let temp = TempDir::new().unwrap();
-        let path = temp.path().join("team.json");
-        fs::write(
-            &path,
-            r#"{"name": "myteam", "prodPackagesRoot": "~/packages"}"#,
-        )
-        .unwrap();
+        with_env_lock(|| {
+            let temp = TempDir::new().unwrap();
+            let path = temp.path().join("team.json");
+            fs::write(
+                &path,
+                r#"{"name": "myteam", "prodPackagesRoot": "~/packages"}"#,
+            )
+            .unwrap();
 
-        // Set USERPROFILE for the test.
-        std::env::set_var("USERPROFILE", &temp.path());
-        let config = TeamConfig::load_from_file(&path).unwrap();
-        let expected_home_pkg = temp.path().join("packages");
-        assert_eq!(
-            config.prod_packages_root.as_deref(),
-            Some(expected_home_pkg.as_path())
-        );
+            let _env_guard = EnvVarGuard::set_many(&[("USERPROFILE", Some(temp.path()))]);
+            let config = TeamConfig::load_from_file(&path).unwrap();
+            let expected_home_pkg = temp.path().join("packages");
+            assert_eq!(
+                config.prod_packages_root.as_deref(),
+                Some(expected_home_pkg.as_path())
+            );
+        });
     }
 
     #[test]
@@ -558,6 +641,212 @@ mod tests {
                 .and_then(|value| value.as_i64()),
             Some(42)
         );
+    }
+
+    #[test]
+    fn load_user_host_config_decrypts_encrypted_fields_with_configured_key() {
+        with_env_lock(|| {
+            let temp = TempDir::new().unwrap();
+            let user_config_path = temp.path().join("user.json");
+            let shared_user_config_path = temp.path().join("envoy_user_config.json");
+            let key_file_path = temp.path().join("config.agekey");
+            let plain_pipelines_root = "\\\\local\\pipelines";
+            let decrypted_packages_root = "\\\\secure\\packages";
+            let (identity, recipient) = generate_keypair();
+            let encrypted_packages_root =
+                encrypt_value(decrypted_packages_root, &recipient).unwrap();
+            let encoded_identity = identity.to_string();
+
+            fs::write(
+                &key_file_path,
+                format!(
+                    "# envoy config encryption key\n{}\n",
+                    encoded_identity.expose_secret()
+                ),
+            )
+            .unwrap();
+            fs::write(&shared_user_config_path, "{}").unwrap();
+            fs::write(
+                &user_config_path,
+                json!({
+                    "prodPackagesRoot": encrypted_packages_root,
+                    "prodPipelinesRoot": plain_pipelines_root,
+                    "customKey": 42,
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+            let _env_guard = EnvVarGuard::set_many(&[
+                (CONFIG_KEY_FILE_ENV_VAR, Some(key_file_path.as_path())),
+                ("ENVOY_USER_CONFIG", Some(shared_user_config_path.as_path())),
+            ]);
+
+            let user = UserHostConfig::load_from_file(&user_config_path).unwrap();
+
+            assert_eq!(user.prod_packages_root, decrypted_packages_root);
+            assert_eq!(user.prod_pipelines_root, plain_pipelines_root);
+            assert_eq!(
+                user.metadata
+                    .get("customKey")
+                    .and_then(|value| value.as_i64()),
+                Some(42)
+            );
+        });
+    }
+
+    #[test]
+    fn load_user_host_config_errors_when_encrypted_field_has_no_key() {
+        with_env_lock(|| {
+            let temp = TempDir::new().unwrap();
+            let user_config_path = temp.path().join("user.json");
+            let shared_user_config_path = temp.path().join("envoy_user_config.json");
+            let decrypted_packages_root = "\\\\secure\\packages";
+            let (_, recipient) = generate_keypair();
+            let encrypted_packages_root =
+                encrypt_value(decrypted_packages_root, &recipient).unwrap();
+
+            fs::write(
+                &user_config_path,
+                json!({
+                    "prodPackagesRoot": encrypted_packages_root,
+                    "prodPipelinesRoot": "\\\\local\\pipelines",
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+            let mut user_config = UserConfig::load(Some(shared_user_config_path.clone()));
+            user_config.set(CONFIG_KEY_FILE_SETTING, "").unwrap();
+            user_config.save().unwrap();
+
+            let _env_guard = EnvVarGuard::set_many(&[
+                (CONFIG_KEY_FILE_ENV_VAR, None),
+                ("ENVOY_USER_CONFIG", Some(shared_user_config_path.as_path())),
+            ]);
+
+            let error = UserHostConfig::load_from_file(&user_config_path)
+                .expect_err("missing key configuration should fail");
+
+            match error {
+                TeamConfigError::DecryptUserField { field, source, .. } => {
+                    assert_eq!(field, "prodPackagesRoot");
+                    assert!(matches!(
+                        source,
+                        ConfigCryptoError::MissingKeyFileConfiguration
+                    ));
+                }
+                other => panic!("unexpected error: {other}"),
+            }
+        });
+    }
+
+    #[test]
+    fn resolve_team_config_merges_with_encrypted_user_path() {
+        with_env_lock(|| {
+            let temp = TempDir::new().unwrap();
+            create_test_bundle(
+                &temp,
+                "bfd",
+                "build-pipeline",
+                Some(
+                    r#"{
+                        "name": "bfd",
+                        "prodPackagesRoot": "\\\\server\\packages",
+                        "prodPipelinesRoot": "\\\\server\\pipelines"
+                    }"#,
+                ),
+            );
+
+            let user_path = temp.path().join("user.json");
+            let shared_user_config_path = temp.path().join("envoy_user_config.json");
+            let key_file_path = temp.path().join("config.agekey");
+            let (identity, recipient) = generate_keypair();
+            let encrypted_packages_root =
+                encrypt_value("\\\\secure\\packages", &recipient).unwrap();
+            let encoded_identity = identity.to_string();
+
+            fs::write(
+                &key_file_path,
+                format!(
+                    "# envoy config encryption key\n{}\n",
+                    encoded_identity.expose_secret()
+                ),
+            )
+            .unwrap();
+            fs::write(&shared_user_config_path, "{}").unwrap();
+            fs::write(
+                &user_path,
+                json!({
+                    "prodPackagesRoot": encrypted_packages_root,
+                    "prodPipelinesRoot": "\\\\local\\pipelines",
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+            let _env_guard = EnvVarGuard::set_many(&[
+                (CONFIG_KEY_FILE_ENV_VAR, Some(key_file_path.as_path())),
+                ("ENVOY_USER_CONFIG", Some(shared_user_config_path.as_path())),
+            ]);
+
+            let bundles = vec![crate::discovery::BundleInfo::new(
+                temp.path().join("bfd").join("build-pipeline"),
+                "build-pipeline".to_string(),
+                "bfd".to_string(),
+            )];
+
+            let config = resolve_team_config(&bundles, Some(user_path.as_ref())).unwrap();
+
+            assert_eq!(
+                config.prod_packages_root.as_deref(),
+                Some(Path::new("\\\\secure\\packages"))
+            );
+            assert_eq!(
+                config.prod_pipelines_root.as_deref(),
+                Some(Path::new("\\\\local\\pipelines"))
+            );
+        });
+    }
+
+    #[test]
+    fn resolve_team_config_errors_when_encrypted_user_path_has_no_key() {
+        with_env_lock(|| {
+            let temp = TempDir::new().unwrap();
+            create_test_bundle(&temp, "bfd", "build-pipeline", Some(r#"{"name": "bfd"}"#));
+
+            let user_path = temp.path().join("user.json");
+            let shared_user_config_path = temp.path().join("envoy_user_config.json");
+            let (_, recipient) = generate_keypair();
+            let encrypted_packages_root =
+                encrypt_value("\\\\secure\\packages", &recipient).unwrap();
+
+            fs::write(&shared_user_config_path, "{}").unwrap();
+            fs::write(
+                &user_path,
+                json!({
+                    "prodPackagesRoot": encrypted_packages_root,
+                })
+                .to_string(),
+            )
+            .unwrap();
+
+            let _env_guard = EnvVarGuard::set_many(&[
+                (CONFIG_KEY_FILE_ENV_VAR, None),
+                ("ENVOY_USER_CONFIG", Some(shared_user_config_path.as_path())),
+            ]);
+
+            let bundles = vec![crate::discovery::BundleInfo::new(
+                temp.path().join("bfd").join("build-pipeline"),
+                "build-pipeline".to_string(),
+                "bfd".to_string(),
+            )];
+
+            let error = resolve_team_config(&bundles, Some(user_path.as_ref()))
+                .expect_err("missing key configuration should fail");
+
+            assert!(matches!(error, TeamConfigError::DecryptUserField { .. }));
+        });
     }
 
     #[test]
