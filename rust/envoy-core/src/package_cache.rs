@@ -11,6 +11,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use fs4::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -21,10 +22,16 @@ use crate::semver::{SemVer, SemVerError, VersionSpec};
 #[derive(Debug, Error)]
 pub enum PackageCacheError {
     #[error("I/O error at {path}: {source}")]
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 
     #[error("invalid JSON in cache manifest at {path}: {source}")]
-    Json { path: PathBuf, source: serde_json::Error },
+    Json {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
 
     #[error("package '{id}' version '{version}' not found in cache")]
     NotFound { id: String, version: String },
@@ -76,7 +83,7 @@ impl Default for RetentionConfig {
     fn default() -> Self {
         Self {
             max_age: Some(Duration::from_secs(30 * 24 * 3600)), // 30 days
-            max_size_bytes: Some(10 * 1024 * 1024 * 1024),     // 10 GB
+            max_size_bytes: Some(10 * 1024 * 1024 * 1024),      // 10 GB
         }
     }
 }
@@ -147,18 +154,8 @@ impl PackageCache {
         }
 
         let index_path = root.join(".index.json");
-        let index = if index_path.exists() {
-            let contents = fs::read_to_string(&index_path).map_err(|source| PackageCacheError::Io {
-                path: index_path.clone(),
-                source,
-            })?;
-            serde_json::from_str(&contents).map_err(|source| PackageCacheError::Json {
-                path: index_path.clone(),
-                source,
-            })?
-        } else {
-            CacheIndex::new()
-        };
+        let lock_path = root.join(".index.lock");
+        let index = with_shared_index_lock(&lock_path, || load_index(&index_path))?;
 
         Ok(Self {
             root,
@@ -197,10 +194,12 @@ impl PackageCache {
                 source,
             })?;
             loop {
-                let n = file.read(&mut buffer).map_err(|source| PackageCacheError::Io {
-                    path: entry.clone(),
-                    source,
-                })?;
+                let n = file
+                    .read(&mut buffer)
+                    .map_err(|source| PackageCacheError::Io {
+                        path: entry.clone(),
+                        source,
+                    })?;
                 if n == 0 {
                     break;
                 }
@@ -220,19 +219,6 @@ impl PackageCache {
     ) -> Result<CachedPackage, PackageCacheError> {
         let content_hash = Self::compute_content_hash(source_dir)?;
         let now = current_timestamp();
-
-        // Check if already cached (content-addressed deduplication).
-        let existing_key = CacheIndex::entry_key(package_id, version);
-        if let Some(existing) = self.index.get(package_id, version) {
-            if existing.content_hash == content_hash {
-                // Already have this exact content — just update access time.
-                return Ok(CachedPackage {
-                    content_hash: existing.content_hash.clone(),
-                    path: self.storage_path(&existing.content_hash),
-                    last_accessed: now,
-                });
-            }
-        }
 
         let storage_dir = self.storage_path(&content_hash);
         if !storage_dir.exists() {
@@ -254,29 +240,38 @@ impl PackageCache {
 
         // Write metadata sidecar.
         let meta_path = storage_dir.join(".meta.json");
-        let meta_json = serde_json::to_string_pretty(&meta).map_err(|source| PackageCacheError::Json {
-            path: meta_path.clone(),
-            source,
-        })?;
+        let meta_json =
+            serde_json::to_string_pretty(&meta).map_err(|source| PackageCacheError::Json {
+                path: meta_path.clone(),
+                source,
+            })?;
         fs::write(&meta_path, meta_json).map_err(|source| PackageCacheError::Io {
             path: meta_path,
             source,
         })?;
 
-        // Update index.
-        self.index.insert(IndexEntry {
-            package_id: package_id.to_string(),
-            version: version.to_string(),
-            content_hash: content_hash.clone(),
-        });
+        let index_path = self.index_path();
+        let lock_path = self.lock_file_path();
+        let updated_index = with_exclusive_index_lock(&lock_path, || {
+            let mut index = load_index(&index_path)?;
 
-        // Persist immediately so other processes (or a later invocation of
-        // this same process) that open a fresh `PackageCache` at this root
-        // can see the new entry. Without this, `store()` only ever updated
-        // the in-memory index, so anything stored in one process was
-        // invisible to every other process reading `.index.json` from disk
-        // -- silently defeating the entire point of a persistent cache.
-        self.persist_index()?;
+            if let Some(existing) = index.get(package_id, version) {
+                if existing.content_hash == content_hash {
+                    return Ok(index);
+                }
+            }
+
+            index.insert(IndexEntry {
+                package_id: package_id.to_string(),
+                version: version.to_string(),
+                content_hash: content_hash.clone(),
+            });
+
+            persist_index(&index_path, &index)?;
+            Ok(index)
+        })?;
+
+        self.index = updated_index;
 
         Ok(CachedPackage {
             content_hash,
@@ -287,13 +282,13 @@ impl PackageCache {
 
     /// Retrieve a cached package by ID and version.
     pub fn get(&self, package_id: &str, version: &str) -> Result<CachedPackage, PackageCacheError> {
-        let entry = self
-            .index
-            .get(package_id, version)
-            .ok_or_else(|| PackageCacheError::NotFound {
-                id: package_id.to_string(),
-                version: version.to_string(),
-            })?;
+        let entry =
+            self.index
+                .get(package_id, version)
+                .ok_or_else(|| PackageCacheError::NotFound {
+                    id: package_id.to_string(),
+                    version: version.to_string(),
+                })?;
 
         let meta_path = self.storage_path(&entry.content_hash).join(".meta.json");
         let now = current_timestamp();
@@ -324,24 +319,35 @@ impl PackageCache {
 
     /// Remove a specific package from the cache.
     pub fn remove(&mut self, package_id: &str, version: &str) -> Result<bool, PackageCacheError> {
-        if let Some(entry) = self.index.remove(package_id, version) {
-            let storage_dir = self.storage_path(&entry.content_hash);
-            if storage_dir.exists() {
-                fs::remove_dir_all(&storage_dir).map_err(|source| PackageCacheError::Io {
-                    path: storage_dir,
-                    source,
-                })?;
+        let index_path = self.index_path();
+        let lock_path = self.lock_file_path();
+        let (updated_index, removed) = with_exclusive_index_lock(&lock_path, || {
+            let mut index = load_index(&index_path)?;
+            if let Some(entry) = index.remove(package_id, version) {
+                let storage_dir = self.storage_path(&entry.content_hash);
+                if storage_dir.exists() {
+                    fs::remove_dir_all(&storage_dir).map_err(|source| PackageCacheError::Io {
+                        path: storage_dir,
+                        source,
+                    })?;
+                }
+                persist_index(&index_path, &index)?;
+                Ok((index, true))
+            } else {
+                Ok((index, false))
             }
-            // Persist immediately -- see the matching comment in `store()`.
-            self.persist_index()?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        })?;
+
+        self.index = updated_index;
+        Ok(removed)
     }
 
     /// Resolve the best matching version from cached packages for a given spec.
-    pub fn resolve(&self, package_id: &str, spec: &VersionSpec) -> Result<Option<CachedPackage>, PackageCacheError> {
+    pub fn resolve(
+        &self,
+        package_id: &str,
+        spec: &VersionSpec,
+    ) -> Result<Option<CachedPackage>, PackageCacheError> {
         // Collect all cached versions for this package.
         let mut candidates: Vec<(String, SemVer)> = Vec::new();
         for (key, entry) in &self.index.entries {
@@ -355,9 +361,10 @@ impl PackageCache {
 
         // Sort descending and find first match.
         candidates.sort_unstable_by(|a, b| b.1.cmp(&a.1));
-        if let Some((_version_str, best_version)) = candidates.into_iter().find(|(_, v)| spec.matches(v)) {
-            self.get(package_id, &best_version.to_string())
-                .map(Some)
+        if let Some((_version_str, best_version)) =
+            candidates.into_iter().find(|(_, v)| spec.matches(v))
+        {
+            self.get(package_id, &best_version.to_string()).map(Some)
         } else {
             Ok(None)
         }
@@ -387,7 +394,8 @@ impl PackageCache {
             .filter_map(|(key, entry)| {
                 // Skip if this content hash is referenced by another package.
                 let is_referenced = self.index.entries.values().any(|e| {
-                    e.content_hash == entry.content_hash && !(e.package_id == entry.package_id && e.version == entry.version)
+                    e.content_hash == entry.content_hash
+                        && !(e.package_id == entry.package_id && e.version == entry.version)
                 });
                 if !is_referenced {
                     Some((entry.package_id.clone(), entry.version.clone()))
@@ -398,15 +406,27 @@ impl PackageCache {
             .collect();
 
         evictable.sort_by(|a, b| {
-            let a_hash = self.index.get(&a.0, &a.1).map(|e| e.content_hash.clone()).unwrap_or_default();
-            let b_hash = self.index.get(&b.0, &b.1).map(|e| e.content_hash.clone()).unwrap_or_default();
+            let a_hash = self
+                .index
+                .get(&a.0, &a.1)
+                .map(|e| e.content_hash.clone())
+                .unwrap_or_default();
+            let b_hash = self
+                .index
+                .get(&b.0, &b.1)
+                .map(|e| e.content_hash.clone())
+                .unwrap_or_default();
             a_hash.cmp(&b_hash)
         });
 
         for (package_id, version) in evictable {
             // Check age-based retention.
             if let Some(max_age) = self.retention.max_age {
-                let content_hash = self.index.get(&package_id, &version).map(|e| e.content_hash.clone()).unwrap_or_default();
+                let content_hash = self
+                    .index
+                    .get(&package_id, &version)
+                    .map(|e| e.content_hash.clone())
+                    .unwrap_or_default();
                 let meta_path = self.storage_path(&content_hash).join(".meta.json");
                 if let Ok(contents) = fs::read_to_string(&meta_path) {
                     if let Ok(meta) = serde_json::from_str::<PackageMeta>(&contents) {
@@ -459,20 +479,22 @@ impl PackageCache {
 
     /// Persist the current index to disk.
     fn persist_index(&self) -> Result<(), PackageCacheError> {
-        let index_path = self.root.join(".index.json");
-        let json = serde_json::to_string_pretty(&self.index).map_err(|source| PackageCacheError::Json {
-            path: index_path.clone(),
-            source,
-        })?;
-        fs::write(&index_path, json).map_err(|source| PackageCacheError::Io {
-            path: index_path,
-            source,
-        })
+        persist_index(&self.index_path(), &self.index)
     }
 
     /// Return the storage directory for a content hash.
     fn storage_path(&self, content_hash: &str) -> PathBuf {
         self.root.join(content_hash)
+    }
+
+    /// Return the manifest path for this cache.
+    fn index_path(&self) -> PathBuf {
+        self.root.join(".index.json")
+    }
+
+    /// Return the sidecar lock path for this cache's manifest.
+    fn lock_file_path(&self) -> PathBuf {
+        self.root.join(".index.lock")
     }
 }
 
@@ -535,7 +557,12 @@ pub fn default_cache_root() -> PathBuf {
 /// `"true"`, or `"yes"`, case-insensitively).
 fn env_flag_enabled(name: &str) -> bool {
     std::env::var(name)
-        .map(|value| matches!(value.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
         .unwrap_or(false)
 }
 
@@ -603,13 +630,109 @@ fn current_timestamp() -> u64 {
         .as_secs()
 }
 
+/// Load the on-disk cache index if present.
+fn load_index(index_path: &Path) -> Result<CacheIndex, PackageCacheError> {
+    match fs::read_to_string(index_path) {
+        Ok(contents) => serde_json::from_str(&contents).map_err(|source| PackageCacheError::Json {
+            path: index_path.to_path_buf(),
+            source,
+        }),
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => Ok(CacheIndex::new()),
+        Err(source) => Err(PackageCacheError::Io {
+            path: index_path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+/// Persist a cache index to disk.
+fn persist_index(index_path: &Path, index: &CacheIndex) -> Result<(), PackageCacheError> {
+    let json = serde_json::to_string_pretty(index).map_err(|source| PackageCacheError::Json {
+        path: index_path.to_path_buf(),
+        source,
+    })?;
+    fs::write(index_path, json).map_err(|source| PackageCacheError::Io {
+        path: index_path.to_path_buf(),
+        source,
+    })
+}
+
+/// Open the sidecar lock file used to guard index updates.
+fn open_lock_file(lock_path: &Path) -> Result<fs::File, PackageCacheError> {
+    fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(lock_path)
+        .map_err(|source| PackageCacheError::Io {
+            path: lock_path.to_path_buf(),
+            source,
+        })
+}
+
+/// Execute an operation while holding a shared index lock.
+fn with_shared_index_lock<T>(
+    lock_path: &Path,
+    operation: impl FnOnce() -> Result<T, PackageCacheError>,
+) -> Result<T, PackageCacheError> {
+    let lock_file = open_lock_file(lock_path)?;
+    FileExt::lock_shared(&lock_file).map_err(|source| PackageCacheError::Io {
+        path: lock_path.to_path_buf(),
+        source,
+    })?;
+
+    let result = operation();
+    let unlock_result = FileExt::unlock(&lock_file).map_err(|source| PackageCacheError::Io {
+        path: lock_path.to_path_buf(),
+        source,
+    });
+
+    match result {
+        Ok(value) => {
+            unlock_result?;
+            Ok(value)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Execute an operation while holding an exclusive index lock.
+fn with_exclusive_index_lock<T>(
+    lock_path: &Path,
+    operation: impl FnOnce() -> Result<T, PackageCacheError>,
+) -> Result<T, PackageCacheError> {
+    let lock_file = open_lock_file(lock_path)?;
+    FileExt::lock(&lock_file).map_err(|source| PackageCacheError::Io {
+        path: lock_path.to_path_buf(),
+        source,
+    })?;
+
+    let result = operation();
+    let unlock_result = FileExt::unlock(&lock_file).map_err(|source| PackageCacheError::Io {
+        path: lock_path.to_path_buf(),
+        source,
+    });
+
+    match result {
+        Ok(value) => {
+            unlock_result?;
+            Ok(value)
+        }
+        Err(error) => Err(error),
+    }
+}
+
 fn collect_files(dir: &Path) -> Result<Vec<PathBuf>, PackageCacheError> {
     let mut files = Vec::new();
     collect_files_recursive(dir, dir, &mut files)?;
     Ok(files)
 }
 
-fn collect_files_recursive(base: &Path, dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), PackageCacheError> {
+fn collect_files_recursive(
+    base: &Path,
+    dir: &Path,
+    files: &mut Vec<PathBuf>,
+) -> Result<(), PackageCacheError> {
     let entries = fs::read_dir(dir).map_err(|source| PackageCacheError::Io {
         path: dir.to_path_buf(),
         source,
@@ -680,17 +803,16 @@ fn directory_size(dir: &Path) -> u64 {
 
 /// Encode a byte slice as lowercase hexadecimal.
 fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
-    bytes
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+    bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::{mpsc, Arc, Barrier};
+    use std::thread;
+    use std::time::Duration;
 
     fn temp_cache_dir() -> PathBuf {
         // Use a unique directory per test to avoid conflicts when running in parallel.
@@ -698,7 +820,11 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("envoy_test_cache_{}_{}", std::process::id(), timestamp));
+        let dir = std::env::temp_dir().join(format!(
+            "envoy_test_cache_{}_{}",
+            std::process::id(),
+            timestamp
+        ));
         let _ = fs::remove_dir_all(&dir);
         dir
     }
@@ -722,7 +848,10 @@ mod tests {
 
         let retrieved = cache.get("test:pkg", "1.0.0").unwrap();
         assert_eq!(retrieved.content_hash, cached.content_hash);
-        assert_eq!(fs::read_to_string(retrieved.path.join("data.txt")).unwrap(), "hello world");
+        assert_eq!(
+            fs::read_to_string(retrieved.path.join("data.txt")).unwrap(),
+            "hello world"
+        );
 
         // Cleanup.
         let _ = fs::remove_dir_all(&cache_root);
@@ -845,6 +974,105 @@ mod tests {
         assert_eq!(list.len(), 2);
 
         // Cleanup.
+        let _ = fs::remove_dir_all(&cache_root);
+    }
+
+    #[test]
+    fn store_creates_lock_file_and_supports_sequential_updates() {
+        let cache_root = temp_cache_dir();
+        let mut cache = PackageCache::new(&cache_root).expect("should create cache");
+
+        let pkg1 = cache_root.join("pkg1");
+        create_sample_package(&pkg1, "data.txt", "first package");
+        cache.store("test:first", "1.0.0", &pkg1).unwrap();
+
+        assert!(cache.lock_file_path().exists());
+
+        let pkg2 = cache_root.join("pkg2");
+        create_sample_package(&pkg2, "data.txt", "second package");
+        cache.store("test:second", "2.0.0", &pkg2).unwrap();
+
+        let reopened = PackageCache::new(&cache_root).expect("should reopen cache");
+        assert!(reopened.contains("test:first", "1.0.0"));
+        assert!(reopened.contains("test:second", "2.0.0"));
+
+        let _ = fs::remove_dir_all(&cache_root);
+    }
+
+    #[test]
+    fn store_waits_for_an_existing_index_lock() {
+        let cache_root = temp_cache_dir();
+        let mut cache = PackageCache::new(&cache_root).expect("should create cache");
+        let package_dir = cache_root.join("source_pkg");
+        create_sample_package(&package_dir, "data.txt", "hello world");
+
+        let lock_path = cache.lock_file_path();
+        let lock_file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&lock_path)
+            .unwrap();
+        FileExt::lock(&lock_file).unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        let thread_package_dir = package_dir.clone();
+        let handle = thread::spawn(move || {
+            let result = cache.store("test:pkg", "1.0.0", &thread_package_dir);
+            tx.send(result.is_ok()).unwrap();
+        });
+
+        thread::sleep(Duration::from_millis(150));
+        assert!(rx.try_recv().is_err());
+
+        FileExt::unlock(&lock_file).unwrap();
+
+        assert!(rx.recv_timeout(Duration::from_secs(5)).unwrap());
+        handle.join().unwrap();
+
+        let reopened = PackageCache::new(&cache_root).expect("should reopen cache");
+        assert!(reopened.contains("test:pkg", "1.0.0"));
+
+        let _ = fs::remove_dir_all(&cache_root);
+    }
+
+    #[test]
+    fn concurrent_store_calls_preserve_both_index_entries() {
+        let cache_root = temp_cache_dir();
+        let pkg1 = cache_root.join("pkg1");
+        let pkg2 = cache_root.join("pkg2");
+        create_sample_package(&pkg1, "data.txt", "first package");
+        create_sample_package(&pkg2, "data.txt", "second package");
+
+        let barrier = Arc::new(Barrier::new(3));
+
+        let root1 = cache_root.clone();
+        let path1 = pkg1.clone();
+        let barrier1 = Arc::clone(&barrier);
+        let handle1 = thread::spawn(move || {
+            let mut cache = PackageCache::new(&root1).unwrap();
+            barrier1.wait();
+            cache.store("test:first", "1.0.0", &path1).unwrap();
+        });
+
+        let root2 = cache_root.clone();
+        let path2 = pkg2.clone();
+        let barrier2 = Arc::clone(&barrier);
+        let handle2 = thread::spawn(move || {
+            let mut cache = PackageCache::new(&root2).unwrap();
+            barrier2.wait();
+            cache.store("test:second", "2.0.0", &path2).unwrap();
+        });
+
+        barrier.wait();
+        handle1.join().unwrap();
+        handle2.join().unwrap();
+
+        let reopened = PackageCache::new(&cache_root).expect("should reopen cache");
+        assert!(reopened.contains("test:first", "1.0.0"));
+        assert!(reopened.contains("test:second", "2.0.0"));
+        assert_eq!(reopened.len(), 2);
+
         let _ = fs::remove_dir_all(&cache_root);
     }
 
