@@ -34,6 +34,7 @@ en    [OPTIONS] [command] [args ...]
 | `--inherit-env` | `-i` | Inherit the full system environment (overrides closed mode) |
 | `--verbose` | `-v` | Enable verbose logging |
 | `--trace VAR` | | Trace how `VAR` is mutated through env file processing |
+| `--diagnose [COMMAND]` | | Show bundle/team/pipeline/cache/VCS diagnostics; add `COMMAND` for its full resolved environment |
 | `--docs` | | Open the envoy documentation in the default browser |
 | `--version` | | Show version and exit |
 | `--help` | `-h` | Show help message |
@@ -101,6 +102,52 @@ en --verbose --list
 en --verbose python_dev script.py
 ```
 
+### `--diagnose [COMMAND]`
+
+Show a full diagnostic report: discovered bundles and commands, resolved
+team config (`.envoy/team.json`) and pipeline (`.envoy/pipeline.json`),
+package cache location and reachability, detected VCS backend (Git,
+Perforce, or [Lore](https://github.com/EpicGames/lore)) with its pending
+change count, telemetry status, and bundle-root reachability (flagging
+network/UNC paths). Pass a command name to also see its full resolved
+environment (every variable, not just one):
+
+```powershell
+en --diagnose
+en --diagnose python_dev
+```
+
+```
+================================================================
+envoy diagnose
+================================================================
+
+Bundles discovered: 2
+  - gt:pythoncore            R:/repo/gtvfx-contrib/gt/pythoncore
+  - gt:unreal                R:/repo/gtvfx-contrib/gt/unreal
+
+Commands registered: 3
+  python_dev, unreal, vscode
+
+Team config: bfd
+  prod_packages_root:  \\server\packages
+
+Current pipeline: bfd:build
+
+Package cache: C:\Users\you\AppData\Local\envoy\package_cache (reachable)
+
+VCS detected: git at R:/repo/gtvfx-contrib
+  0 pending change(s)
+
+Telemetry: disabled (default; call envoy.enable_telemetry(...) to opt in)
+
+Bundle root reachability:
+  - gt:pythoncore            [local        ] reachable: R:/repo/gtvfx-contrib/gt/pythoncore
+  - gt:unreal                [local        ] reachable: R:/repo/gtvfx-contrib/gt/unreal
+```
+
+For a single-variable, step-by-step operator trace instead, use `--trace VAR COMMAND`.
+
 ### `--env` / `-e`
 
 Run a command inside a different command's environment:
@@ -137,6 +184,11 @@ en -c R:/my-project/.envoy/commands.json my_command
 | `ENVOY_BNDL_ROOTS` | Semicolon-separated root directories for bundle auto-discovery |
 | `ENVOY_ALLOWLIST` | Semicolon- or comma-separated variable names to pass through in closed mode |
 | `ENVOY_USER_CONFIG` | Override path to the user config file (useful for testing) |
+| `ENVOY_PACKAGE_CACHE` | Override the local package cache directory |
+| `ENVOY_DISABLE_PACKAGE_CACHE` | Set to `1`/`true`/`yes` to disable the package cache entirely |
+| `ENVOY_DISABLE_DISCOVERY_CACHE` | Set to `1`/`true`/`yes` to force a fresh bundle-discovery scan, bypassing the on-disk discovery cache |
+| `ENVOY_PIPELINE_CONTEXT` | Colon-separated context path used to resolve the current pipeline (e.g. `team:project:feature`) |
+| `ENVOY_VCS` | Force a specific VCS backend for detection: `git`, `perforce`, or `lore` |
 
 ## User Config Flags
 

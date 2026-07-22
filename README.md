@@ -6,11 +6,16 @@
 
 - **CLI-First** — Simple command-line interface via `en`, `envoy`, and `engit`
 - **Multi-Bundle** — Aggregate commands from multiple Git repositories
-- **JSON Configuration** — Define environments with operators (`=`, `+=`, `^=`, `?=`)
+- **JSON Configuration** — Define environments with operators (`=`, `+=`, `^=`, `?=`), with `//`, `/* */`, and `#` comment support
 - **Closed Environment** — Subprocesses receive only what you define, not the full system environment
-- **Auto-Discovery** — Automatic bundle detection via `ENVOY_BNDL_ROOTS`
+- **Auto-Discovery** — Automatic, parallelized bundle detection via `ENVOY_BNDL_ROOTS`, with an on-disk discovery cache for fast repeat invocations
 - **Path Normalization** — Automatic OS-native path handling
 - **Null-Safe** — Undefined variables warn and skip rather than propagate empty values
+- **Package Caching** — Local, content-addressed caching for production packages, resolved automatically alongside bundle discovery
+- **Team & Pipeline Context** — Automatic `.envoy/team.json` and `.envoy/pipeline.json` resolution for team-scoped settings and context-aware pipelines
+- **VCS Integration** — Auto-detects Git, Perforce, or [Lore](https://github.com/EpicGames/lore) working copies for status/change queries
+- **Opt-In Telemetry** — Disabled by default; when enabled, exports usage events via OpenTelemetry/OTLP to any compatible collector
+- **Diagnostics** — `envoy --diagnose [COMMAND]` reports discovered bundles, team/pipeline context, cache and VCS status, and full environment resolution in one place
 
 ## Quick Start
 
@@ -26,6 +31,9 @@ envoy unreal
 
 # 4. Show command details
 envoy --info unreal
+
+# 5. Diagnose your environment (bundles, team/pipeline, cache, VCS, and more)
+envoy --diagnose unreal
 ```
 
 ## Documentation
