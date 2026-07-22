@@ -81,6 +81,8 @@ diagnoseEnvironment = _native.diagnoseEnvironment
 setApiVerbosity = _native.setApiVerbosity
 loadUserConfig = _native.loadUserConfig
 getCurrentBundleConfig = _native.getCurrentBundleConfig
+getCurrentTeamConfig = _native.getCurrentTeamConfig
+getCurrentPipeline = _native.getCurrentPipeline
 cli_main = _native.cli_main
 proc = _native.proc
 exceptions = _native.exceptions
@@ -137,6 +139,8 @@ __all__ = [
     "setApiVerbosity",
     "loadUserConfig",
     "getCurrentBundleConfig",
+    "getCurrentTeamConfig",
+    "getCurrentPipeline",
     "cli_main",
     "discoverBundlesAuto",
     "getBundles",

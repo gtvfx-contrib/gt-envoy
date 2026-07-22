@@ -24,7 +24,10 @@ use envoy_core::environment::{
     TraceStepEvent as CoreTraceStepEvent,
 };
 use envoy_core::error::EnvoyError;
-use envoy_core::runtime::{collect_env_files, is_raw_path, load_registry, prepare_env};
+use envoy_core::runtime::{
+    collect_env_files, is_raw_path, load_registry, prepare_env,
+    resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
+};
 use envoy_core::user_config::UserConfig as CoreUserConfig;
 use envoy_core::package_cache::{
     open_default_package_cache, PackageCache as CorePackageCache, PackageCacheError,
@@ -627,6 +630,57 @@ fn get_current_bundle_config(
     config.map(|value| Py::new(py, value)).transpose()
 }
 
+/// Return the active team configuration resolved from discovered bundles.
+///
+/// Returns `None` when no discovered bundle defines a `.envoy/team.json`.
+/// This is the automatic-discovery counterpart to constructing a
+/// [`TeamConfig`] by hand via `TeamConfig.load_from_file`.
+#[pyfunction(name = "getCurrentTeamConfig")]
+#[pyo3(signature = (*, bundle_roots=None, commands_file=None))]
+fn get_current_team_config(
+    py: Python<'_>,
+    bundle_roots: Option<Vec<String>>,
+    commands_file: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<Py<TeamConfig>>> {
+    let commands_file = resolve_optional_path(commands_file)?;
+    let (_registry, bundles) = load_registry(
+        bundle_roots.as_deref(),
+        commands_file.as_deref(),
+        open_default_package_cache(true).as_ref(),
+    )
+    .map_err(envoy_error_to_pyerr)?;
+
+    resolve_team_config_for_bundles(bundles.as_deref())
+        .map(|inner| Py::new(py, TeamConfig { inner }))
+        .transpose()
+}
+
+/// Return the current pipeline resolved from discovered bundles, honoring
+/// the `ENVOY_PIPELINE_CONTEXT` environment variable.
+///
+/// Returns `None` when no discovered bundle defines a `.envoy/pipeline.json`
+/// or no pipeline matches the current context or default namespace. This is
+/// the automatic-discovery counterpart to `Pipeline.resolve`.
+#[pyfunction(name = "getCurrentPipeline")]
+#[pyo3(signature = (*, bundle_roots=None, commands_file=None))]
+fn get_current_pipeline(
+    py: Python<'_>,
+    bundle_roots: Option<Vec<String>>,
+    commands_file: Option<&Bound<'_, PyAny>>,
+) -> PyResult<Option<Py<Pipeline>>> {
+    let commands_file = resolve_optional_path(commands_file)?;
+    let (_registry, bundles) = load_registry(
+        bundle_roots.as_deref(),
+        commands_file.as_deref(),
+        open_default_package_cache(true).as_ref(),
+    )
+    .map_err(envoy_error_to_pyerr)?;
+
+    resolve_current_pipeline_for_bundles(bundles.as_deref())
+        .map(|inner| Py::new(py, Pipeline { inner }))
+        .transpose()
+}
+
 #[pyfunction(name = "discoverBundlesAuto")]
 fn discover_bundles_auto(py: Python<'_>) -> PyResult<Vec<Py<BundleInfo>>> {
     bundle_infos_to_py(
@@ -689,6 +743,8 @@ pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResul
     m.add_function(wrap_pyfunction!(set_api_verbosity, m)?)?;
     m.add_function(wrap_pyfunction!(load_user_config, m)?)?;
     m.add_function(wrap_pyfunction!(get_current_bundle_config, m)?)?;
+    m.add_function(wrap_pyfunction!(get_current_team_config, m)?)?;
+    m.add_function(wrap_pyfunction!(get_current_pipeline, m)?)?;
     m.add_function(wrap_pyfunction!(discover_bundles_auto, m)?)?;
     m.add_function(wrap_pyfunction!(get_bundles, m)?)?;
     m.add_function(wrap_pyfunction!(load_bundles_from_config, m)?)?;

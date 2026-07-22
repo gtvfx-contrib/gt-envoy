@@ -13,7 +13,10 @@ use envoy_core::error::EnvoyError;
 use envoy_core::executor::ProcessExecutor;
 use envoy_core::models::WrapperConfig;
 use envoy_core::package_cache::open_default_package_cache;
-use envoy_core::runtime::{collect_env_files, is_raw_path, prepare_env, resolve_cached_bundles};
+use envoy_core::runtime::{
+    collect_env_files, is_raw_path, prepare_env, resolve_cached_bundles,
+    resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
+};
 use envoy_core::user_config::{known_settings, UserConfig};
 use envoy_core::wrapper::ApplicationWrapper;
 
@@ -264,6 +267,18 @@ fn load_registry_for_cli(
                     return Err(1);
                 }
             }
+        }
+    }
+
+    if verbose {
+        if let Some(team) = resolve_team_config_for_bundles(bundles.as_deref()) {
+            debug(verbose, &format!("Resolved team config: {}", team.name));
+        }
+        if let Some(pipeline) = resolve_current_pipeline_for_bundles(bundles.as_deref()) {
+            debug(
+                verbose,
+                &format!("Resolved pipeline: {}:{}", pipeline.namespace, pipeline.name),
+            );
         }
     }
 

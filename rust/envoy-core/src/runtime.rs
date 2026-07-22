@@ -182,6 +182,49 @@ pub fn resolve_cached_bundles(
         .collect()
 }
 
+/// Resolve the active team configuration for the given bundles, if any.
+///
+/// Returns `None` when no discovered bundle defines a `.envoy/team.json` (the
+/// common case) or when discovery otherwise fails. This mirrors the
+/// graceful-degradation approach used elsewhere in envoy (e.g. malformed
+/// team.json files are logged as warnings, not propagated as hard errors) --
+/// an absent or unresolvable team config simply means "no team configured"
+/// rather than aborting the caller.
+///
+/// This is the wiring point that makes [`crate::team_config::TeamConfig`]
+/// reachable from the default runtime/CLI flow instead of only via direct,
+/// manual calls to `team_config::resolve_team_config`.
+pub fn resolve_team_config_for_bundles(
+    bundles: Option<&[BundleInfo]>,
+) -> Option<crate::team_config::TeamConfig> {
+    let bundles = bundles?;
+    if bundles.is_empty() {
+        return None;
+    }
+    crate::team_config::resolve_team_config(bundles, None).ok()
+}
+
+/// Resolve the current pipeline for the given bundles based on
+/// `ENVOY_PIPELINE_CONTEXT`, if any bundle defines a pipeline.
+///
+/// Returns `None` when no bundle defines a `.envoy/pipeline.json`, or no
+/// pipeline matches the current context or default namespace -- this is
+/// "no pipeline configured" rather than a hard error, matching the
+/// graceful-degradation approach used elsewhere in envoy.
+///
+/// This is the wiring point that makes [`crate::pipeline::Pipeline`]
+/// resolution reachable from the default runtime/CLI flow instead of only
+/// via direct, manual calls to `pipeline::get_current_pipeline`.
+pub fn resolve_current_pipeline_for_bundles(
+    bundles: Option<&[BundleInfo]>,
+) -> Option<crate::pipeline::Pipeline> {
+    let bundles = bundles?;
+    if bundles.is_empty() {
+        return None;
+    }
+    crate::pipeline::get_current_pipeline(bundles, &crate::pipeline::PipelineConfig::default()).ok()
+}
+
 /// Collect the ordered env-file list for `command_name`.
 ///
 /// This ports `_collectEnvFiles()` from `py/envoy/proc.py`, including both:
@@ -382,7 +425,10 @@ mod tests {
     use serde_json::{json, Value};
     use tempfile::tempdir;
 
-    use super::{collect_env_files, is_raw_path, load_registry, prepare_env};
+    use super::{
+        collect_env_files, is_raw_path, load_registry, prepare_env,
+        resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
+    };
     use crate::commands::CommandRegistry;
     use crate::discovery::{BundleInfo, BUNDLE_ENV_DIR};
     use crate::error::EnvoyError;
@@ -798,5 +844,86 @@ mod tests {
             }
             other => panic!("unexpected error variant: {other:?}"),
         }
+    }
+
+    fn bundle_with_file(
+        temp_dir: &Path,
+        namespace: &str,
+        name: &str,
+        file_name: &str,
+        contents: &str,
+    ) -> BundleInfo {
+        let bundle_dir = temp_dir.join(namespace).join(name);
+        fs::create_dir_all(bundle_dir.join(".envoy")).expect(".envoy dir should be created");
+        fs::write(bundle_dir.join(".envoy").join(file_name), contents)
+            .expect("fixture file should be written");
+        BundleInfo::new(bundle_dir, name.to_string(), namespace.to_string())
+    }
+
+    #[test]
+    fn resolve_team_config_for_bundles_returns_none_without_bundles() {
+        assert!(resolve_team_config_for_bundles(None).is_none());
+        assert!(resolve_team_config_for_bundles(Some(&[])).is_none());
+    }
+
+    #[test]
+    fn resolve_team_config_for_bundles_returns_none_when_no_team_json_present() {
+        let temp_dir = tempdir().expect("tempdir should be created");
+        let bundle = bundle_with_file(
+            temp_dir.path(),
+            "gt",
+            "maya",
+            "global_env.json",
+            "{}",
+        );
+
+        assert!(resolve_team_config_for_bundles(Some(&[bundle])).is_none());
+    }
+
+    #[test]
+    fn resolve_team_config_for_bundles_finds_team_json() {
+        let temp_dir = tempdir().expect("tempdir should be created");
+        let bundle = bundle_with_file(
+            temp_dir.path(),
+            "gt",
+            "maya",
+            "team.json",
+            r#"{"name": "bfd", "prodPackagesRoot": "\\\\server\\packages"}"#,
+        );
+
+        let team = resolve_team_config_for_bundles(Some(&[bundle]))
+            .expect("team config should be discovered automatically");
+
+        assert_eq!(team.name, "bfd");
+    }
+
+    #[test]
+    fn resolve_current_pipeline_for_bundles_returns_none_without_bundles() {
+        with_env_lock(|| {
+            let _env_guard = EnvVarGuard::set_many(&[("ENVOY_PIPELINE_CONTEXT", None)]);
+            assert!(resolve_current_pipeline_for_bundles(None).is_none());
+            assert!(resolve_current_pipeline_for_bundles(Some(&[])).is_none());
+        });
+    }
+
+    #[test]
+    fn resolve_current_pipeline_for_bundles_finds_pipeline_json() {
+        with_env_lock(|| {
+            let _env_guard = EnvVarGuard::set_many(&[("ENVOY_PIPELINE_CONTEXT", None)]);
+            let temp_dir = tempdir().expect("tempdir should be created");
+            let bundle = bundle_with_file(
+                temp_dir.path(),
+                "gt",
+                "maya",
+                "pipeline.json",
+                r#"{"name": "build", "namespace": "bfd"}"#,
+            );
+
+            let pipeline = resolve_current_pipeline_for_bundles(Some(&[bundle]))
+                .expect("pipeline should be discovered automatically");
+
+            assert_eq!(pipeline.name, "build");
+            assert_eq!(pipeline.namespace, "bfd");
+        });
     }
 }
