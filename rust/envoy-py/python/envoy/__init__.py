@@ -8,6 +8,7 @@ downstream consumers.
 
 from __future__ import annotations
 
+import asyncio as _asyncio
 import importlib
 import sys as _sys
 
@@ -95,6 +96,40 @@ exceptions = _native.exceptions
 telemetry = _native.telemetry
 # New top-level Environment class (dict-like, auto-initializing).
 Environment = _native.Environment
+
+
+async def async_new_environment(command: str, **kwargs: object) -> Environment:
+    """Construct an :class:`Environment` without blocking the event loop.
+
+    ``Environment`` construction is lazy (the subprocess environment is
+    only built on first attribute access -- see ``Environment``'s own
+    docstring), but resolving a command name still involves bundle
+    discovery and file I/O the first time it happens. This wraps that
+    construction in :func:`asyncio.to_thread` so `async` callers don't
+    block the event loop on it.
+
+    Args:
+        command: Envoy command name or raw executable path, forwarded to
+            :class:`Environment`.
+        **kwargs: Additional keyword arguments forwarded to
+            :class:`Environment` (``inherit_env``, ``allowlist``,
+            ``bundle_roots``, ``commands_file``).
+
+    Returns:
+        The constructed ``Environment``.
+
+    Note:
+        ``Environment`` itself only exposes synchronous dict-like access
+        (``env["VAR"]``, ``env.get(...)``, ``env.items()``); it does not
+        currently expose process-execution methods (those live on
+        ``envoy.proc``), so there is no async equivalent of
+        ``check_output`` to offer here yet. Revisit if/when ``Environment``
+        grows execution methods of its own.
+
+    """
+    return await _asyncio.to_thread(Environment, command, **kwargs)
+
+
 EnvoyError = exceptions.EnvoyError
 WrapperError = exceptions.WrapperError
 PreRunError = exceptions.PreRunError
@@ -173,6 +208,7 @@ __all__ = [
     "exceptions",
     "telemetry",
     "Environment",
+    "async_new_environment",
     "EnvoyError",
     "WrapperError",
     "PreRunError",

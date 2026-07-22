@@ -184,6 +184,36 @@ impl Environment {
         format!("<Environment {}>", self.command)
     }
 
+    /// Enter a `with` block, returning the built environment as a plain
+    /// `dict` suitable for `subprocess.run(env=...)` and similar APIs:
+    ///
+    /// ```python
+    /// with envoy.Environment("unreal") as env:
+    ///     subprocess.run(["pyside6-uic", "ui.ui"], env=env)
+    /// ```
+    ///
+    /// Returns a materialized `dict` (via `build`) rather than `self` so the
+    /// yielded value works with any API expecting a plain mapping, without
+    /// relying on duck-typing support for custom mapping objects.
+    fn __enter__(&self, py: Python<'_>) -> PyResult<PyObject> {
+        self.build(py)
+    }
+
+    /// Exit a `with` block.
+    ///
+    /// This environment has no external process state to revert on exit
+    /// (unlike, say, temporarily patching `os.environ`), so this is a no-op
+    /// that never suppresses exceptions raised in the `with` body.
+    #[pyo3(signature = (_exc_type=None, _exc_value=None, _traceback=None))]
+    fn __exit__(
+        &self,
+        _exc_type: Option<&Bound<'_, PyAny>>,
+        _exc_value: Option<&Bound<'_, PyAny>>,
+        _traceback: Option<&Bound<'_, PyAny>>,
+    ) -> bool {
+        false
+    }
+
     /// Build and return the environment as a dict (for compatibility).
     ///
     /// This method is provided for backward compatibility with code that
