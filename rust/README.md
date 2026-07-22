@@ -31,17 +31,43 @@ release. The wheel's own static metadata version (in `pyproject.toml`
 
 ## Building
 
+### Prerequisites
+
+- **Rust toolchain** (`rustup` with the `x86_64-pc-windows-msvc` target)
+- **Visual Studio Build Tools** (for `link.exe`)
+- **Python 3.10+** — a virtual environment is recommended:
+  ```powershell
+  python -m venv .venv
+  .venv\Scripts\Activate.ps1
+  pip install maturin
+  ```
+
+### Quick build (development)
+
 ```powershell
-# Native binaries + core/engit libs
+# From the repo root:
+cd rust/envoy-py
+maturin develop --release
+```
+
+This compiles `envoy-py` and installs the `_envoy.pyd` extension module into
+the active Python environment. Useful for iterating on Rust code without
+building native binaries or publishing a wheel.
+
+### Full build (native binaries + wheel)
+
+```powershell
+# Native binaries (envoy, engit) + core/engit libs
 cargo build --workspace --exclude envoy-py --release
 
-# Python extension wheel (envoy-py) -- the distributed `envoy` package.
-# From the repo root (uses the root pyproject.toml's maturin config):
-pip install .
-# or, for local development against a venv, from rust/envoy-py directly:
+# Python extension wheel (the distributed `envoy` package)
 cd rust/envoy-py
-python -m maturin develop
+maturin develop --release
+# or for a distributable wheel:
+maturin build --release
 ```
+
+The full build script `scripts\build_native.bat` runs both steps in sequence.
 
 ## Testing / linting
 
