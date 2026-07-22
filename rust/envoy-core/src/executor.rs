@@ -475,8 +475,11 @@ fn terminate_process_unix(child: &mut Child) {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "windows")]
     use std::fs;
-    use std::path::{Path, PathBuf};
+    #[cfg(target_os = "windows")]
+    use std::path::Path;
+    use std::path::PathBuf;
     use std::process::{Command, Stdio};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -710,10 +713,12 @@ mod tests {
             .join(test_name)
     }
 
+    #[cfg(target_os = "windows")]
     struct ScratchFile {
         path: PathBuf,
     }
 
+    #[cfg(target_os = "windows")]
     impl ScratchFile {
         fn new(path: PathBuf, contents: &str) -> Self {
             fs::write(&path, contents).expect("write scratch file");
@@ -721,6 +726,7 @@ mod tests {
         }
     }
 
+    #[cfg(target_os = "windows")]
     impl Drop for ScratchFile {
         fn drop(&mut self) {
             let _ = fs::remove_file(&self.path);

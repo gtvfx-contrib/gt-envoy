@@ -908,6 +908,7 @@ fn spawn_command_definition(
     )
 }
 
+#[cfg_attr(not(windows), allow(unused_mut, unused_variables))]
 fn apply_default_creationflags(mut options: SpawnOptions, default_no_window: bool) -> SpawnOptions {
     #[cfg(windows)]
     if default_no_window && options.creationflags.is_none() {
