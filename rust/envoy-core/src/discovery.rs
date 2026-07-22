@@ -23,8 +23,11 @@ use std::fmt;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rayon::prelude::*;
 use regex::{Captures, Regex};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config_registry::{is_config_name, resolve_named_config};
@@ -45,6 +48,45 @@ pub const BUNDLE_MARKER_FILE: &str = ".bundle";
 
 /// Per-bundle envoy config directory name.
 pub const BUNDLE_ENV_DIR: &str = ".envoy";
+
+const DISCOVERY_CACHE_DISABLE_VAR: &str = "ENVOY_DISABLE_DISCOVERY_CACHE";
+const DISCOVERY_CACHE_FILENAME: &str = "discovery_cache.json";
+const DISCOVERY_CACHE_FINGERPRINT_DEPTH: usize = 2;
+const DISCOVERY_CACHE_MAX_AGE: Duration = Duration::from_secs(5);
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct DiscoveryCacheManifest {
+    entries: HashMap<String, DiscoveryCacheEntry>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct DiscoveryCacheEntry {
+    created_at: u64,
+    roots: Vec<CachedRootFingerprint>,
+    bundles: Vec<CachedBundleInfo>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct CachedRootFingerprint {
+    root: PathBuf,
+    directories: Vec<CachedDirectoryFingerprint>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct CachedDirectoryFingerprint {
+    relative_path: PathBuf,
+    modified_at: Option<u64>,
+    bundle_marker_modified_at: Option<u64>,
+    has_envoy_env: bool,
+    has_git_dir: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct CachedBundleInfo {
+    root: PathBuf,
+    name: String,
+    namespace: String,
+}
 
 fn namespace_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
@@ -588,51 +630,281 @@ pub fn validate_bundle(path: &Path) -> bool {
 
 /// Recursively find checkout or published bundle roots below `root_dir`.
 pub fn find_bundle_roots(root_dir: &Path, max_depth: usize) -> Vec<PathBuf> {
-    let mut bundle_roots = Vec::new();
-
     if !root_dir.is_dir() {
-        return bundle_roots;
+        return Vec::new();
     }
 
-    search_dir(
-        root_dir,
-        0,
-        max_depth,
-        SearchMode::Bundles,
-        &mut bundle_roots,
-    );
-    bundle_roots
+    search_dir(root_dir, 0, max_depth, SearchMode::Bundles)
 }
 
 /// Recursively find git repositories below `root_dir`.
 pub fn find_git_repos(root_dir: &Path, max_depth: usize) -> Vec<PathBuf> {
-    let mut repos = Vec::new();
-
     if !root_dir.is_dir() {
-        return repos;
+        return Vec::new();
     }
 
-    search_dir(root_dir, 0, max_depth, SearchMode::GitRepos, &mut repos);
-    repos
+    search_dir(root_dir, 0, max_depth, SearchMode::GitRepos)
 }
 
 /// Discover bundles under the provided root directories.
+///
+/// Results are cached on disk under envoy's cache root. A cached entry is
+/// reused only when it is still fresh and a shallow fingerprint of each root
+/// directory matches the current filesystem state. The fingerprint records
+/// visible directories near the root plus each directory's `.git`, `.envoy`,
+/// and `.bundle` state, while a short TTL keeps the cache conservative for
+/// deeper filesystem changes.
 pub fn discover_bundles_from_roots(root_dirs: &[String]) -> Vec<BundleInfo> {
-    let mut bundles = Vec::new();
+    let roots = root_dirs
+        .iter()
+        .map(|root_str| resolve_input_path(Path::new(root_str)))
+        .collect::<Vec<_>>();
 
-    for root_str in root_dirs {
-        let root = resolve_input_path(Path::new(root_str));
-        let candidates = find_bundle_roots(&root, 5);
-
-        for candidate_path in candidates {
-            if validate_bundle(&candidate_path) {
-                let (name, namespace) = name_and_namespace(&candidate_path);
-                bundles.push(BundleInfo::new(candidate_path, name, namespace));
-            }
-        }
+    if let Some(cached) = load_cached_discovery_results(&roots, 5) {
+        return cached;
     }
 
+    let bundles = roots
+        .par_iter()
+        .map(|root| discover_bundles_for_root(root, 5))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+
+    store_cached_discovery_results(&roots, &bundles, 5);
     bundles
+}
+
+fn discover_bundles_for_root(root: &Path, max_depth: usize) -> Vec<BundleInfo> {
+    find_bundle_roots(root, max_depth)
+        .into_iter()
+        .filter(|candidate_path| validate_bundle(candidate_path))
+        .map(|candidate_path| {
+            let (name, namespace) = name_and_namespace(&candidate_path);
+            BundleInfo::new(candidate_path, name, namespace)
+        })
+        .collect()
+}
+
+fn load_cached_discovery_results(
+    root_dirs: &[PathBuf],
+    max_depth: usize,
+) -> Option<Vec<BundleInfo>> {
+    if root_dirs.is_empty() || env_flag_enabled(DISCOVERY_CACHE_DISABLE_VAR) {
+        return None;
+    }
+
+    let cache_key = discovery_cache_key(root_dirs, max_depth);
+    let mut manifest = load_discovery_cache_manifest();
+    let cache_entry = manifest.entries.remove(&cache_key)?;
+
+    if current_timestamp().saturating_sub(cache_entry.created_at)
+        > DISCOVERY_CACHE_MAX_AGE.as_secs()
+    {
+        return None;
+    }
+
+    let expected_fingerprints = root_dirs
+        .iter()
+        .filter_map(|root| fingerprint_root(root, max_depth))
+        .collect::<Vec<_>>();
+
+    if expected_fingerprints.len() != root_dirs.len() || cache_entry.roots != expected_fingerprints
+    {
+        return None;
+    }
+
+    Some(
+        cache_entry
+            .bundles
+            .into_iter()
+            .map(|cached| BundleInfo::new(cached.root, cached.name, cached.namespace))
+            .collect(),
+    )
+}
+
+fn store_cached_discovery_results(root_dirs: &[PathBuf], bundles: &[BundleInfo], max_depth: usize) {
+    if root_dirs.is_empty() || env_flag_enabled(DISCOVERY_CACHE_DISABLE_VAR) {
+        return;
+    }
+
+    let fingerprints = root_dirs
+        .iter()
+        .filter_map(|root| fingerprint_root(root, max_depth))
+        .collect::<Vec<_>>();
+
+    if fingerprints.len() != root_dirs.len() {
+        return;
+    }
+
+    let mut manifest = load_discovery_cache_manifest();
+    manifest.entries.insert(
+        discovery_cache_key(root_dirs, max_depth),
+        DiscoveryCacheEntry {
+            created_at: current_timestamp(),
+            roots: fingerprints,
+            bundles: bundles
+                .iter()
+                .map(|bundle| CachedBundleInfo {
+                    root: bundle.root.clone(),
+                    name: bundle.name.clone(),
+                    namespace: bundle.namespace.clone(),
+                })
+                .collect(),
+        },
+    );
+
+    save_discovery_cache_manifest(&manifest);
+}
+
+fn discovery_cache_key(root_dirs: &[PathBuf], max_depth: usize) -> String {
+    let roots = root_dirs
+        .iter()
+        .map(|root| root.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+
+    format!(
+        "roots:{}|depth:{max_depth}",
+        serde_json::to_string(&roots).unwrap_or_default()
+    )
+}
+
+fn load_discovery_cache_manifest() -> DiscoveryCacheManifest {
+    let cache_path = discovery_cache_path();
+    let Ok(contents) = fs::read_to_string(&cache_path) else {
+        return DiscoveryCacheManifest::default();
+    };
+
+    serde_json::from_str(&contents).unwrap_or_default()
+}
+
+fn save_discovery_cache_manifest(manifest: &DiscoveryCacheManifest) {
+    let cache_path = discovery_cache_path();
+    let Some(parent) = cache_path.parent() else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() {
+        return;
+    }
+
+    let Ok(contents) = serde_json::to_string_pretty(manifest) else {
+        return;
+    };
+
+    let _ = fs::write(cache_path, contents);
+}
+
+fn discovery_cache_path() -> PathBuf {
+    let package_cache_root = crate::package_cache::default_cache_root();
+    let envoy_cache_root = package_cache_root
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or(package_cache_root);
+
+    envoy_cache_root.join(DISCOVERY_CACHE_FILENAME)
+}
+
+fn fingerprint_root(root: &Path, max_depth: usize) -> Option<CachedRootFingerprint> {
+    if !root.is_dir() {
+        return None;
+    }
+
+    let max_fingerprint_depth = max_depth.min(DISCOVERY_CACHE_FINGERPRINT_DEPTH);
+    Some(CachedRootFingerprint {
+        root: root.to_path_buf(),
+        directories: fingerprint_directory(root, root, 0, max_fingerprint_depth),
+    })
+}
+
+fn fingerprint_directory(
+    root: &Path,
+    path: &Path,
+    depth: usize,
+    max_depth: usize,
+) -> Vec<CachedDirectoryFingerprint> {
+    let mut directories = vec![CachedDirectoryFingerprint {
+        relative_path: path
+            .strip_prefix(root)
+            .map(Path::to_path_buf)
+            .unwrap_or_default(),
+        modified_at: metadata_modified_timestamp(path),
+        bundle_marker_modified_at: metadata_modified_timestamp(&path.join(BUNDLE_MARKER_FILE)),
+        has_envoy_env: path.join(BUNDLE_ENV_DIR).is_dir(),
+        has_git_dir: path.join(".git").is_dir(),
+    }];
+
+    if depth >= max_depth {
+        return directories;
+    }
+
+    let Ok(read_dir) = fs::read_dir(path) else {
+        return directories;
+    };
+
+    let mut child_dirs = read_dir
+        .flatten()
+        .filter_map(|entry| {
+            let child_path = entry.path();
+            let is_dir = entry
+                .file_type()
+                .map(|file_type| file_type.is_dir())
+                .unwrap_or(false);
+            if !is_dir {
+                return None;
+            }
+
+            if child_path
+                .file_name()
+                .map(|name| name.to_string_lossy().starts_with('.'))
+                .unwrap_or(false)
+            {
+                return None;
+            }
+
+            Some(child_path)
+        })
+        .collect::<Vec<_>>();
+    child_dirs.sort();
+
+    for child_dir in child_dirs {
+        directories.extend(fingerprint_directory(
+            root,
+            &child_dir,
+            depth + 1,
+            max_depth,
+        ));
+    }
+
+    directories
+}
+
+fn metadata_modified_timestamp(path: &Path) -> Option<u64> {
+    fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(system_time_to_timestamp)
+}
+
+fn system_time_to_timestamp(time: SystemTime) -> Option<u64> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|value| value.as_secs())
+}
+
+fn current_timestamp() -> u64 {
+    system_time_to_timestamp(SystemTime::now()).unwrap_or(0)
+}
+
+fn env_flag_enabled(name: &str) -> bool {
+    env::var(name)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn name_and_namespace(bundle_root: &Path) -> (String, String) {
@@ -811,53 +1083,57 @@ enum SearchMode {
     GitRepos,
 }
 
-fn search_dir(
-    path: &Path,
-    depth: usize,
-    max_depth: usize,
-    mode: SearchMode,
-    results: &mut Vec<PathBuf>,
-) {
+fn search_dir(path: &Path, depth: usize, max_depth: usize, mode: SearchMode) -> Vec<PathBuf> {
     if depth > max_depth {
-        return;
+        return Vec::new();
     }
 
     match mode {
         SearchMode::Bundles if is_git_repo(path) || is_published_bundle(path) => {
-            results.push(path.to_path_buf());
-            return;
+            return vec![path.to_path_buf()];
         }
         SearchMode::GitRepos if is_git_repo(path) => {
-            results.push(path.to_path_buf());
-            return;
+            return vec![path.to_path_buf()];
         }
         SearchMode::Bundles | SearchMode::GitRepos => {}
     }
 
     let Ok(read_dir) = fs::read_dir(path) else {
-        return;
+        return Vec::new();
     };
 
-    for entry in read_dir.flatten() {
-        let entry_path = entry.path();
-        let is_dir = entry
-            .file_type()
-            .map(|file_type| file_type.is_dir())
-            .unwrap_or(false);
-        if !is_dir {
-            continue;
-        }
+    let mut child_dirs = read_dir
+        .flatten()
+        .filter_map(|entry| {
+            let entry_path = entry.path();
+            let is_dir = entry
+                .file_type()
+                .map(|file_type| file_type.is_dir())
+                .unwrap_or(false);
+            if !is_dir {
+                return None;
+            }
 
-        if entry_path
-            .file_name()
-            .map(|name| name.to_string_lossy().starts_with('.'))
-            .unwrap_or(false)
-        {
-            continue;
-        }
+            if entry_path
+                .file_name()
+                .map(|name| name.to_string_lossy().starts_with('.'))
+                .unwrap_or(false)
+            {
+                return None;
+            }
 
-        search_dir(&entry_path, depth + 1, max_depth, mode, results);
-    }
+            Some(entry_path)
+        })
+        .collect::<Vec<_>>();
+    child_dirs.sort();
+
+    child_dirs
+        .into_par_iter()
+        .map(|entry_path| search_dir(&entry_path, depth + 1, max_depth, mode))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 fn parse_bndlid(bndlid: &str) -> Option<(String, String)> {
@@ -979,18 +1255,21 @@ mod tests {
     use std::ffi::{OsStr, OsString};
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::thread;
+    use std::time::Duration;
 
     use serde_json::json;
     use serde_json::Value;
     use tempfile::tempdir;
 
     use super::{
-        discover_bundles_auto, discover_bundles_from_roots, expand_bundle_path, find_bundle_roots,
-        find_git_repos, get_bundle_commands_files, get_bundle_env_files, get_bundles,
-        has_envoy_env, infer_namespace, is_bndlid, is_git_repo, is_published_bundle,
-        load_bundles_from_config, resolve_bndlid, validate_bundle, Bundle, BundleConfig,
+        discover_bundles_auto, discover_bundles_from_roots, discovery_cache_key,
+        discovery_cache_path, expand_bundle_path, find_bundle_roots, find_git_repos,
+        get_bundle_commands_files, get_bundle_env_files, get_bundles, has_envoy_env,
+        infer_namespace, is_bndlid, is_git_repo, is_published_bundle, load_bundles_from_config,
+        load_discovery_cache_manifest, resolve_bndlid, validate_bundle, Bundle, BundleConfig,
         BundleInfo, EnvoyError, BUNDLES_CONFIG_VAR, BUNDLE_CHECKOUT, BUNDLE_ENV_DIR,
-        BUNDLE_MARKER_FILE, BUNDLE_ROOTS_VAR,
+        BUNDLE_MARKER_FILE, BUNDLE_ROOTS_VAR, DISCOVERY_CACHE_DISABLE_VAR,
     };
 
     struct EnvVarGuard {
@@ -1096,6 +1375,19 @@ mod tests {
             .iter()
             .map(|bundle| (bundle.bndlid(), bundle.root.clone()))
             .collect()
+    }
+
+    fn cache_entry_created_at(root_dirs: &[String], max_depth: usize) -> Option<u64> {
+        let roots = root_dirs
+            .iter()
+            .map(|root| super::resolve_input_path(Path::new(root)))
+            .collect::<Vec<_>>();
+
+        let cache_key = discovery_cache_key(&roots, max_depth);
+        load_discovery_cache_manifest()
+            .entries
+            .get(&cache_key)
+            .map(|entry| entry.created_at)
     }
 
     #[test]
@@ -1251,6 +1543,68 @@ mod tests {
 
         assert_eq!(discovered.get("gt:pythoncore"), Some(&checkout));
         assert_eq!(discovered.get("tools:render"), Some(&published));
+    }
+
+    #[test]
+    fn discover_bundles_from_roots_reuses_fresh_cache_entries() {
+        with_env_lock(|| {
+            let temp = tempdir().expect("failed to create temp dir");
+            let cache_temp = tempdir().expect("failed to create cache temp dir");
+            let cache_root = cache_temp.path().join("cache-root");
+            fs::create_dir_all(&cache_root).expect("failed to create cache root");
+            let _cache_root_guard = EnvVarGuard::set("LOCALAPPDATA", Some(cache_root.as_os_str()));
+            let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, None);
+
+            create_checkout_bundle(temp.path(), "gt", "pythoncore", &["python_env.json"], None);
+            let root_dirs = vec![temp.path().display().to_string()];
+
+            let first = discover_bundles_from_roots(&root_dirs);
+            assert_eq!(first.len(), 1);
+            assert!(discovery_cache_path().is_file());
+
+            let first_created_at = cache_entry_created_at(&root_dirs, 5)
+                .expect("cache entry should exist after discovery");
+
+            thread::sleep(Duration::from_secs(1));
+
+            let second = discover_bundles_from_roots(&root_dirs);
+            let second_created_at = cache_entry_created_at(&root_dirs, 5)
+                .expect("cache entry should remain after cache hit");
+
+            assert_eq!(namespaced_map(&first), namespaced_map(&second));
+            assert_eq!(second_created_at, first_created_at);
+        });
+    }
+
+    #[test]
+    fn discover_bundles_from_roots_invalidates_cache_when_bundle_state_changes() {
+        with_env_lock(|| {
+            let temp = tempdir().expect("failed to create temp dir");
+            let cache_temp = tempdir().expect("failed to create cache temp dir");
+            let cache_root = cache_temp.path().join("cache-root");
+            fs::create_dir_all(&cache_root).expect("failed to create cache root");
+            let _cache_root_guard = EnvVarGuard::set("LOCALAPPDATA", Some(cache_root.as_os_str()));
+            let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, None);
+
+            let checkout =
+                create_checkout_bundle(temp.path(), "gt", "pythoncore", &["python_env.json"], None);
+            let root_dirs = vec![temp.path().display().to_string()];
+
+            let first = discover_bundles_from_roots(&root_dirs);
+            assert_eq!(first.len(), 1);
+            let first_created_at = cache_entry_created_at(&root_dirs, 5)
+                .expect("cache entry should exist after first discovery");
+
+            thread::sleep(Duration::from_secs(1));
+            fs::remove_dir_all(checkout.join(".git")).expect("failed to remove .git");
+
+            let second = discover_bundles_from_roots(&root_dirs);
+            let second_created_at = cache_entry_created_at(&root_dirs, 5)
+                .expect("cache entry should be refreshed after invalidation");
+
+            assert!(second.is_empty());
+            assert!(second_created_at > first_created_at);
+        });
     }
 
     #[test]
