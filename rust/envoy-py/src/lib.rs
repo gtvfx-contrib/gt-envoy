@@ -23,6 +23,7 @@ mod config_registry;
 mod environment;
 mod exceptions;
 mod proc;
+mod telemetry;
 mod wrapper;
 
 /// Returns the `envoy-core` crate version this extension was built against.
@@ -52,6 +53,7 @@ fn _envoy(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     config_registry::register_config_registry_bindings(py, m)?;
     environment::register_environment_module(py, m)?;
     proc::register_proc_module(py, m)?;
+    telemetry::register_telemetry_module(py, m)?;
     wrapper::register_wrapper_bindings(py, m)?;
     Ok(())
 }

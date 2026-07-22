@@ -16,10 +16,16 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum TeamConfigError {
     #[error("I/O error reading team config at {path}: {source}")]
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 
     #[error("invalid JSON in team config at {path}: {source}")]
-    Json { path: PathBuf, source: serde_json::Error },
+    Json {
+        path: PathBuf,
+        source: serde_json::Error,
+    },
 
     #[error("team '{name}' not found; no .envoy/team.json discovered")]
     NotFound { name: String },
@@ -72,8 +78,8 @@ impl TeamConfig {
             source: e,
         })?;
 
-        let value: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| TeamConfigError::Json {
+        let value: serde_json::Value =
+            serde_json::from_str(&content).map_err(|e| TeamConfigError::Json {
                 path: path.to_path_buf(),
                 source: e,
             })?;
@@ -86,30 +92,36 @@ impl TeamConfig {
             });
         }
 
-        let name = value.get("name")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| TeamConfigError::MissingField {
+        let name = value.get("name").and_then(|v| v.as_str()).ok_or_else(|| {
+            TeamConfigError::MissingField {
                 field: "name".to_string(),
                 path: path.to_path_buf(),
-            })?;
+            }
+        })?;
 
         // Parse optional fields.
-        let prod_packages_root = value.get("prodPackagesRoot")
+        let prod_packages_root = value
+            .get("prodPackagesRoot")
             .and_then(|v| v.as_str())
             .map(Self::expand_tilde);
 
-        let prod_pipelines_root = value.get("prodPipelinesRoot")
+        let prod_pipelines_root = value
+            .get("prodPipelinesRoot")
             .and_then(|v| v.as_str())
             .map(Self::expand_tilde);
 
-        let user_host_config_file = value.get("userHostConfigFile")
+        let user_host_config_file = value
+            .get("userHostConfigFile")
             .and_then(|v| v.as_str())
             .map(String::from);
 
         // Collect remaining fields as metadata.
         let mut metadata = HashMap::new();
         for (key, val) in value.as_object().unwrap() {
-            if !matches!(key.as_str(), "name" | "prodPackagesRoot" | "prodPipelinesRoot" | "userHostConfigFile") {
+            if !matches!(
+                key.as_str(),
+                "name" | "prodPackagesRoot" | "prodPipelinesRoot" | "userHostConfigFile"
+            ) {
                 metadata.insert(key.clone(), val.clone());
             }
         }
@@ -165,8 +177,8 @@ impl UserHostConfig {
             source: e,
         })?;
 
-        let value: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| TeamConfigError::Json {
+        let value: serde_json::Value =
+            serde_json::from_str(&content).map_err(|e| TeamConfigError::Json {
                 path: path.to_path_buf(),
                 source: e,
             })?;
@@ -178,12 +190,14 @@ impl UserHostConfig {
             });
         }
 
-        let prod_packages_root = value.get("prodPackagesRoot")
+        let prod_packages_root = value
+            .get("prodPackagesRoot")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
-        let prod_pipelines_root = value.get("prodPipelinesRoot")
+        let prod_pipelines_root = value
+            .get("prodPipelinesRoot")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
@@ -220,7 +234,11 @@ pub fn discover_team_configs(bundles: &[crate::discovery::BundleInfo]) -> Vec<Te
 
         match TeamConfig::load_from_file(&team_path) {
             Ok(config) => configs.push(config),
-            Err(e) => eprintln!("Warning: failed to load team config from {}: {}", team_path.display(), e),
+            Err(e) => tracing::warn!(
+                path = %team_path.display(),
+                error = %e,
+                "failed to load team config"
+            ),
         }
     }
 
@@ -238,7 +256,9 @@ pub fn resolve_team_config(
     let configs = discover_team_configs(bundles);
 
     if configs.is_empty() {
-        return Err(TeamConfigError::NotFound { name: String::new() });
+        return Err(TeamConfigError::NotFound {
+            name: String::new(),
+        });
     }
 
     // Use the first discovered team config.
@@ -249,7 +269,11 @@ pub fn resolve_team_config(
         if user_path.is_file() {
             match UserHostConfig::load_from_file(user_path) {
                 Ok(user) => active = active.merge_with_user(&user),
-                Err(e) => eprintln!("Warning: failed to load user config from {}: {}", user_path.display(), e),
+                Err(e) => tracing::warn!(
+                    path = %user_path.display(),
+                    error = %e,
+                    "failed to load user config"
+                ),
             }
         } else if let Some(ref team_config_file) = active.user_host_config_file {
             // Fall back to the path specified in team.json.
@@ -257,7 +281,11 @@ pub fn resolve_team_config(
             if expanded.is_file() {
                 match UserHostConfig::load_from_file(&expanded) {
                     Ok(user) => active = active.merge_with_user(&user),
-                    Err(e) => eprintln!("Warning: failed to load user config from {}: {}", expanded.display(), e),
+                    Err(e) => tracing::warn!(
+                        path = %expanded.display(),
+                        error = %e,
+                        "failed to load user config"
+                    ),
                 }
             }
         }
@@ -319,13 +347,20 @@ mod tests {
     fn load_team_config_expands_tilde() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("team.json");
-        fs::write(&path, r#"{"name": "myteam", "prodPackagesRoot": "~/packages"}"#).unwrap();
+        fs::write(
+            &path,
+            r#"{"name": "myteam", "prodPackagesRoot": "~/packages"}"#,
+        )
+        .unwrap();
 
         // Set USERPROFILE for the test.
         std::env::set_var("USERPROFILE", &temp.path());
         let config = TeamConfig::load_from_file(&path).unwrap();
         let expected_home_pkg = temp.path().join("packages");
-        assert_eq!(config.prod_packages_root.as_deref(), Some(expected_home_pkg.as_path()));
+        assert_eq!(
+            config.prod_packages_root.as_deref(),
+            Some(expected_home_pkg.as_path())
+        );
     }
 
     #[test]
@@ -354,19 +389,20 @@ mod tests {
 
         let config = TeamConfig::load_from_file(&path).unwrap();
         assert_eq!(config.metadata.len(), 2);
-        assert_eq!(config.metadata.get("customSetting").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(
+            config
+                .metadata
+                .get("customSetting")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
     }
 
     #[test]
     fn discover_team_configs_finds_all_in_bundles() {
         let temp = TempDir::new().unwrap();
         let bundles = vec![
-            create_test_bundle(
-                &temp,
-                "bfd",
-                "build-pipeline",
-                Some(r#"{"name": "bfd"}"#),
-            ),
+            create_test_bundle(&temp, "bfd", "build-pipeline", Some(r#"{"name": "bfd"}"#)),
             create_test_bundle(&temp, "gt", "test-bundle", None), // no team.json
         ];
 
@@ -410,7 +446,10 @@ mod tests {
 
         let merged = team.merge_with_user(&user);
         let expected_local = PathBuf::from("\\\\local\\packages");
-        assert_eq!(merged.prod_packages_root.as_deref(), Some(expected_local.as_path()));
+        assert_eq!(
+            merged.prod_packages_root.as_deref(),
+            Some(expected_local.as_path())
+        );
     }
 
     #[test]
@@ -427,11 +466,16 @@ mod tests {
         .unwrap();
 
         let team = TeamConfig::load_from_file(&path).unwrap();
-        let user = UserHostConfig { ..Default::default() };
+        let user = UserHostConfig {
+            ..Default::default()
+        };
 
         let merged = team.merge_with_user(&user);
         let expected_server = PathBuf::from("\\\\server\\packages");
-        assert_eq!(merged.prod_packages_root.as_deref(), Some(expected_server.as_path()));
+        assert_eq!(
+            merged.prod_packages_root.as_deref(),
+            Some(expected_server.as_path())
+        );
     }
 
     #[test]
@@ -455,16 +499,15 @@ mod tests {
     #[test]
     fn resolve_team_config_merges_with_user_path() {
         let temp = TempDir::new().unwrap();
-        create_test_bundle(
-            &temp,
-            "bfd",
-            "build-pipeline",
-            Some(r#"{"name": "bfd"}"#),
-        );
+        create_test_bundle(&temp, "bfd", "build-pipeline", Some(r#"{"name": "bfd"}"#));
 
         // Create a user config file.
         let user_path = temp.path().join("user.json");
-        fs::write(&user_path, r#"{ "prodPackagesRoot": "\\\\override\\packages" }"#).unwrap();
+        fs::write(
+            &user_path,
+            r#"{ "prodPackagesRoot": "\\\\override\\packages" }"#,
+        )
+        .unwrap();
 
         let bundles = vec![crate::discovery::BundleInfo::new(
             temp.path().join("bfd").join("build-pipeline"),
@@ -474,7 +517,10 @@ mod tests {
 
         let config = resolve_team_config(&bundles, Some(user_path.as_ref())).unwrap();
         let expected_override = PathBuf::from("\\\\override\\packages");
-        assert_eq!(config.prod_packages_root.as_deref(), Some(expected_override.as_path()));
+        assert_eq!(
+            config.prod_packages_root.as_deref(),
+            Some(expected_override.as_path())
+        );
     }
 
     #[test]

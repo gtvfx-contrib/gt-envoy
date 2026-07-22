@@ -35,10 +35,16 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum PipelineError {
     #[error("I/O error reading pipeline at {path}: {source}")]
-    Io { path: PathBuf, source: std::io::Error },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
 
     #[error("invalid JSON in pipeline file at {file_path}: {source}")]
-    Json { file_path: PathBuf, source: serde_json::Error },
+    Json {
+        file_path: PathBuf,
+        source: serde_json::Error,
+    },
 
     #[error("pipeline '{name}' not found for context '{context}'")]
     NotFound { name: String, context: String },
@@ -106,9 +112,7 @@ impl ContextHierarchy {
     /// `resolve("team:project:feature")` returns `["team", "team:project", "team:project:feature"]`.
     pub fn levels(&self) -> Vec<String> {
         let parts: Vec<&str> = self.raw.split(':').collect();
-        (0..parts.len())
-            .map(|i| parts[..=i].join(":"))
-            .collect()
+        (0..parts.len()).map(|i| parts[..=i].join(":")).collect()
     }
 
     /// Return `true` if this context is a parent of another (e.g., `"team:a"`
@@ -162,7 +166,11 @@ pub fn discover_pipelines(bundles: &[crate::discovery::BundleInfo]) -> Vec<Pipel
 
         match load_pipeline_from_file(&pipeline_path, &bundle.namespace) {
             Ok(pipeline) => pipelines.push(pipeline),
-            Err(e) => eprintln!("Warning: failed to load pipeline from {}: {}", pipeline_path.display(), e),
+            Err(e) => tracing::warn!(
+                path = %pipeline_path.display(),
+                error = %e,
+                "failed to load pipeline"
+            ),
         }
     }
 
@@ -170,37 +178,55 @@ pub fn discover_pipelines(bundles: &[crate::discovery::BundleInfo]) -> Vec<Pipel
 }
 
 /// Load a single pipeline definition from a JSON file.
-pub fn load_pipeline_from_file(path: &Path, default_namespace: &str) -> Result<Pipeline, PipelineError> {
+pub fn load_pipeline_from_file(
+    path: &Path,
+    default_namespace: &str,
+) -> Result<Pipeline, PipelineError> {
     let content = fs::read_to_string(path).map_err(|e| PipelineError::Io {
         path: path.to_path_buf(),
         source: e,
     })?;
 
-    let value: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| PipelineError::Json {
+    let value: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| PipelineError::Json {
             file_path: path.to_path_buf(),
             source: e,
         })?;
 
-    let name = value.get("name")
+    let name = value
+        .get("name")
         .and_then(|v| v.as_str())
         .ok_or_else(|| PipelineError::MissingName(path.to_path_buf()))?
         .to_string();
 
-    let namespace = value.get("namespace")
+    let namespace = value
+        .get("namespace")
         .and_then(|v| v.as_str())
         .unwrap_or(default_namespace)
         .to_string();
 
     // Parse source (optional — defaults to local).
-    let source = match value.get("source").and_then(|s| s.get("type")).and_then(|t| t.as_str()) {
-        Some("local") => PipelineSource::Local { path: path.to_path_buf() },
-        None | Some("") => PipelineSource::Local { path: path.to_path_buf() },
-        Some(other) => return Err(PipelineError::UnsupportedSource { source_type: other.to_string() }),
+    let source = match value
+        .get("source")
+        .and_then(|s| s.get("type"))
+        .and_then(|t| t.as_str())
+    {
+        Some("local") => PipelineSource::Local {
+            path: path.to_path_buf(),
+        },
+        None | Some("") => PipelineSource::Local {
+            path: path.to_path_buf(),
+        },
+        Some(other) => {
+            return Err(PipelineError::UnsupportedSource {
+                source_type: other.to_string(),
+            })
+        }
     };
 
     // Parse pinned version (optional).
-    let pinned_version = value.get("pinned_version")
+    let pinned_version = value
+        .get("pinned_version")
         .and_then(|v| v.as_str())
         .map(String::from);
 
@@ -318,7 +344,10 @@ mod tests {
     #[test]
     fn context_hierarchy_levels_are_ordered_broadest_first() {
         let ctx = ContextHierarchy::new("team:project:feature");
-        assert_eq!(ctx.levels(), vec!["team", "team:project", "team:project:feature"]);
+        assert_eq!(
+            ctx.levels(),
+            vec!["team", "team:project", "team:project:feature"]
+        );
     }
 
     #[test]
@@ -412,13 +441,11 @@ mod tests {
         );
 
         // Create a second bundle with a different namespace.
-        let bundles = vec![
-            crate::discovery::BundleInfo::new(
-                temp.path().join("bfd").join("team-pipeline"),
-                "team-pipeline".to_string(),
-                "bfd".to_string(),
-            ),
-        ];
+        let bundles = vec![crate::discovery::BundleInfo::new(
+            temp.path().join("bfd").join("team-pipeline"),
+            "team-pipeline".to_string(),
+            "bfd".to_string(),
+        )];
 
         let pipelines = discover_pipelines(&bundles);
         assert_eq!(pipelines.len(), 1);
@@ -449,7 +476,10 @@ mod tests {
         assert_eq!(pipelines.len(), 1);
 
         // Request a context that doesn't match any pipeline namespace.
-        let config = PipelineConfig { default_namespace: "gt".into(), ..Default::default() };
+        let config = PipelineConfig {
+            default_namespace: "gt".into(),
+            ..Default::default()
+        };
         let ctx = ContextHierarchy::new("unknown");
         let result = resolve_pipeline(&ctx, &pipelines, &config).unwrap();
         assert_eq!(result.name, "build"); // falls back to gt namespace.
@@ -475,7 +505,10 @@ mod tests {
         assert_eq!(pipelines.len(), 1);
 
         // Request a context that doesn't match any namespace and no default.
-        let config = PipelineConfig { default_namespace: "".into(), ..Default::default() };
+        let config = PipelineConfig {
+            default_namespace: "".into(),
+            ..Default::default()
+        };
         let ctx = ContextHierarchy::new("unknown");
         assert!(resolve_pipeline(&ctx, &pipelines, &config).is_err());
     }
@@ -485,7 +518,9 @@ mod tests {
         let p = Pipeline {
             name: "build".to_string(),
             namespace: "bfd".to_string(),
-            source: PipelineSource::Local { path: PathBuf::from("/tmp/pipeline.json") },
+            source: PipelineSource::Local {
+                path: PathBuf::from("/tmp/pipeline.json"),
+            },
             pinned_version: None,
             metadata: HashMap::new(),
         };
@@ -494,7 +529,9 @@ mod tests {
 
     #[test]
     fn pipeline_source_serializes_correctly() {
-        let source = PipelineSource::Local { path: PathBuf::from("/tmp/pipeline.json") };
+        let source = PipelineSource::Local {
+            path: PathBuf::from("/tmp/pipeline.json"),
+        };
         let json = serde_json::to_string(&source).unwrap();
         assert!(json.contains("\"type\":\"local\""));
         assert!(json.contains("pipeline.json"));

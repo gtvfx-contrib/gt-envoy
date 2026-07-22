@@ -86,9 +86,13 @@ loadUserConfig = _native.loadUserConfig
 getCurrentBundleConfig = _native.getCurrentBundleConfig
 getCurrentTeamConfig = _native.getCurrentTeamConfig
 getCurrentPipeline = _native.getCurrentPipeline
+enable_telemetry = _native.enable_telemetry
+disable_telemetry = _native.disable_telemetry
+is_telemetry_enabled = _native.is_telemetry_enabled
 cli_main = _native.cli_main
 proc = _native.proc
 exceptions = _native.exceptions
+telemetry = _native.telemetry
 # New top-level Environment class (dict-like, auto-initializing).
 Environment = _native.Environment
 EnvoyError = exceptions.EnvoyError
@@ -104,6 +108,7 @@ ValidationError = exceptions.ValidationError
 _sys.modules[__name__ + ".proc"] = proc
 _sys.modules[__name__ + ".testing"] = testing
 _sys.modules[__name__ + ".exceptions"] = exceptions
+_sys.modules[__name__ + ".telemetry"] = telemetry
 
 __all__ = [
     "_core_version",
@@ -144,6 +149,9 @@ __all__ = [
     "getCurrentBundleConfig",
     "getCurrentTeamConfig",
     "getCurrentPipeline",
+    "enable_telemetry",
+    "disable_telemetry",
+    "is_telemetry_enabled",
     "cli_main",
     "discoverBundlesAuto",
     "getBundles",
@@ -163,6 +171,7 @@ __all__ = [
     "proc",
     "testing",
     "exceptions",
+    "telemetry",
     "Environment",
     "EnvoyError",
     "WrapperError",

@@ -33,6 +33,8 @@ struct ExecutionOptions<'a> {
 }
 
 pub(crate) fn run(argv: &[String]) -> i32 {
+    init_tracing();
+
     let cli = match args::parse(argv) {
         Ok(cli) => cli,
         Err(error) => {
@@ -42,6 +44,25 @@ pub(crate) fn run(argv: &[String]) -> i32 {
     };
 
     run_cli(cli)
+}
+
+/// Install a default `tracing` subscriber writing to stderr, honoring
+/// `RUST_LOG` (falling back to `warn`) for the internal diagnostic logging
+/// envoy-core emits via the `tracing` crate (e.g. malformed team.json /
+/// pipeline.json warnings).
+///
+/// Uses `try_init` rather than `init` since `run()` can be invoked more than
+/// once per process -- e.g. `envoy.cli_main(...)` from a long-lived Python
+/// process -- and installing a global subscriber twice panics. A failed
+/// second attempt is expected and silently ignored.
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .try_init();
 }
 
 fn run_cli(cli: Cli) -> i32 {
@@ -128,7 +149,8 @@ fn run_cli(cli: Cli) -> i32 {
         return 0;
     };
 
-    run_command(
+    let start = std::time::Instant::now();
+    let exit_code = run_command(
         &registry,
         command_name,
         &cli.args,
@@ -139,7 +161,30 @@ fn run_cli(cli: Cli) -> i32 {
             env_allowlist: env_allowlist.as_deref(),
             env_override: cli.env.as_deref(),
         },
-    )
+    );
+
+    // Best-effort usage tracking: a no-op unless a caller has opted in via
+    // `envoy.enable_telemetry(...)`. Recording this unconditionally (rather
+    // than only when telemetry happens to already be enabled) means any
+    // future in-process caller that enables telemetry before invoking the
+    // CLI dispatch (e.g. via `envoy.cli_main`) gets `command_run` events
+    // without envoy-cli needing to know that decision was made.
+    let mut attributes = std::collections::HashMap::new();
+    attributes.insert(
+        "command".to_string(),
+        envoy_core::telemetry::TelemetryValue::Str(command_name.to_string()),
+    );
+    attributes.insert(
+        "duration_ms".to_string(),
+        envoy_core::telemetry::TelemetryValue::Int(start.elapsed().as_millis() as i64),
+    );
+    attributes.insert(
+        "success".to_string(),
+        envoy_core::telemetry::TelemetryValue::Bool(exit_code == 0),
+    );
+    envoy_core::telemetry::track("command_run", attributes);
+
+    exit_code
 }
 
 fn load_registry_for_cli(
@@ -277,7 +322,10 @@ fn load_registry_for_cli(
         if let Some(pipeline) = resolve_current_pipeline_for_bundles(bundles.as_deref()) {
             debug(
                 verbose,
-                &format!("Resolved pipeline: {}:{}", pipeline.namespace, pipeline.name),
+                &format!(
+                    "Resolved pipeline: {}:{}",
+                    pipeline.namespace, pipeline.name
+                ),
             );
         }
     }
