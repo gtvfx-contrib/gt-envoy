@@ -7,9 +7,12 @@
 //!
 //! All adapters shell out to the user-facing CLI for each backend. This keeps
 //! the integration light and lets envoy degrade cleanly when a backend is not
-//! installed or a workspace is only partially configured. Lore status parsing
-//! follows the public CLI docs and example output and should be checked
-//! against a live `lore` build if its plain-text format changes before 1.0.
+//! installed or a workspace is only partially configured. Lore detection and
+//! status parsing were checked against Lore `0.8.6-nightly` source and docs on
+//! 2026-07-22, including `.lore` workspace markers, `lore status --scan`, and
+//! the current plain-text section layout. A live Windows CLI build could not be
+//! completed in this environment because Lore's `lore-base` native build needs
+//! a newer MSVC C11 atomics setup than the available Visual Studio 2019 tools.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -212,7 +215,13 @@ impl LoreAdapter {
             return Some(Self { root });
         }
 
-        if run_command(start_dir, "lore", &["status", "--revision-only"]).is_ok() {
+        if run_command(
+            start_dir,
+            "lore",
+            &["--no-pager", "status", "--revision-only"],
+        )
+        .is_ok()
+        {
             return Some(Self {
                 root: start_dir.to_path_buf(),
             });
@@ -232,7 +241,7 @@ impl VcsAdapter for LoreAdapter {
     }
 
     fn get_changes(&self) -> Result<Vec<VcsChange>, VcsError> {
-        let output = run_command(&self.root, "lore", &["status"])?;
+        let output = run_command(&self.root, "lore", &["--no-pager", "status", "--scan"])?;
         parse_lore_status_output(&output)
     }
 }
@@ -532,25 +541,46 @@ fn normalize_perforce_status(token: &str) -> Result<String, VcsError> {
     Ok(status.to_string())
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum LoreStatusSection {
+    None,
+    Staged,
+    Conflict,
+    Unstaged,
+    Untracked,
+}
+
 fn parse_lore_status_output(output: &str) -> Result<Vec<VcsChange>, VcsError> {
     let mut changes = Vec::new();
+    let mut current_section = LoreStatusSection::None;
 
     for line in output.lines() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || is_lore_header_line(trimmed) {
+        if trimmed.is_empty() {
             continue;
         }
 
-        let Some((token, path)) = split_token_and_path(trimmed) else {
+        if let Some(section) = lore_status_section_header(trimmed) {
+            current_section = section;
+            continue;
+        }
+
+        if is_lore_header_line(trimmed) {
+            continue;
+        }
+
+        let Some((token, raw_path)) = split_token_and_path(trimmed) else {
             return Err(VcsError::UnparseableOutput {
                 command: "lore status".to_string(),
                 reason: format!("could not parse line: {trimmed}"),
             });
         };
 
+        let path = normalize_lore_path(raw_path, token, current_section);
+
         changes.push(VcsChange {
-            path: path.to_string(),
-            status: normalize_lore_status(token)?,
+            path,
+            status: normalize_lore_status(token, current_section)?,
         });
     }
 
@@ -561,18 +591,54 @@ fn is_lore_header_line(line: &str) -> bool {
     line.starts_with("Repository ")
         || line.starts_with("On branch ")
         || line.starts_with("Remote revision ")
+        || line.starts_with("Remote reachable ")
+        || line.starts_with("Remote branch ")
         || line.starts_with("Local branch ")
-        || line.starts_with("Changes staged for commit:")
-        || line.starts_with("No changes")
+        || line.starts_with("Pending merge, ")
+        || line.starts_with("Repository size: ")
+        || line.starts_with("Tracked changes:")
+        || line == "No tracked changes"
 }
 
-fn normalize_lore_status(token: &str) -> Result<String, VcsError> {
+fn lore_status_section_header(line: &str) -> Option<LoreStatusSection> {
+    match line {
+        "Changes staged for commit:" => Some(LoreStatusSection::Staged),
+        "Changes in conflict:" => Some(LoreStatusSection::Conflict),
+        "Changes not staged for commit:" => Some(LoreStatusSection::Unstaged),
+        "Untracked files:" => Some(LoreStatusSection::Untracked),
+        _ => None,
+    }
+}
+
+fn normalize_lore_path(path: &str, token: &str, section: LoreStatusSection) -> String {
+    let trimmed = if section == LoreStatusSection::Conflict {
+        path.trim_end_matches('!')
+            .trim_end()
+            .trim_end_matches("(M)")
+            .trim_end()
+    } else {
+        path
+    };
+
+    if matches!(token, "V" | "v" | "C" | "c") {
+        return trimmed
+            .rsplit_once(" -> ")
+            .map(|(_, destination)| destination.trim().to_string())
+            .unwrap_or_else(|| trimmed.to_string());
+    }
+
+    trimmed.to_string()
+}
+
+fn normalize_lore_status(token: &str, section: LoreStatusSection) -> Result<String, VcsError> {
     let normalized = token.to_ascii_lowercase();
 
     let status = match normalized.as_str() {
+        "a" if section == LoreStatusSection::Untracked => "untracked",
         "a" | "add" | "added" => "added",
         "m" | "edit" | "modified" | "dirty" => "modified",
         "d" | "delete" | "deleted" => "deleted",
+        "v" | "move" | "moved" => "renamed",
         "r" | "rename" | "renamed" => "renamed",
         "c" | "copy" | "copied" => "copied",
         "?" | "??" => "untracked",
@@ -687,7 +753,9 @@ mod tests {
         let changes = parse_lore_status_output(
             "Repository 3f2a1b4c5d6e7f8a\nOn branch main revision 0 -> 0000000000000000\n\
 Remote revision 0 -> 0000000000000000\nLocal branch in sync with remote\n\
-Changes staged for commit:\nA hello.txt\nM src\\main.rs\nD old.txt\n",
+Changes staged for commit:\nA hello.txt\nV src\\from.rs -> src\\to.rs\n\
+Changes not staged for commit:\nM src\\main.rs\nD old.txt\n\
+Untracked files:\nA notes.txt\nTracked changes: 1 added, 1 modified, 1 deleted, 1 moved\n",
         )
         .expect("lore status output should parse");
 
@@ -699,12 +767,20 @@ Changes staged for commit:\nA hello.txt\nM src\\main.rs\nD old.txt\n",
                     status: "added".to_string(),
                 },
                 VcsChange {
+                    path: "src\\to.rs".to_string(),
+                    status: "renamed".to_string(),
+                },
+                VcsChange {
                     path: "src\\main.rs".to_string(),
                     status: "modified".to_string(),
                 },
                 VcsChange {
                     path: "old.txt".to_string(),
                     status: "deleted".to_string(),
+                },
+                VcsChange {
+                    path: "notes.txt".to_string(),
+                    status: "untracked".to_string(),
                 },
             ]
         );
