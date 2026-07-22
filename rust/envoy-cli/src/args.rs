@@ -97,6 +97,17 @@ pub(crate) struct Cli {
     )]
     pub trace: Option<String>,
 
+    #[arg(
+        long,
+        value_name = "COMMAND",
+        num_args = 0..=1,
+        default_missing_value = "",
+        help = "Show diagnostics: discovered bundles/commands, team/pipeline \
+context, package cache status, VCS detection, and bundle-root reachability. \
+Pass a COMMAND to also include its full environment resolution trace."
+    )]
+    pub diagnose: Option<String>,
+
     #[arg(help = "Command to execute")]
     pub command: Option<String>,
 
@@ -244,7 +255,7 @@ fn option_value_expectation(token: &str) -> Option<ValueExpectation> {
     match token {
         "--info" | "--which" | "--commands-file" | "--bundles-config" | "--set-config"
         | "--env" | "-e" | "--trace" => Some(ValueExpectation::Required),
-        "--get-config" => Some(ValueExpectation::Optional),
+        "--get-config" | "--diagnose" => Some(ValueExpectation::Optional),
         _ => None,
     }
 }

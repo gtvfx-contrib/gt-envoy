@@ -12,7 +12,7 @@ use envoy_core::environment::{EnvironmentManager, TraceEvent};
 use envoy_core::error::EnvoyError;
 use envoy_core::executor::ProcessExecutor;
 use envoy_core::models::WrapperConfig;
-use envoy_core::package_cache::open_default_package_cache;
+use envoy_core::package_cache::{open_default_package_cache, resolve_package_cache_dir};
 use envoy_core::runtime::{
     collect_env_files, is_raw_path, prepare_env, resolve_cached_bundles,
     resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
@@ -111,6 +111,16 @@ fn run_cli(cli: Cli) -> i32 {
         let mut sorted = values.clone();
         sorted.sort();
         debug(verbose, &format!("Allowlist: {sorted:?}"));
+    }
+
+    if let Some(command_name) = cli.diagnose.as_deref() {
+        return run_diagnose(
+            &registry,
+            bundles.as_deref(),
+            Some(command_name).filter(|name| !name.is_empty()),
+            cli.inherit_env,
+            env_allowlist.as_deref(),
+        );
     }
 
     if let Some(command_name) = cli.which.as_deref() {
@@ -353,6 +363,199 @@ fn resolve_config_value(raw: &str, verbose: bool) -> Result<PathBuf, i32> {
 
 fn raw_path_without_env_override(command: Option<&str>, env_override: Option<&str>) -> bool {
     command.is_some_and(is_raw_path) && env_override.is_none()
+}
+
+/// Implements `envoy --diagnose [COMMAND]`.
+///
+/// Surfaces discovered bundles/commands, resolved team/pipeline context,
+/// package cache status, VCS detection, telemetry status, and bundle-root
+/// reachability -- everything the stretch-goals plan's Phase 5.3 "Diagnostic
+/// Tools" design called for in one place, wrapping the underlying
+/// `envoy_core` pieces (`resolve_team_config_for_bundles`,
+/// `resolve_current_pipeline_for_bundles`, `envoy_core::vcs::detect`,
+/// `open_default_package_cache`, `EnvironmentManager::diagnose_environment`)
+/// that are each individually reachable via other flags/the Python API but
+/// were not previously surfaced together in one CLI report.
+///
+/// When `command_name` is given, also resolves and prints that command's
+/// full environment (all variables, not just one), complementing the
+/// existing single-variable `--trace VAR COMMAND` flag.
+fn run_diagnose(
+    registry: &CommandRegistry,
+    bundles: Option<&[BundleInfo]>,
+    command_name: Option<&str>,
+    inherit_env: bool,
+    env_allowlist: Option<&[String]>,
+) -> i32 {
+    let separator = "=".repeat(64);
+    println!("{separator}");
+    println!("envoy diagnose");
+    println!("{separator}");
+    println!();
+
+    match bundles {
+        Some(bundles) if !bundles.is_empty() => {
+            println!("Bundles discovered: {}", bundles.len());
+            for bundle in bundles {
+                println!("  - {:<24} {}", bundle.bndlid(), bundle.root.display());
+            }
+        }
+        _ => println!(
+            "Bundles discovered: 0 (legacy single-.envoy-directory mode, or none found)"
+        ),
+    }
+    println!();
+
+    let mut commands = registry.list_commands();
+    commands.sort();
+    println!("Commands registered: {}", commands.len());
+    if !commands.is_empty() {
+        println!("  {}", commands.join(", "));
+    }
+    println!();
+
+    match resolve_team_config_for_bundles(bundles) {
+        Some(team) => {
+            println!("Team config: {}", team.name);
+            if let Some(root) = team.prod_packages_root.as_ref() {
+                println!("  prod_packages_root:  {}", root.display());
+            }
+            if let Some(root) = team.prod_pipelines_root.as_ref() {
+                println!("  prod_pipelines_root: {}", root.display());
+            }
+        }
+        None => println!("Team config: none discovered (.envoy/team.json not found)"),
+    }
+    println!();
+
+    match resolve_current_pipeline_for_bundles(bundles) {
+        Some(pipeline) => println!(
+            "Current pipeline: {}:{}",
+            pipeline.namespace, pipeline.name
+        ),
+        None => println!(
+            "Current pipeline: none discovered (.envoy/pipeline.json not found, or no match)"
+        ),
+    }
+    println!();
+
+    match resolve_package_cache_dir(true) {
+        Some(dir) => {
+            let reachable = open_default_package_cache(true).is_some();
+            let note = if reachable {
+                "reachable"
+            } else {
+                "configured but could not be opened"
+            };
+            println!("Package cache: {} ({note})", dir.display());
+        }
+        None => println!("Package cache: disabled (ENVOY_DISABLE_PACKAGE_CACHE is set)"),
+    }
+    println!();
+
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    match envoy_core::vcs::detect(&cwd) {
+        Some(adapter) => {
+            println!(
+                "VCS detected: {} at {}",
+                adapter.kind().as_str(),
+                adapter.root().display()
+            );
+            match adapter.status() {
+                Ok(status) => println!("  {} pending change(s)", status.changes.len()),
+                Err(error) => println!("  (status unavailable: {error})"),
+            }
+        }
+        None => println!(
+            "VCS detected: none (checked Git, Perforce, Lore from {})",
+            cwd.display()
+        ),
+    }
+    println!();
+
+    println!(
+        "Telemetry: {}",
+        if envoy_core::telemetry::is_enabled() {
+            "enabled"
+        } else {
+            "disabled (default; call envoy.enable_telemetry(...) to opt in)"
+        }
+    );
+    println!();
+
+    if let Some(bundles) = bundles.filter(|values| !values.is_empty()) {
+        println!("Bundle root reachability:");
+        for bundle in bundles {
+            let root = &bundle.root;
+            let is_network = root.to_string_lossy().starts_with("\\\\");
+            let kind = if is_network { "network (UNC)" } else { "local" };
+            let status = if root.exists() { "reachable" } else { "UNREACHABLE" };
+            println!(
+                "  - {:<24} [{kind:<13}] {status}: {}",
+                bundle.bndlid(),
+                root.display()
+            );
+        }
+        println!();
+    }
+
+    let Some(command_name) = command_name else {
+        println!("(Pass a COMMAND, e.g. --diagnose {}, to also see its full \
+resolved environment.)", commands.first().map(String::as_str).unwrap_or("mycommand"));
+        return 0;
+    };
+
+    println!("{}", "-".repeat(64));
+    println!("Environment resolution for '{command_name}':");
+    println!();
+
+    if registry.get(command_name).is_none() {
+        eprintln!("Error: Command '{command_name}' not found");
+        eprintln!("Run 'envoy --list' to see available commands");
+        return 1;
+    }
+
+    let env_files = match collect_env_files(command_name, registry, bundles) {
+        Ok(env_files) => env_files,
+        Err(error) => {
+            eprintln!(
+                "Error resolving environment for '{command_name}': {}",
+                display_envoy_error(&error)
+            );
+            return 1;
+        }
+    };
+
+    println!("Env files ({}):", env_files.len());
+    for (index, env_file) in env_files.iter().enumerate() {
+        println!("  [{}] {}", index + 1, env_file.display());
+    }
+    println!();
+
+    let allowlist_set = env_allowlist.map(|values| values.iter().cloned().collect::<HashSet<_>>());
+    let env_manager = EnvironmentManager::new(inherit_env, allowlist_set);
+    match env_manager.diagnose_environment(&env_files, None) {
+        Ok((final_env, _trace_events)) => {
+            println!("Resolved variables: {}", final_env.len());
+            let mut names: Vec<&String> = final_env.keys().collect();
+            names.sort();
+            for name in names {
+                let value = final_env.get(name).map(String::as_str).unwrap_or_default();
+                println!("  {name} = {value}");
+            }
+            println!();
+            println!(
+                "(Use --trace VAR {command_name} for a step-by-step resolution trace of a \
+single variable.)"
+            );
+        }
+        Err(error) => {
+            eprintln!("Error: {}", display_envoy_error(&error));
+            return 1;
+        }
+    }
+
+    0
 }
 
 fn list_commands(registry: &CommandRegistry) -> i32 {

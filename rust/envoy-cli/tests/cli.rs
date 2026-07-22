@@ -287,3 +287,132 @@ fn verbose_run_never_substitutes_a_checkout_bundle_for_a_cache_entry() {
 stdout was:\n{stdout}"
     );
 }
+
+#[test]
+fn diagnose_without_command_summarizes_bundles_team_and_pipeline() {
+    let scratch = ScratchDir::new("envoy_diagnose_summary");
+
+    let bundle_root = scratch.path().join("gt").join("maya");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(bundle_root.join(".git")).expect(".git dir should be created");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"known": {"environment": []}}"#,
+    )
+    .expect("commands.json should be written");
+    fs::write(envoy_dir.join("team.json"), r#"{"name": "bfd"}"#)
+        .expect("team.json should be written");
+    fs::write(
+        envoy_dir.join("pipeline.json"),
+        r#"{"name": "build", "namespace": "bfd"}"#,
+    )
+    .expect("pipeline.json should be written");
+
+    let cache_root = scratch.path().join("package_cache");
+
+    let assert = base_command()
+        .arg("--diagnose")
+        .env("ENVOY_BNDL_ROOTS", scratch.path())
+        .env("ENVOY_PACKAGE_CACHE", &cache_root)
+        .assert()
+        .success();
+    let stdout = stdout_text(&assert);
+
+    assert!(stdout.contains("envoy diagnose"), "stdout was:\n{stdout}");
+    assert!(
+        stdout.contains("Bundles discovered: 1"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(stdout.contains("gt:maya"), "stdout was:\n{stdout}");
+    assert!(
+        stdout.contains("Commands registered: 1"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(stdout.contains("Team config: bfd"), "stdout was:\n{stdout}");
+    assert!(
+        stdout.contains("Current pipeline: bfd:build"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Package cache:"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(stdout.contains("VCS detected:"), "stdout was:\n{stdout}");
+    assert!(
+        stdout.contains("Telemetry: disabled"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Bundle root reachability:"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Pass a COMMAND"),
+        "should prompt for a command to see its resolved environment, stdout was:\n{stdout}"
+    );
+}
+
+#[test]
+fn diagnose_with_command_shows_resolved_environment() {
+    let scratch = ScratchDir::new("envoy_diagnose_command");
+
+    let bundle_root = scratch.path().join("gt").join("maya");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(bundle_root.join(".git")).expect(".git dir should be created");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"known": {"environment": ["known_env.json"]}}"#,
+    )
+    .expect("commands.json should be written");
+    fs::write(
+        envoy_dir.join("known_env.json"),
+        r#"{"DIAGNOSE_SMOKE_TEST": "hello"}"#,
+    )
+    .expect("known_env.json should be written");
+
+    let assert = base_command()
+        .args(["--diagnose", "known"])
+        .env("ENVOY_BNDL_ROOTS", scratch.path())
+        .assert()
+        .success();
+    let stdout = stdout_text(&assert);
+
+    assert!(
+        stdout.contains("Environment resolution for 'known'"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("DIAGNOSE_SMOKE_TEST = hello"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Use --trace VAR known"),
+        "stdout was:\n{stdout}"
+    );
+}
+
+#[test]
+fn diagnose_with_unknown_command_fails_with_clear_error() {
+    let scratch = ScratchDir::new("envoy_diagnose_unknown");
+    let envoy_dir = scratch.path().join(".envoy");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"known": {"environment": []}}"#,
+    )
+    .expect("commands.json should be written");
+
+    let assert = base_command()
+        .args(["--diagnose", "does_not_exist"])
+        .current_dir(scratch.path())
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+
+    assert!(
+        stderr.contains("Command 'does_not_exist' not found"),
+        "stderr was:\n{stderr}"
+    );
+}
