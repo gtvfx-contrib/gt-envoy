@@ -616,6 +616,11 @@ mod tests {
 
             let env_values = HashMap::from([(String::from("HOME"), String::from("C:/Users/Test"))]);
             let expanded = command.expand_alias(Some(env_values));
+            let expected_home_tools = if cfg!(windows) {
+                "C:\\Users\\Test\\tools"
+            } else {
+                "C:/Users/Test/tools"
+            };
 
             assert_eq!(
                 expanded,
@@ -626,7 +631,7 @@ mod tests {
                         .display()
                         .to_string(),
                     envoy_env_dir.join("python_env.json").display().to_string(),
-                    String::from("C:\\Users\\Test\\tools"),
+                    String::from(expected_home_tools),
                 ]
             );
         });

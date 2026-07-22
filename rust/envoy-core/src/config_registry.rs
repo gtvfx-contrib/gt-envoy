@@ -446,8 +446,11 @@ mod tests {
         let missing_root = temp.path().join("missing");
         fs::create_dir_all(&existing_root).expect("failed to create existing root");
 
+        // roots_from_str splits on ';' on Windows and ':' on Unix (matching
+        // std::env::join_paths / the ENVOY_CFG_ROOTS_VAR convention).
+        let separator = if cfg!(windows) { ';' } else { ':' };
         let roots = roots_from_str(&format!(
-            "  {}  ;  {}  ;  ",
+            "  {}  {separator}  {}  {separator}  ",
             existing_root.display(),
             missing_root.display()
         ));
