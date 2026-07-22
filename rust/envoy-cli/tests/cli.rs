@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use assert_cmd::Command;
+use envoy_core::package_cache::PackageCache;
 
 fn stdout_text(assert: &assert_cmd::assert::Assert) -> String {
     String::from_utf8_lossy(&assert.get_output().stdout).into_owned()
@@ -154,5 +155,135 @@ fn unregistered_command_name_returns_not_found() {
     assert!(
         stderr.contains("Error: Command 'missing_command' not found"),
         "stderr was:\n{stderr}"
+    );
+}
+
+/// End-to-end coverage for the Phase 1-3 wiring gaps closed in this pass:
+/// a *published* bundle whose `.envoy/team.json` / `.envoy/pipeline.json` /
+/// `.envoy/commands.json` come from a warm package-cache entry, all
+/// resolved automatically through the real `envoy` binary -- not just via
+/// direct, isolated unit calls to each module.
+#[test]
+fn verbose_run_resolves_team_config_pipeline_and_warm_package_cache_together() {
+    let scratch = ScratchDir::new("envoy_full_wiring");
+
+    // A published bundle (has a `.bundle` marker) discovered via
+    // ENVOY_BNDL_ROOTS. Its own commands.json defines a command that should
+    // NOT end up loaded, because a cached snapshot takes precedence.
+    let bundle_root = scratch.path().join("gt").join("maya");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(bundle_root.join(".bundle"), r#"{"version": "2.0.0"}"#)
+        .expect(".bundle marker should be written");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"from_checkout_root": {"environment": []}}"#,
+    )
+    .expect("original commands.json should be written");
+
+    // The cached snapshot: a *different* commands.json (so we can prove it
+    // -- not the original bundle root -- is what actually gets loaded), plus
+    // the team.json / pipeline.json that should be auto-resolved.
+    let cached_source = scratch.path().join("cached_source");
+    let cached_envoy_dir = cached_source.join(".envoy");
+    fs::create_dir_all(&cached_envoy_dir).expect("cached .envoy dir should be created");
+    fs::write(
+        cached_envoy_dir.join("commands.json"),
+        r#"{"known_from_cache": {"environment": []}}"#,
+    )
+    .expect("cached commands.json should be written");
+    fs::write(cached_envoy_dir.join("team.json"), r#"{"name": "bfd"}"#)
+        .expect("cached team.json should be written");
+    fs::write(
+        cached_envoy_dir.join("pipeline.json"),
+        r#"{"name": "build", "namespace": "bfd"}"#,
+    )
+    .expect("cached pipeline.json should be written");
+
+    let cache_root = scratch.path().join("package_cache");
+    let mut cache = PackageCache::new(&cache_root).expect("package cache should open");
+    cache
+        .store("gt:maya", "1.0.0", &cached_source)
+        .expect("storing the cached snapshot should succeed");
+
+    let assert = base_command()
+        .args(["--verbose", "--list"])
+        .env("ENVOY_BNDL_ROOTS", scratch.path())
+        .env("ENVOY_PACKAGE_CACHE", &cache_root)
+        .assert()
+        .success();
+
+    let stdout = stdout_text(&assert);
+    let stderr = stderr_text(&assert);
+
+    assert!(
+        stdout.contains("known_from_cache"),
+        "expected the warm cache's commands to be loaded, stdout was:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("from_checkout_root"),
+        "the original bundle's commands should be shadowed once the cache is \
+warm, stdout was:\n{stdout}"
+    );
+    assert!(
+        stderr.contains("debug: Resolved team config: bfd"),
+        "stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("debug: Resolved pipeline: bfd:build"),
+        "stderr was:\n{stderr}"
+    );
+}
+
+/// A developer's own checkout must never be silently swapped for a cached
+/// snapshot, even when a package-cache entry exists under the same bndlid.
+#[test]
+fn verbose_run_never_substitutes_a_checkout_bundle_for_a_cache_entry() {
+    let scratch = ScratchDir::new("envoy_checkout_not_cached");
+
+    // A checkout bundle: `.git` marker only, no `.bundle` marker.
+    let bundle_root = scratch.path().join("gt").join("maya");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(bundle_root.join(".git")).expect(".git dir should be created");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"from_checkout_root": {"environment": []}}"#,
+    )
+    .expect("original commands.json should be written");
+
+    // A cache entry under the same bndlid that must be ignored.
+    let cached_source = scratch.path().join("cached_source");
+    let cached_envoy_dir = cached_source.join(".envoy");
+    fs::create_dir_all(&cached_envoy_dir).expect("cached .envoy dir should be created");
+    fs::write(
+        cached_envoy_dir.join("commands.json"),
+        r#"{"known_from_cache": {"environment": []}}"#,
+    )
+    .expect("cached commands.json should be written");
+
+    let cache_root = scratch.path().join("package_cache");
+    let mut cache = PackageCache::new(&cache_root).expect("package cache should open");
+    cache
+        .store("gt:maya", "1.0.0", &cached_source)
+        .expect("storing the cache entry should succeed");
+
+    let assert = base_command()
+        .args(["--verbose", "--list"])
+        .env("ENVOY_BNDL_ROOTS", scratch.path())
+        .env("ENVOY_PACKAGE_CACHE", &cache_root)
+        .assert()
+        .success();
+
+    let stdout = stdout_text(&assert);
+
+    assert!(
+        stdout.contains("from_checkout_root"),
+        "the developer's own checkout should still be loaded, stdout was:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("known_from_cache"),
+        "a checkout bundle must never be substituted for a cached snapshot, \
+stdout was:\n{stdout}"
     );
 }

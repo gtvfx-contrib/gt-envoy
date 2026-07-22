@@ -270,6 +270,14 @@ impl PackageCache {
             content_hash: content_hash.clone(),
         });
 
+        // Persist immediately so other processes (or a later invocation of
+        // this same process) that open a fresh `PackageCache` at this root
+        // can see the new entry. Without this, `store()` only ever updated
+        // the in-memory index, so anything stored in one process was
+        // invisible to every other process reading `.index.json` from disk
+        // -- silently defeating the entire point of a persistent cache.
+        self.persist_index()?;
+
         Ok(CachedPackage {
             content_hash,
             path: storage_dir,
@@ -324,6 +332,8 @@ impl PackageCache {
                     source,
                 })?;
             }
+            // Persist immediately -- see the matching comment in `store()`.
+            self.persist_index()?;
             Ok(true)
         } else {
             Ok(false)
@@ -715,6 +725,56 @@ mod tests {
         assert_eq!(fs::read_to_string(retrieved.path.join("data.txt")).unwrap(), "hello world");
 
         // Cleanup.
+        let _ = fs::remove_dir_all(&cache_root);
+    }
+
+    #[test]
+    fn store_persists_the_index_across_a_fresh_cache_instance() {
+        // Regression test: `store()` previously only updated the in-memory
+        // index and never wrote `.index.json`, so a *different* PackageCache
+        // instance pointed at the same root (e.g. a separate process, or a
+        // separate invocation of `PackageCache::new` in the same process)
+        // could never see anything stored by another instance.
+        let cache_root = temp_cache_dir();
+
+        {
+            let mut cache = PackageCache::new(&cache_root).expect("should create cache");
+            let pkg_dir = cache_root.join("source_pkg");
+            create_sample_package(&pkg_dir, "data.txt", "hello world");
+            cache.store("test:pkg", "1.0.0", &pkg_dir).unwrap();
+        }
+
+        // Re-open a brand new instance, simulating a separate process.
+        let reopened = PackageCache::new(&cache_root).expect("should reopen cache");
+        let retrieved = reopened
+            .get("test:pkg", "1.0.0")
+            .expect("entry stored by the previous instance should be visible");
+        assert_eq!(
+            fs::read_to_string(retrieved.path.join("data.txt")).unwrap(),
+            "hello world"
+        );
+
+        let _ = fs::remove_dir_all(&cache_root);
+    }
+
+    #[test]
+    fn remove_persists_the_index_across_a_fresh_cache_instance() {
+        let cache_root = temp_cache_dir();
+
+        {
+            let mut cache = PackageCache::new(&cache_root).expect("should create cache");
+            let pkg_dir = cache_root.join("source_pkg");
+            create_sample_package(&pkg_dir, "data.txt", "hello world");
+            cache.store("test:pkg", "1.0.0", &pkg_dir).unwrap();
+            assert!(cache.remove("test:pkg", "1.0.0").unwrap());
+        }
+
+        let reopened = PackageCache::new(&cache_root).expect("should reopen cache");
+        assert!(matches!(
+            reopened.get("test:pkg", "1.0.0"),
+            Err(PackageCacheError::NotFound { .. })
+        ));
+
         let _ = fs::remove_dir_all(&cache_root);
     }
 

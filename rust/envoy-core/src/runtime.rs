@@ -21,7 +21,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use crate::commands::{find_commands_file, CommandDefinition, CommandRegistry};
-use crate::discovery::{discover_bundles_auto, discover_bundles_from_roots, BundleInfo};
+use crate::discovery::{discover_bundles_auto, discover_bundles_from_roots, is_published_bundle, BundleInfo};
 use crate::environment::EnvironmentManager;
 use crate::error::{EnvoyError, Result};
 use crate::package_cache::PackageCache;
@@ -143,9 +143,18 @@ pub fn load_registry(
 
 /// Resolve cached versions for discovered bundles.
 ///
-/// For each bundle, attempts to find a matching entry in the package cache using
-/// the bundle's bndlid as the package_id. If found, returns a new BundleInfo with
-/// the cached path; otherwise returns the original BundleInfo unchanged.
+/// For each **published/production** bundle, attempts to find a matching
+/// entry in the package cache using the bundle's bndlid as the package_id.
+/// If found, returns a new BundleInfo with the cached path; otherwise returns
+/// the original BundleInfo unchanged.
+///
+/// Checkout (dev) bundles -- i.e. any bundle root without a `.bundle` marker
+/// file, per [`is_published_bundle`] -- are always returned unchanged and
+/// never consulted against the cache. Package caching exists to speed up
+/// *production* package resolution (per its own design intent); silently
+/// swapping a developer's own working checkout for a stale cached snapshot
+/// just because its `namespace:name` happens to match a cached entry would
+/// be actively harmful, not a performance optimization.
 ///
 /// Public so callers with their own bundle-discovery path (e.g. `envoy-cli`'s
 /// `load_registry_for_cli`, which does not go through [`load_registry`]) can
@@ -170,6 +179,11 @@ pub fn resolve_cached_bundles(
     bundles
         .into_iter()
         .map(|bundle| {
+            // Never substitute a developer's own checkout for a cached copy.
+            if !is_published_bundle(&bundle.root) {
+                return bundle;
+            }
+
             let bndlid = bundle.bndlid();
             match cache.resolve(&bndlid, &wildcard_spec) {
                 Ok(Some(cached)) => {
@@ -427,7 +441,8 @@ mod tests {
 
     use super::{
         collect_env_files, is_raw_path, load_registry, prepare_env,
-        resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
+        resolve_cached_bundles, resolve_current_pipeline_for_bundles,
+        resolve_team_config_for_bundles,
     };
     use crate::commands::CommandRegistry;
     use crate::discovery::{BundleInfo, BUNDLE_ENV_DIR};
@@ -925,5 +940,59 @@ mod tests {
             assert_eq!(pipeline.name, "build");
             assert_eq!(pipeline.namespace, "bfd");
         });
+    }
+
+    #[test]
+    fn resolve_cached_bundles_never_substitutes_checkout_bundles() {
+        use crate::package_cache::PackageCache;
+
+        let temp_dir = tempdir().expect("tempdir should be created");
+        let checkout = bundle_with_file(temp_dir.path(), "gt", "maya", "global_env.json", "{}");
+
+        let cache_root = temp_dir.path().join("cache");
+        let mut cache = PackageCache::new(&cache_root).expect("cache should open");
+        let source_dir = temp_dir.path().join("cached_source");
+        fs::create_dir_all(&source_dir).expect("cached source dir should be created");
+        fs::write(source_dir.join("marker.txt"), "cached").expect("marker file should write");
+        cache
+            .store(&checkout.bndlid(), "1.0.0", &source_dir)
+            .expect("store should succeed");
+
+        let resolved = resolve_cached_bundles(vec![checkout.clone()], Some(&cache));
+
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(
+            resolved[0].root, checkout.root,
+            "a checkout (dev) bundle must never be swapped for a cached copy, \
+even when a matching cache entry exists"
+        );
+    }
+
+    #[test]
+    fn resolve_cached_bundles_substitutes_published_bundles() {
+        use crate::package_cache::PackageCache;
+
+        let temp_dir = tempdir().expect("tempdir should be created");
+        let published = bundle_with_file(temp_dir.path(), "gt", "maya", "global_env.json", "{}");
+        fs::write(published.root.join(".bundle"), r#"{"version": "1.0.0"}"#)
+            .expect(".bundle marker should write");
+
+        let cache_root = temp_dir.path().join("cache");
+        let mut cache = PackageCache::new(&cache_root).expect("cache should open");
+        let source_dir = temp_dir.path().join("cached_source");
+        fs::create_dir_all(&source_dir).expect("cached source dir should be created");
+        fs::write(source_dir.join("marker.txt"), "cached").expect("marker file should write");
+        cache
+            .store(&published.bndlid(), "1.0.0", &source_dir)
+            .expect("store should succeed");
+
+        let resolved = resolve_cached_bundles(vec![published.clone()], Some(&cache));
+
+        assert_eq!(resolved.len(), 1);
+        assert_ne!(
+            resolved[0].root, published.root,
+            "a published/production bundle with a matching cache entry should \
+be substituted with the cached path"
+        );
     }
 }
