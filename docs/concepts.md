@@ -104,3 +104,38 @@ Environment files are JSON files that define variable assignments. They use **op
 ```
 
 See [Environment Files](env-files.md) for the full reference.
+
+## Team Configuration
+
+A bundle may define `.envoy/team.json` with team-scoped settings — a production packages/pipelines root, and an optional per-user/host config file path:
+
+```json
+{
+    "name": "bfd",
+    "prodPackagesRoot": "\\\\server\\packages",
+    "prodPipelinesRoot": "\\\\server\\pipelines"
+}
+```
+
+Envoy discovers and resolves the first `team.json` found across discovered bundles automatically — see it with `envoy --diagnose`, or from Python via `envoy.getCurrentTeamConfig()`.
+
+## Pipelines
+
+A bundle may define `.envoy/pipeline.json` to participate in context-aware pipeline resolution — a colon-separated context (e.g. via the `ENVOY_PIPELINE_CONTEXT` environment variable) resolves to the most specific matching pipeline, falling back to broader contexts and finally a default namespace:
+
+```json
+{
+    "name": "build",
+    "namespace": "bfd"
+}
+```
+
+See it with `envoy --diagnose`, or from Python via `envoy.getCurrentPipeline()`.
+
+## Package Cache
+
+Envoy maintains a local, content-addressed cache for **published/production** bundles (never for your own checkout — a bundle with a `.git` directory is never substituted for a cached copy). The cache location defaults to a platform-appropriate directory and can be overridden via the `package_cache_dir` user-config setting or the `ENVOY_PACKAGE_CACHE` environment variable. See `envoy --diagnose` for its current status.
+
+## VCS Integration
+
+`envoy.Vcs.detect()` (Python) or `envoy --diagnose` (CLI) auto-detects the current working copy's version control backend — Git, Perforce, or [Lore](https://github.com/EpicGames/lore) — and reports pending changes through a single, normalized interface, regardless of which backend is in use. Set `ENVOY_VCS` to force a specific backend.

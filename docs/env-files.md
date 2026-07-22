@@ -2,6 +2,20 @@
 
 Environment files are JSON files placed in a bundle's `.envoy/` directory. They are listed in `commands.json` under the `environment` key and loaded in order when a command runs.
 
+## Comments
+
+Env files (and other `.envoy/*.json` config files: `commands.json`, `team.json`, `pipeline.json`, bundle configs) tolerate `//` and `/* */` C-style comments and `#` line comments. This is a superset of plain JSON, so existing files without comments continue to work unchanged:
+
+```json
+{
+    // Loaded before every command in this bundle
+    "APP_ROOT": "${__BUNDLE__}",
+    "LOG_LEVEL": "DEBUG" /* verbose during development */,
+    # PYTHONPATH additions for shared libraries
+    "+=PYTHONPATH": "${__BUNDLE__}/vendor"
+}
+```
+
 ## Operators
 
 Every key may carry an optional operator prefix:
