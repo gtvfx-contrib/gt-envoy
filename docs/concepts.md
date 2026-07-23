@@ -136,6 +136,8 @@ See it with `envoy --diagnose`, or from Python via `envoy.getCurrentPipeline()`.
 
 Envoy maintains a local, content-addressed cache for **published/production** bundles (never for your own checkout — a bundle with a `.git` directory is never substituted for a cached copy). The cache location defaults to a platform-appropriate directory and can be overridden via the `package_cache_dir` user-config setting or the `ENVOY_PACKAGE_CACHE` environment variable. See `envoy --diagnose` for its current status.
 
+On a cache miss for a published bundle, envoy tries to fill it automatically from the active team's `prodPackagesRoot` (see [Team Configuration](#team-configuration) above), expected to mirror the `<prod_packages_root>\namespace\name\version\` layout. The fetched package is stored in the cache for subsequent runs. If no team config is resolved, `prodPackagesRoot` isn't set, or the expected package directory is missing/invalid, the fetch is skipped and envoy falls back to the bundle's originally discovered path — a fetch failure is never a hard error.
+
 ## VCS Integration
 
 `envoy.Vcs.detect()` (Python) or `envoy --diagnose` (CLI) auto-detects the current working copy's version control backend — Git, Perforce, or [Lore](https://github.com/EpicGames/lore) — and reports pending changes through a single, normalized interface, regardless of which backend is in use. Set `ENVOY_VCS` to force a specific backend.

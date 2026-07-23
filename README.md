@@ -11,7 +11,7 @@
 - **Auto-Discovery** — Automatic, parallelized bundle detection via `ENVOY_BNDL_ROOTS`, with an on-disk discovery cache for fast repeat invocations
 - **Path Normalization** — Automatic OS-native path handling
 - **Null-Safe** — Undefined variables warn and skip rather than propagate empty values
-- **Package Caching** — Local, content-addressed caching for production packages, resolved automatically alongside bundle discovery
+- **Package Caching** — Local, content-addressed caching for production packages, resolved automatically alongside bundle discovery; on a cache miss, envoy fetches the package from the team's configured production package root and populates the cache automatically
 - **Team & Pipeline Context** — Automatic `.envoy/team.json` and `.envoy/pipeline.json` resolution for team-scoped settings and context-aware pipelines
 - **VCS Integration** — Auto-detects Git, Perforce, or [Lore](https://github.com/EpicGames/lore) working copies for status/change queries
 - **Opt-In Telemetry** — Disabled by default; when enabled, exports usage events via OpenTelemetry/OTLP to any compatible collector
