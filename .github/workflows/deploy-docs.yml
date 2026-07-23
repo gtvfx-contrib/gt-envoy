@@ -26,10 +26,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up Python 3.14
+      - name: Set up Python 3.11.9
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: '3.11.9'
 
       - name: Install stable Rust toolchain
         # Needed because `pip install .` below compiles the maturin-backed
@@ -104,10 +104,10 @@ jobs:
         working-directory: rust
         run: cargo doc --workspace --exclude envoy-py --no-deps
 
-      - name: Set up Python 3.14
+      - name: Set up Python 3.11.9
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: '3.11.9'
 
       - name: Build rustdoc for envoy-py
         # Separate step: envoy-py links against a Python interpreter (pyo3),
