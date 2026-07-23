@@ -97,8 +97,18 @@ jobs:
         run: cargo clippy -p envoy-py --all-targets -- -D warnings
 
       - name: Run cargo test
+        # cc (the linker driver) needs an extra -L search path for
+        # libpythonX.Y.so: this self-hosted runner's actions/setup-python
+        # unpacks Python under its own tool-cache directory (exported as
+        # $pythonLocation by the "Set up Python" step above), but the
+        # Python build's own sysconfig LIBDIR is frozen at
+        # /opt/hostedtoolcache/... (the path used on GitHub-hosted
+        # runners), which doesn't exist here -- so pyo3-build-config's
+        # -L flag points nowhere and linking envoy-py's test binary
+        # against libpython fails. LIBRARY_PATH is read directly by cc/ld
+        # as an additional search directory, independent of that guess.
         working-directory: rust
-        run: cargo test -p envoy-py --lib
+        run: LIBRARY_PATH="$pythonLocation/lib" cargo test -p envoy-py --lib
 
       - name: Build wheel with maturin
         run: |
