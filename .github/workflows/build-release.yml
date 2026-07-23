@@ -24,6 +24,29 @@ jobs:
         with:
           python-version: '3.11.9'
 
+      - name: Ensure Git Bash is on PATH
+        # dtolnay/rust-toolchain's composite steps declare `shell: bash`.
+        # GitHub-hosted Windows runners ship Git for Windows with its `bin`
+        # dir already on PATH, so `bash` resolves for free. This self-hosted
+        # Windows runner has Git for Windows installed (git.exe is used for
+        # checkout above) but only `Git\cmd` is on PATH, not `Git\bin`/
+        # `Git\usr\bin` where bash.exe and its POSIX utils live, so `bash`
+        # otherwise fails with "command not found".
+        shell: pwsh
+        run: |
+          $gitBashPaths = @(
+            'C:\Program Files\Git\bin',
+            'C:\Program Files\Git\usr\bin'
+          ) | Where-Object { Test-Path $_ }
+
+          if (-not $gitBashPaths) {
+            throw "Git for Windows (bash.exe) not found on this runner; install it from https://gitforwindows.org/."
+          }
+
+          foreach ($path in $gitBashPaths) {
+            Add-Content -Path $env:GITHUB_PATH -Value $path
+          }
+
       - name: Install stable Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
