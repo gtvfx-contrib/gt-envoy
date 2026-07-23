@@ -115,7 +115,7 @@ Or as a bare array:
 
 ```powershell
 en --bundles-config R:/studio/bundles.json --list
-en -bc R:/studio/bundles.json python_dev script.py
+en -bc R:/studio/bundles.json python script.py
 ```
 
 ### Environment variables in config paths
@@ -174,7 +174,7 @@ sequenceDiagram
 When two bundles define the same command name, the **last loaded bundle wins**:
 
 ```
-WARNING - Command 'python_dev' from gt:bundle-b overrides existing command from gt:bundle-a
+WARNING - Command 'python' from gt:bundle-b overrides existing command from gt:bundle-a
 ```
 
 Use `--verbose` to surface these warnings and adjust bundle order in your config or `ENVOY_BNDL_ROOTS` to control priority.

@@ -50,8 +50,8 @@ This prevents accidental dependency on developer machine state and makes environ
 Pass `--inherit-env` (or `-i`) to inherit the full system environment, with bundle env files layered on top:
 
 ```powershell
-en --inherit-env python_dev script.py
-en -i python_dev script.py
+en --inherit-env python script.py
+en -i python script.py
 ```
 
 Use this when a command needs tools from your system `PATH` that are not yet defined in a bundle env file, or when debugging environment issues.

@@ -184,7 +184,7 @@ In multi-bundle mode, `global_env.json` is collected from **every** discovered b
 
 ## Loading Order
 
-For a command `python_dev` with `"environment": ["base_env.json", "dev_env.json"]`:
+For a command `python` with `"environment": ["base_env.json", "dev_env.json"]`:
 
 ```mermaid
 flowchart TD

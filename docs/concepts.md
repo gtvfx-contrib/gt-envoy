@@ -42,7 +42,7 @@ Commands are defined in `.envoy/commands.json`:
 
 ```json
 {
-    "python_dev": {
+    "python": {
         "environment": ["python_env.json"],
         "alias": ["python", "-X", "dev"]
     },
@@ -64,7 +64,7 @@ Commands are defined in `.envoy/commands.json`:
 ### Running Commands
 
 ```powershell
-en python_dev script.py --arg value
+en python script.py --arg value
 en unreal MyGame.uproject
 en build --target Release
 ```

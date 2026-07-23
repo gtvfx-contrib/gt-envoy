@@ -43,7 +43,7 @@ When multiple bundles define the same command name, the **last discovered bundle
 2. Order of roots in `ENVOY_BNDL_ROOTS` (left-to-right), then alphabetical within each root
 
 ```
-WARNING - Command 'python_dev' from gt:bundle-b overrides existing command from gt:bundle-a
+WARNING - Command 'python' from gt:bundle-b overrides existing command from gt:bundle-a
 ```
 
 Run `en --verbose --list` to see these warnings and identify the conflict source.
@@ -70,7 +70,7 @@ This allows running envoy from inside a project without any environment setup.
 Use `--trace VAR` to see exactly how a variable is built through each env file:
 
 ```powershell
-en --trace PYTHONPATH python_dev
+en --trace PYTHONPATH python
 ```
 
 Shows each assignment/append/prepend as it happens across `global_env.json` and the command's env files — useful when a path is missing or appearing in the wrong position.

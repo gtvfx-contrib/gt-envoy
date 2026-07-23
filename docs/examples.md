@@ -5,7 +5,7 @@
 **`.envoy/commands.json`:**
 ```json
 {
-    "python_dev": {
+    "python": {
         "environment": ["python_env.json"],
         "alias": ["python", "-X", "dev"]
     }
@@ -23,8 +23,8 @@
 
 **Usage:**
 ```powershell
-en python_dev script.py
-en python_dev -m pytest tests/
+en python script.py
+en python -m pytest tests/
 ```
 
 ---

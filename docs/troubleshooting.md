@@ -6,7 +6,7 @@ Before digging into a specific symptom below, run:
 
 ```powershell
 en --diagnose               # bundles, team/pipeline, cache, VCS, telemetry status
-en --diagnose python_dev    # also shows the command's full resolved environment
+en --diagnose python    # also shows the command's full resolved environment
 ```
 
 This surfaces discovered bundles and commands, resolved team/pipeline context,
@@ -54,8 +54,8 @@ In closed mode the subprocess `PATH` comes entirely from bundle env files. If th
 3. Use `en -i <command>` temporarily to confirm the executable is present on the system `PATH`
 
 ```powershell
-en --which python_dev          # check resolved path
-en -i python_dev script.py     # run with system PATH inherited
+en --which python          # check resolved path
+en -i python script.py     # run with system PATH inherited
 ```
 
 ## Environment Variables Not Applying
@@ -66,8 +66,8 @@ en -i python_dev script.py     # run with system PATH inherited
 4. Use `en --trace VAR <command>` to see how a specific variable is mutated across files
 
 ```powershell
-en --trace PYTHONPATH python_dev
-en --verbose python_dev --help
+en --trace PYTHONPATH python
+en --verbose python --help
 ```
 
 ## Path Inconsistency (Mixed Slashes)

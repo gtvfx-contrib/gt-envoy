@@ -1485,7 +1485,7 @@ mod tests {
             "gt",
             "pythoncore",
             &["python_env.json"],
-            Some(json!({"python_dev": {}})),
+            Some(json!({"python": {}})),
         );
         let published = create_published_bundle(
             &temp.path().join("releases"),
@@ -1516,7 +1516,7 @@ mod tests {
             "gt",
             "pythoncore",
             &["python_env.json"],
-            Some(json!({"python_dev": {}})),
+            Some(json!({"python": {}})),
         );
         let published = create_published_bundle(
             &root.join("releases"),
@@ -1835,7 +1835,7 @@ mod tests {
                 "gt",
                 "pythoncore",
                 &["python_env.json"],
-                Some(json!({"python_dev": {}})),
+                Some(json!({"python": {}})),
             );
             let config = temp.path().join("bundles.json");
             write_json(
@@ -1868,7 +1868,7 @@ mod tests {
                 "gt",
                 "pythoncore",
                 &["python_env.json"],
-                Some(json!({"python_dev": {}})),
+                Some(json!({"python": {}})),
             );
             let config = temp.path().join("bundles.json");
             let bundle_path_json = serde_json::to_string(&checkout.display().to_string())
@@ -1919,7 +1919,7 @@ mod tests {
                 "gt",
                 "pythoncore",
                 &["python_env.json"],
-                Some(json!({"python_dev": {}, "maya_dev": {}})),
+                Some(json!({"python": {}, "maya_dev": {}})),
             );
 
             let config_path = temp.path().join("bundles.json");
@@ -1934,7 +1934,7 @@ mod tests {
                 bundle_config
                     .commands()
                     .expect("commands should load from direct config"),
-                vec!["maya_dev", "python_dev"]
+                vec!["maya_dev", "python"]
             );
 
             let cfg_root = temp.path().join("cfg-root");
@@ -2058,7 +2058,7 @@ mod tests {
             "gt",
             "pythoncore",
             &["python_env.json", "maya_env.json"],
-            Some(json!({"python_dev": {}})),
+            Some(json!({"python": {}})),
         );
 
         let info = BundleInfo::new(

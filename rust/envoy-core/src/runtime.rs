@@ -736,7 +736,7 @@ mod tests {
             "gt",
             "pythoncore",
             json!({
-                "python_dev": {
+                "python": {
                     "environment": ["python_env.json"]
                 }
             }),
@@ -747,7 +747,7 @@ mod tests {
         let (registry, bundles) =
             load_registry(Some(&roots), None, None).expect("explicit bundle roots should load");
 
-        assert!(registry.contains("python_dev"));
+        assert!(registry.contains("python"));
         let bundles = bundles.expect("bundle discovery should be present");
         assert_eq!(bundles.len(), 1);
         assert_eq!(bundles[0].root, bundle_root);

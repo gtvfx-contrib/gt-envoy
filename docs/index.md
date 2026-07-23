@@ -27,13 +27,13 @@ $env:ENVOY_BNDL_ROOTS = "R:/repo/gtvfx-contrib"
 en --list
 
 # 3. Run a command
-en python_dev script.py
+en python script.py
 
 # 4. Show command details
-en --info python_dev
+en --info python
 
 # 5. Diagnose your environment (bundles, team/pipeline, cache, VCS, and more)
-en --diagnose python_dev
+en --diagnose python
 ```
 
 ## Documentation

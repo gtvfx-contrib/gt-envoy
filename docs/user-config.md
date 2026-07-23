@@ -53,7 +53,7 @@ also lists all available named configs.
 ### Bypass the config for one run
 
 ```powershell
-envoy --ignore-config python_dev script.py
+envoy --ignore-config python script.py
 ```
 
 `--ignore-config` (`-ic`) skips the user config entirely for that invocation,
