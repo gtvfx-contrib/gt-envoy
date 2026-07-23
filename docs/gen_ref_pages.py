@@ -21,7 +21,7 @@ import types
 
 import mkdocs_gen_files
 
-PACKAGES = ["envoy", "engit"]
+PACKAGES = ["envoy"]
 
 nav = mkdocs_gen_files.Nav()
 

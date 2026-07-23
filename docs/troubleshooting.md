@@ -1,5 +1,20 @@
 # Troubleshooting
 
+## Start Here — `envoy --diagnose`
+
+Before digging into a specific symptom below, run:
+
+```powershell
+en --diagnose               # bundles, team/pipeline, cache, VCS, telemetry status
+en --diagnose python_dev    # also shows the command's full resolved environment
+```
+
+This surfaces discovered bundles and commands, resolved team/pipeline context,
+package cache location and reachability, detected VCS backend, and
+bundle-root reachability (flagging unreachable network paths) in one report —
+often enough to spot the problem before checking the more specific sections
+below.
+
 ## "Could not find commands.json"
 
 Envoy has no commands to load. Fix one of:

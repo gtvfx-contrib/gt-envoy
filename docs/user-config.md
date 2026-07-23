@@ -86,6 +86,22 @@ envoy --set-config verbosity=verbose
 
 The `--verbose` (`-v`) flag always overrides this for the current run.
 
+### `package_cache_dir`
+
+Directory used for the local package cache. Set to an empty string to fall
+back to the platform default location (`%LOCALAPPDATA%\envoy\package_cache`
+on Windows, `~/.cache/envoy/package_cache` elsewhere).
+
+```powershell
+envoy --set-config package_cache_dir=R:/studio/envoy/package_cache
+envoy --set-config package_cache_dir=   # clear it, fall back to the default
+```
+
+The `ENVOY_PACKAGE_CACHE` environment variable and the `--ignore-config` flag
+both take precedence over this setting — see the
+[CLI reference](cli-reference/envoy.md#environment-variables) for the full
+precedence order.
+
 ## Resolution priority
 
 When envoy determines which bundles to load it follows this priority order:

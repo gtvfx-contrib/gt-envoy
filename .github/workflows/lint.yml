@@ -18,17 +18,111 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.14
+      - name: Set up Python 3.11.9
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: '3.11.9'
 
-      - name: Install envoy with dev extras
-        working-directory: ${{ github.workspace }}/py
-        run: python -m pip install --upgrade pip && pip install -e ..[dev]
+      - name: Install ruff
+        run: python -m pip install --upgrade pip && pip install ruff
 
       - name: Run ruff check
-        run: ruff check py
+        run: ruff check rust/envoy-py/python rust/envoy-py/tests
 
       - name: Run ruff format --check
-        run: ruff format --check py
+        run: ruff format --check rust/envoy-py/python rust/envoy-py/tests
+
+  rust:
+    name: Rust (fmt + clippy + test)
+    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry/build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Run cargo fmt --check
+        working-directory: rust
+        run: cargo fmt --check
+
+      - name: Run cargo clippy
+        # envoy-py requires linking against a Python interpreter (pyo3) and
+        # is built/tested separately via maturin (see build-release.yml),
+        # not as part of this plain cargo workspace check.
+        working-directory: rust
+        run: cargo clippy --workspace --exclude envoy-py --all-targets -- -D warnings
+
+      - name: Run cargo test
+        working-directory: rust
+        run: cargo test --workspace --exclude envoy-py
+
+  rust-envoy-py:
+    name: Rust envoy-py (fmt + clippy + test, PyO3)
+    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11.9'
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry/build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Run cargo fmt --check
+        working-directory: rust
+        run: cargo fmt --check -p envoy-py
+
+      - name: Run cargo clippy
+        working-directory: rust
+        run: cargo clippy -p envoy-py --all-targets -- -D warnings
+
+      - name: Run cargo test
+        # cc (the linker driver) needs an extra -L search path for
+        # libpythonX.Y.so: this self-hosted runner's actions/setup-python
+        # unpacks Python under its own tool-cache directory (exported as
+        # $pythonLocation by the "Set up Python" step above), but the
+        # Python build's own sysconfig LIBDIR is frozen at
+        # /opt/hostedtoolcache/... (the path used on GitHub-hosted
+        # runners), which doesn't exist here -- so pyo3-build-config's
+        # -L flag points nowhere and linking envoy-py's test binary
+        # against libpython fails. LIBRARY_PATH is read directly by cc/ld
+        # as an additional search directory, independent of that guess.
+        working-directory: rust
+        run: LIBRARY_PATH="$pythonLocation/lib" cargo test -p envoy-py --lib
+
+      - name: Build wheel with maturin
+        run: |
+          pip install maturin
+          python -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml
+
+      - name: Install built wheel + pytest
+        run: |
+          pip install pytest
+          pip install --no-index --find-links rust/target/wheels envoy
+
+      - name: Run Python contract + consumer smoke tests against the wheel
+        # These prove envoy-py's Python-facing behavior (not just that the
+        # crate compiles/its own Rust unit tests pass) -- see
+        # rust/envoy-py/tests/python_contract/README.md and
+        # rust/envoy-py/tests/consumer_smoke/README.md for scope/rationale.
+        run: python -m pytest rust/envoy-py/tests -v

@@ -17,47 +17,72 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history so hatch-vcs can derive the version from the tag
+          fetch-depth: 0   # full history so `git describe` can derive the version from the tag
 
-      - name: Set up Python 3.14
+      - name: Set up Python 3.11.9
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
+          python-version: '3.11.9'
 
-      - name: Install build dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install envoy (editable, with docs extras) so hatch-vcs writes _version.py
-        working-directory: ${{ github.workspace }}/py
-        run: pip install -e ..[docs]
+      - name: Cache cargo registry/build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Install envoy (with docs extras)
+        # Builds+installs the maturin-backed envoy-py wheel (compiling the
+        # Rust extension via cargo, which the Rust toolchain step above set
+        # up), so mkdocstrings can introspect its docstrings below.
+        # envoy.__version__ is derived from `git describe` at build time via
+        # rust/envoy-py/build.rs, independent of this install step.
+        run: pip install .[docs]
 
       - name: Build documentation
         working-directory: ${{ github.workspace }}
         run: python -m properdocs build --clean
 
-      - name: Build executables
-        working-directory: ${{ github.workspace }}
-        run: pyinstaller envoy.spec --noconfirm
+      - name: Build native executables
+        # Replaces the old PyInstaller (envoy.spec) build: envoy-cli/engit-cli
+        # are native Rust binaries with no bundled Python interpreter and no
+        # PyInstaller step required. See rust/README.md.
+        working-directory: ${{ github.workspace }}/rust
+        run: cargo build --workspace --exclude envoy-py --release
+
+      - name: Stage executables into dist/
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          Copy-Item rust\target\release\envoy.exe dist\envoy.exe -Force
+          Copy-Item rust\target\release\engit.exe dist\engit.exe -Force
 
       - name: Verify executables
         run: |
           .\dist\envoy.exe --version
           .\dist\engit.exe --help
 
+      - name: Build envoy Python wheel for release
+        # The envoy-py (PyO3) wheel is now the distributed `envoy` Python
+        # package (see pyproject.toml's maturin build-backend). Built
+        # directly into dist/ so it's picked up by the release-upload step
+        # below alongside the native executables.
+        run: |
+          pip install maturin
+          python -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml --out dist
+
       - name: Create publish zip
         # Staged publish: copy only deployment-relevant items into a clean
         # staging directory, place EXEs into bin/ (replacing their bat
-        # counterparts), strip dev/test artefacts, then zip the result.
-        # en.bat is kept as a tiny alias wrapper that calls envoy.exe directly.
+        # counterparts), then zip the result. en.bat is kept as a tiny alias
+        # wrapper that calls envoy.exe directly.
         run: |
           $version   = "${{ github.ref_name }}"
           $workspace = "${{ github.workspace }}"
           $staging   = "$workspace\_publish_staging"
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
 
-          foreach ($item in @('bin', '.envoy', 'py', 'LICENSE', 'README.md')) {
+          foreach ($item in @('bin', '.envoy', 'LICENSE', 'README.md')) {
               $src = "$workspace\$item"
               if (Test-Path $src) {
                   Copy-Item $src "$staging\" -Recurse -Force
@@ -72,10 +97,6 @@ jobs:
           # Remove bat launchers that are replaced by EXEs in the publish layout
           Remove-Item "$staging\bin\envoy.bat" -Force -ErrorAction SilentlyContinue
           Remove-Item "$staging\bin\engit.bat" -Force -ErrorAction SilentlyContinue
-
-          # Remove dev/test-only files
-          Remove-Item "$staging\py\envoy\test_bundle" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item "$staging\py\envoy\testing.py"  -Force        -ErrorAction SilentlyContinue
 
           # Place EXEs into bin/ (envoy.exe also serves as the target for en.bat)
           Copy-Item "$workspace\dist\envoy.exe" "$staging\bin\envoy.exe" -Force
@@ -104,13 +125,6 @@ jobs:
           Compress-Archive -Path "$staging\*" -DestinationPath $zipPath
           Remove-Item $staging -Recurse -Force
 
-      - name: Build Python wheel
-        # pip wheel is used instead of python -m build for reliability.
-        # --no-deps builds only the envoy wheel, not dependency wheels.
-        # Runs after the bundle zip so the wheel is not included in the zip.
-        working-directory: ${{ github.workspace }}
-        run: pip wheel . -w dist --no-deps
-
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -120,3 +134,40 @@ jobs:
             dist/envoy-*.whl
             dist/envoy-v*.zip
           fail_on_unmatched_files: true
+
+  build-native-cross-platform:
+    # Cross-platform build verification for the native Rust binaries. This
+    # job does NOT (yet) produce release assets -- Linux/macOS distribution
+    # of envoy/engit is not yet an established workflow (bin/*.bat, the
+    # bundle-publish zip layout, etc. are still Windows-oriented) -- it only
+    # confirms the Rust workspace builds cleanly on each platform, catching
+    # cross-platform regressions early. Promote this to a real release
+    # artifact once Linux/macOS distribution is actually needed.
+    name: Build native binaries (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry/build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build native executables
+        working-directory: ${{ github.workspace }}/rust
+        run: cargo build --workspace --exclude envoy-py --release
+
+      - name: Verify executables
+        working-directory: ${{ github.workspace }}/rust
+        run: |
+          ./target/release/envoy --version
+          ./target/release/engit --help

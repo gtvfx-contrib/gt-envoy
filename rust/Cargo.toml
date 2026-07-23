@@ -1,0 +1,25 @@
+[workspace]
+resolver = "2"
+members = [
+    "envoy-core",
+    "envoy-py",
+    "envoy-cli",
+    "engit-core",
+    "engit-cli",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+# GPL-3.0, matching ../LICENSE. A `license-file` path can't be used here
+# since maturin requires license files to resolve inside the Cargo
+# workspace root, and the canonical LICENSE lives one level up at the repo
+# root (shared with the py/ tree).
+license = "GPL-3.0-or-later"
+repository = "https://github.com/gtvfx-contrib/gt-envoy"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }

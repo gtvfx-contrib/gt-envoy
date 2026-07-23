@@ -1,0 +1,66 @@
+//! `envoy-core` -- pure Rust port of envoy's framework-agnostic logic.
+//!
+//! This crate contains no Python or CLI-specific code. It is consumed by:
+//! - `envoy-py` (PyO3 bindings, preserving the `import envoy` Python API)
+//! - `envoy-cli` (native CLI binary, no Python runtime dependency)
+//! - `engit-core` (bundle discovery / named-config resolution for `engit`)
+//!
+//! Modules are ported from the original Python implementation in
+//! `py/envoy/`, module-for-module, to keep behavior traceable during the
+//! migration:
+//!
+//! | Rust module         | Python source           |
+//! |----------------------|--------------------------|
+//! | [`error`]            | `_exceptions.py`         |
+//! | [`models`]           | `_models.py`             |
+//! | [`user_config`]      | `_user_config.py`        |
+//! | [`config_registry`]  | `_config_registry.py`    |
+//! | [`discovery`]        | `_discovery.py`          |
+//! | [`environment`]      | `_environment.py`        |
+//! | [`commands`]         | `_commands.py`           |
+//! | [`executor`]         | `_executor.py`           |
+//! | [`wrapper`]          | `_wrapper.py`            |
+
+pub mod commands;
+pub mod config_crypto;
+pub mod config_registry;
+pub mod discovery;
+pub mod environment;
+pub mod error;
+pub mod executor;
+pub mod json_util;
+pub mod models;
+pub mod package_cache;
+pub mod pipeline;
+pub mod retry;
+pub mod runtime;
+pub mod semver;
+pub mod team_config;
+pub mod telemetry;
+pub mod user_config;
+pub mod vcs;
+pub mod wrapper;
+
+pub use error::{EnvoyError, Result};
+
+/// Shared test-only synchronization for tests that mutate real process
+/// environment variables (`ENVOY_CFG_ROOTS`, `ENVOY_USER_CONFIG`,
+/// `ENVOY_COMMANDS_FILE`, `ENVOY_BNDL_ROOTS`, etc.).
+///
+/// `commands`, `config_registry`, `discovery`, and `environment` each have
+/// tests that temporarily set/restore real environment variables. Since
+/// `cargo test` runs tests in parallel threads within a single process, and
+/// environment variables are process-global, tests in *different* modules
+/// that each guarded their own module-local mutex could still race against
+/// each other on the same real env var (e.g. both `discovery` and
+/// `config_registry` touch `ENVOY_CFG_ROOTS`). All such tests must lock this
+/// single crate-wide mutex instead of a module-local one.
+#[cfg(test)]
+pub(crate) mod env_test_lock {
+    use std::sync::Mutex;
+
+    /// Crate-wide mutex guarding any test that mutates real environment
+    /// variables. Lock this (via `.lock().unwrap_or_else(|poison|
+    /// poison.into_inner())`) before mutating `std::env` in a test.
+    pub(crate) static MUTEX: Mutex<()> = Mutex::new(());
+}

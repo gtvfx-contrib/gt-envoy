@@ -1,9 +1,0 @@
-{
-  "^=PYTHONPATH": [
-    "R:/repo/gtvfx-contrib/gt/app/wrapper/py"
-  ],
-  "^=PATH": "R:/repo/tools/bin",
-  "^=TEST_PATH": "prepended_value",
-  "APP_NAME": "MyApplication",
-  "DEBUG": "true"
-}

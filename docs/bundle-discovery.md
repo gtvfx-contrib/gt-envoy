@@ -2,12 +2,18 @@
 
 Envoy discovers commands from one or more **bundles** — directories containing an `.envoy/` directory. Commands from all discovered bundles are merged into a single registry.
 
+Discovery scans directories in parallel and caches results on disk for a few
+seconds so repeat invocations in a short loop don't re-scan from scratch.
+Set `ENVOY_DISABLE_DISCOVERY_CACHE=1` to force a fresh scan every time.
+
 Bundles come in two forms:
 
 | Form | Marker | `version` | `is_production` |
 |------|--------|-----------|-----------------|
 | **Checkout** | `.git/` directory | `'checkout'` | `False` |
 | **Published** | `.bundle` file | e.g. `'v1.2.0'` | `True` |
+
+Published bundles are also checked against the local [package cache](concepts.md#package-cache): if a cached snapshot exists for a published bundle's `namespace:name`, envoy uses the cached copy instead of re-reading it from its original (possibly remote) location. Checkout bundles are never substituted this way — your own working copy is never silently swapped for a cached snapshot.
 
 ## Discovery Flow
 
