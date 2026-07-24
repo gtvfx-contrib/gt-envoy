@@ -47,13 +47,21 @@ jobs:
             Add-Content -Path $env:GITHUB_PATH -Value $path
           }
 
-      - name: Install stable Rust toolchain
+      - name: Install stable Rust toolchain (1.75+ for Windows response file support)
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustc
 
       - name: Cache cargo registry/build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+
+      - name: Clean Cargo build cache (fixes link.exe argument limit)
+        # Removes stale build artifacts that may have been compiled with an older
+        # Rust toolchain. This prevents `link.exe extra operand` errors on Windows
+        # where object file paths exceed command-line limits.
+        run: cargo clean --manifest-path rust/envoy-py/Cargo.toml
 
       - name: Install envoy (with docs extras)
         # Builds+installs the maturin-backed envoy-py wheel (compiling the
