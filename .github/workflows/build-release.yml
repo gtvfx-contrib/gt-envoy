@@ -63,6 +63,19 @@ jobs:
         # where object file paths exceed command-line limits.
         run: cargo clean --manifest-path rust/envoy-py/Cargo.toml
 
+      - name: Verify MSVC build tools are available
+        # Ensures the self-hosted runner has proper Visual Studio build tools installed.
+        # The `link.exe extra operand` error often indicates missing or outdated MSVC tools.
+        shell: pwsh
+        run: |
+          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (Test-Path $vsWhere) {
+            & $vsWhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Out-Null
+            Write-Host "Visual Studio build tools found at: $LASTEXITCODE"
+          } else {
+            throw "Visual Studio build tools not found. Install 'Desktop development with C++' workload."
+          }
+
       - name: Install envoy (with docs extras)
         # Builds+installs the maturin-backed envoy-py wheel (compiling the
         # Rust extension via cargo, which the Rust toolchain step above set
