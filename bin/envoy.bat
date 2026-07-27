@@ -4,12 +4,6 @@ REM Usage: envoy [command] [args...]
 REM        envoy --list
 REM        envoy --info <command>
 
-REM Prefer the pre-built standalone executable when available (production /
-REM published bundle layout -- see .github/workflows/build-release.yml).
-if exist "%~dp0..\dist\envoy.exe" (
-    "%~dp0..\dist\envoy.exe" %*
-    exit /b %errorlevel%
-)
 
 REM Local dev build: native Rust binary built via `cargo build --release`
 REM (or the debug profile) from rust/envoy-cli, before a dist/ copy exists.
