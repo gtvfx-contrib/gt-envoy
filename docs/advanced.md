@@ -39,7 +39,7 @@ sequenceDiagram
 
 When multiple bundles define the same command name, the **last discovered bundle wins**. Bundle discovery order is:
 
-1. Order of entries in `--bundles-config` / `-b` (top-to-bottom)
+1. Order of entries in `--stack` / `-s` (top-to-bottom)
 2. Order of roots in `ENVOY_BNDL_ROOTS` (left-to-right), then alphabetical within each root
 
 ```

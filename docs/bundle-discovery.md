@@ -13,15 +13,17 @@ Bundles come in two forms:
 | **Checkout** | `.git/` directory | `'checkout'` | `False` |
 | **Published** | `.bundle` file | e.g. `'v1.2.0'` | `True` |
 
-Published bundles are also checked against the local [package cache](concepts.md#package-cache): if a cached snapshot exists for a published bundle's `namespace:name`, envoy uses the cached copy instead of re-reading it from its original (possibly remote) location. Checkout bundles are never substituted this way — your own working copy is never silently swapped for a cached snapshot.
+Published bundles are also checked against the local [bundle cache](concepts.md#bundle-cache): if a cached snapshot exists for a published bundle's `namespace:name`, envoy uses the cached copy instead of re-reading it from its original (possibly remote) location. Checkout bundles are never substituted this way — your own working copy is never silently swapped for a cached snapshot.
 
 ## Discovery Flow
 
 ```mermaid
 flowchart TD
-    A([envoy starts]) --> B{--bundles-config\nor -bc specified?}
-    B -- Yes --> C[Load listed bundle paths]
-    B -- No --> D{ENVOY_BNDL_ROOTS\nset?}
+    A([envoy starts]) --> B{--stack/-s or\nENVOY_STACK?}
+    B -- Yes --> C[Load strict .estack YAML]
+    B -- No --> X{User stack or\nENVOY_STACK_CONTEXT?}
+    X -- Yes --> C
+    X -- No --> D{ENVOY_BNDL_ROOTS\nset?}
     D -- Yes --> E[Scan each root recursively]
     E --> F{Has .git/ OR .bundle\nAND .envoy/?}
     F -- Yes --> G[Load bundle]
@@ -75,7 +77,7 @@ R:\repo\
 
 Every bundle published via `engit publish` or `bundle-publish.yml` contains a `.bundle` file at its root. This file serves two purposes:
 
-1. **Discovery marker** — `ENVOY_BNDL_ROOTS` scanning accepts it alongside `.git/` so deployed bundles are auto-discovered without a config file.
+1. **Discovery marker** — `ENVOY_BNDL_ROOTS` scanning accepts it alongside `.git/` so deployed bundles are auto-discovered without a Stack.
 2. **Version metadata** — `Bundle.version` and `Bundle.is_production` read from it.
 
 ### Format
@@ -88,60 +90,57 @@ Every bundle published via `engit publish` or `bundle-publish.yml` contains a `.
 }
 ```
 
-After extracting a published zip under a bundle root, envoy discovers it automatically — no `bundles.json` required.
+After extracting a published zip under a bundle root, envoy discovers it automatically — no `studio.estack` required.
 
-## Method 2 — Config File
+## Method 2 — Runtime Stack
 
-Create a `bundles.json` and pass it with `--bundles-config` / `-bc`:
+Create a strict YAML `studio.estack` and pass it with `--stack` / `-s`:
 
-```json
-{
-    "bundles": [
-        "R:/repo/gtvfx-contrib/gt/globals",
-        "R:/repo/gtvfx-contrib/gt/pythoncore",
-        "C:/tools/envoy/v1.0.0"
-    ]
-}
-```
-
-Or as a bare array:
-
-```json
-[
-    "R:/repo/gtvfx-contrib/gt/globals",
-    "R:/repo/gtvfx-contrib/gt/pythoncore"
-]
+```yaml
+name: studio
+namespace: gt
+source:
+  type: local
+pinned_version: null
+metadata:
+  owner: tools
+bundles:
+  - path: R:/repo/gtvfx-contrib/gt/globals
+    metadata:
+      role: core
+  - path: R:/repo/gtvfx-contrib/gt/pythoncore
+  - path: C:/tools/envoy/v1.0.0
 ```
 
 ```powershell
-en --bundles-config R:/studio/bundles.json --list
-en -bc R:/studio/bundles.json python script.py
+en --stack R:/studio/studio.estack --list
+en -s R:/studio/studio.estack python script.py
 ```
 
-### Environment variables in config paths
+Stack files must have the exact `.estack` extension. Unknown fields, duplicate
+paths, missing paths, malformed YAML, and directories that are not valid envoy
+bundles are errors. Relative paths resolve from the stack file's directory.
 
-Path strings inside a bundle config file support `${VARNAME}` expansion.
+### Environment variables in stack paths
+
+Bundle paths inside a stack support `${VARNAME}` and `~` expansion.
 Each token is resolved against the current process environment at load time,
-making configs portable across machines or deployment roots:
+making Stacks portable across machines or deployment roots:
 
-```json
-{
-    "bundles": [
-        "${STUDIO_PIPELINE_ROOT}/envoy/0.2.1",
-        "${STUDIO_PIPELINE_ROOT}/globals/1.0.0",
-        "${STUDIO_PIPELINE_ROOT}/pythoncore/2.1.0",
-        "R:/fallback/myapp"
-    ]
-}
+```yaml
+name: production
+namespace: studio:production
+bundles:
+  - path: ${STUDIO_ROOT}/envoy/0.2.1
+  - path: ${STUDIO_ROOT}/globals/1.0.0
+  - path: ${STUDIO_ROOT}/pythoncore/2.1.0
 ```
 
-When envoy loads this config it replaces each `${VAR}` with the matching
+When envoy loads this Stack it replaces each `${VAR}` with the matching
 environment variable value before resolving the path.
 
-**Undefined variables** — if a referenced variable is not set in the
-environment, envoy logs a warning (including the variable name and the config
-file it came from) and **skips** that bundle entry.  The remaining entries
-are still loaded normally.
+An undefined variable is a validation error; envoy never constructs a partial
+runtime from a malformed stack.
 
 !!! tip
     This is the same `${VARNAME}` syntax used in `.envoy/*.json` files.
@@ -177,12 +176,15 @@ When two bundles define the same command name, the **last loaded bundle wins**:
 WARNING - Command 'python' from gt:bundle-b overrides existing command from gt:bundle-a
 ```
 
-Use `--verbose` to surface these warnings and adjust bundle order in your config or `ENVOY_BNDL_ROOTS` to control priority.
+Use `--verbose` to surface these warnings and adjust bundle order in your stack or `ENVOY_BNDL_ROOTS` to control priority.
 
 ## Environment Variables
 
 | Variable | Separator | Description |
 |---|---|---|
+| `ENVOY_STACK` | — | Named Stack or `.estack` path |
+| `ENVOY_STACK_CONTEXT` | — | Colon-separated context for registry matching |
+| `ENVOY_STACK_ROOTS` | `;` (Windows) / `:` (Unix) | Named Stack registry roots |
 | `ENVOY_BNDL_ROOTS` | `;` (Windows) / `:` (Unix) | Root directories to scan for bundles |
 
 ## Published Bundle Workflow

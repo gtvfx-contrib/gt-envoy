@@ -9,10 +9,10 @@ workspace layout for contributors.
 
 | Crate         | Kind                 | Replaced (Python)       | Notes |
 |---------------|----------------------|--------------------------|-------|
-| `envoy-core`  | lib                  | `py/envoy/_*.py` (core)  | Framework-agnostic: discovery, environment, commands, executor, wrapper, config registry, user config. No Python or CLI dependency. |
+| `envoy-core`  | lib                  | `py/envoy/_*.py` (core)  | Framework-agnostic: discovery, environment, commands, executor, wrapper, Stack registry, user config. No Python or CLI dependency. |
 | `envoy-py`    | cdylib (PyO3)        | `py/envoy/__init__.py`, `proc.py`, `_api.py`, `_cli.py` | Built with `maturin`. This is now the distributed `envoy` Python package (`pip install envoy`) — preserves `import envoy`, `envoy.proc`, `envoy.testing`, `envoy.cli_main` for existing consumers. |
 | `envoy-cli`   | bin (`envoy`)        | `py/envoy/_cli.py`       | Native binary, no Python runtime dependency. Replaces the PyInstaller-built `dist/envoy.exe`. `envoy-py`'s `cli_main()` binding calls into this crate's library function, so both share the same CLI dispatch logic. |
-| `engit-core`  | lib                  | `py/engit/_*.py`         | Git/GitHub tooling logic. Depends on `envoy-core` for bundle discovery / named-config resolution. |
+| `engit-core`  | lib                  | `py/engit/_*.py`         | Git/GitHub tooling logic. Depends on `envoy-core` for bundle discovery and named-Stack resolution. |
 | `engit-cli`   | bin (`engit`)        | `py/engit/_cli.py`       | Native binary. No Python API — `engit` is CLI-only. |
 
 ## Versioning
@@ -98,8 +98,8 @@ commands above because it requires linking against a Python interpreter
 All modules have been ported and `envoy-py` now exposes the full
 `py/envoy/__init__.py` public surface: `envoy.proc`, `envoy.testing`,
 `envoy.exceptions`, the top-level `_api.py` functions, `Bundle`/
-`BundleInfo`/`BundleConfig` discovery, `CommandDefinition`/`CommandRegistry`,
-the named-config registry, `ApplicationWrapper`/`WrapperConfig` (including
+`BundleInfo`/`Stack` discovery, `CommandDefinition`/`CommandRegistry`,
+the named-Stack registry, `ApplicationWrapper`/`WrapperConfig` (including
 real Python callback support), and `cli_main()`. `py/envoy` and `py/engit`
 have both been deleted — the root `pyproject.toml` now builds `envoy` via
 the `maturin` backend from this workspace, and `engit` is native-only (no

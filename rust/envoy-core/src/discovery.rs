@@ -1,22 +1,21 @@
-//! Bundle discovery and bundle-config loading for `envoy-core`.
+//! Bundle discovery and stack-backed loading for `envoy-core`.
 //!
 //! This module ports `py/envoy/_discovery.py` into Rust. It is responsible
 //! for:
 //! - resolving bundle IDs like `gt:pythoncore`
 //! - scanning bundle root directories for checkout and published bundles
-//! - loading bundle lists from JSON bundle-config files
+//! - loading bundle lists from YAML `.estack` files
 //! - exposing small model types used by later environment/command ports
 //!
 //! Discovery currently supports two sources:
 //! 1. Auto-discovery from `ENVOY_BNDL_ROOTS`
-//! 2. Explicit bundle-config JSON files
+//! 2. Explicit runtime stack files
 //!
 //! Published bundles are detected by a `.bundle` marker file. Checkout
 //! bundles are detected by a `.git/` directory. In both cases a valid envoy
 //! bundle must also contain a `.envoy/` directory.
 
-use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
 use std::fmt;
@@ -31,13 +30,9 @@ use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config_registry::{is_config_name, resolve_named_config};
 use crate::error::{EnvoyError, Result};
-use crate::json_util::parse_json_with_comments;
-use crate::user_config::UserConfig;
 
 const BUNDLE_ROOTS_VAR: &str = "ENVOY_BNDL_ROOTS";
-const BUNDLES_CONFIG_VAR: &str = "ENVOY_BUNDLES_CONFIG";
 
 /// Version sentinel for a bundle that lives directly in a git checkout.
 pub const BUNDLE_CHECKOUT: &str = "checkout";
@@ -460,156 +455,6 @@ impl fmt::Display for Bundle {
     }
 }
 
-/// An envoy bundle configuration file.
-pub struct BundleConfig {
-    path: PathBuf,
-    bundles: RefCell<Option<Vec<Bundle>>>,
-    name: Option<String>,
-    cfg_version: Option<String>,
-}
-
-impl BundleConfig {
-    /// Create a bundle config from a filesystem path.
-    pub fn new(path: impl AsRef<Path>) -> Result<Self> {
-        let path = resolve_input_path(path.as_ref());
-        if !path.is_file() {
-            return Err(EnvoyError::Validation(format!(
-                "BundleConfig path does not exist: {}",
-                path.display()
-            )));
-        }
-
-        Ok(Self {
-            path,
-            bundles: RefCell::new(None),
-            name: None,
-            cfg_version: None,
-        })
-    }
-
-    /// Construct a config already resolved from a named config slot.
-    pub(crate) fn from_named(path: PathBuf, name: String, version: String) -> Self {
-        Self {
-            path: normalize_windows_path(path),
-            bundles: RefCell::new(None),
-            name: Some(name),
-            cfg_version: Some(version),
-        }
-    }
-
-    /// Resolve and load a bundle config from a named config slot.
-    pub fn from_name(name: &str) -> Result<Self> {
-        let Some(resolved) = resolve_named_config(name) else {
-            return Err(EnvoyError::Validation(format!(
-                "Named config {name:?} not found in ENVOY_CFG_ROOTS. Check that \
-ENVOY_CFG_ROOTS is set and the config has been published."
-            )));
-        };
-
-        let version = resolved
-            .file_stem()
-            .map(|stem| stem.to_string_lossy().into_owned())
-            .unwrap_or_default();
-
-        Ok(Self::from_named(resolved, name.to_string(), version))
-    }
-
-    /// Return the active bundle config from user config, if present.
-    pub fn current(ignore_user_config: bool) -> Result<Option<Self>> {
-        if ignore_user_config {
-            return Ok(None);
-        }
-
-        let user_config = UserConfig::load(None);
-        let Some(raw) = user_config.get("bundles_config") else {
-            return Ok(None);
-        };
-
-        if is_config_name(raw) {
-            let Some(resolved) = resolve_named_config(raw) else {
-                return Err(EnvoyError::Validation(format!(
-                    "Named config {raw:?} (from user config) not found in ENVOY_CFG_ROOTS."
-                )));
-            };
-
-            let version = resolved
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-                .unwrap_or_default();
-
-            return Ok(Some(Self::from_named(resolved, raw.to_string(), version)));
-        }
-
-        Self::new(raw).map(Some)
-    }
-
-    /// Return the absolute config-file path.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
-    /// Return the named config slot, if this config was resolved by name.
-    pub fn name(&self) -> Option<&str> {
-        self.name.as_deref()
-    }
-
-    /// Return the resolved named-config version, if any.
-    pub fn cfg_version(&self) -> Option<&str> {
-        self.cfg_version.as_deref()
-    }
-
-    /// Return the bundles declared in this config.
-    ///
-    /// The successful result is cached after first load.
-    pub fn bundles(&self) -> Result<Vec<Bundle>> {
-        if let Some(cached) = self.bundles.borrow().as_ref() {
-            return Ok(cached.clone());
-        }
-
-        let bundles = load_bundles_from_config(&self.path)?
-            .into_iter()
-            .map(Bundle::from_info)
-            .collect::<Vec<_>>();
-
-        *self.bundles.borrow_mut() = Some(bundles.clone());
-        Ok(bundles)
-    }
-
-    /// Return the sorted union of command names across all bundles.
-    pub fn commands(&self) -> Result<Vec<String>> {
-        let mut seen = HashSet::new();
-        for bundle in self.bundles()? {
-            seen.extend(bundle.commands());
-        }
-
-        let mut commands = seen.into_iter().collect::<Vec<_>>();
-        commands.sort();
-        Ok(commands)
-    }
-}
-
-impl fmt::Debug for BundleConfig {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match &self.name {
-            Some(name) => {
-                write!(
-                    formatter,
-                    "BundleConfig(name='{}', path={})",
-                    name,
-                    self.path.display()
-                )
-            }
-            None => write!(formatter, "BundleConfig(path={})", self.path.display()),
-        }
-    }
-}
-
-impl fmt::Display for BundleConfig {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self, formatter)
-    }
-}
-
 /// Return `true` if `path` contains a `.git/` directory.
 pub fn is_git_repo(path: &Path) -> bool {
     path.join(".git").is_dir()
@@ -818,11 +663,11 @@ fn save_discovery_cache_manifest(manifest: &DiscoveryCacheManifest) {
 }
 
 fn discovery_cache_path() -> PathBuf {
-    let package_cache_root = crate::package_cache::default_cache_root();
-    let envoy_cache_root = package_cache_root
+    let bundle_cache_root = crate::bundle_cache::default_cache_root();
+    let envoy_cache_root = bundle_cache_root
         .parent()
         .map(Path::to_path_buf)
-        .unwrap_or(package_cache_root);
+        .unwrap_or(bundle_cache_root);
 
     envoy_cache_root.join(DISCOVERY_CACHE_FILENAME)
 }
@@ -960,18 +805,15 @@ fn name_and_namespace(bundle_root: &Path) -> (String, String) {
     )
 }
 
-/// Auto-discover bundles using `ENVOY_BNDL_ROOTS`.
-///
-/// If `ENVOY_BUNDLES_CONFIG` points at an existing bundle-config file, that
-/// file is loaded instead of scanning roots.
+/// Discover bundles from the current stack, then fall back to bundle roots.
 pub fn discover_bundles_auto() -> Result<Vec<BundleInfo>> {
-    let bundles_config = env::var(BUNDLES_CONFIG_VAR).unwrap_or_default();
-    let bundles_config = bundles_config.trim();
-    if !bundles_config.is_empty() {
-        let config_path = resolve_input_path(Path::new(bundles_config));
-        if config_path.is_file() {
-            return load_bundles_from_config(&config_path);
-        }
+    if let Some(stack) = crate::stack::Stack::current(
+        false,
+        None,
+        crate::stack::DEFAULT_STACK_NAMESPACE,
+        crate::stack::DEFAULT_STACK_MAX_DEPTH,
+    )? {
+        return stack.bundle_infos();
     }
 
     let roots_str = env::var(BUNDLE_ROOTS_VAR).unwrap_or_default();
@@ -993,69 +835,15 @@ pub fn discover_bundles_auto() -> Result<Vec<BundleInfo>> {
     Ok(discover_bundles_from_roots(&root_dirs))
 }
 
-/// Load bundle definitions from a bundle-config JSON file.
-pub fn load_bundles_from_config(config_file: &Path) -> Result<Vec<BundleInfo>> {
-    let config_file = resolve_input_path(config_file);
-    if !config_file.is_file() {
-        return Err(EnvoyError::EnvironmentBuild(format!(
-            "Config file not found: {}",
-            config_file.display()
-        )));
-    }
-
-    let contents = fs::read_to_string(&config_file).map_err(|source| {
-        EnvoyError::EnvironmentBuild(format!("Error reading config file: {source}"))
-    })?;
-    let data = parse_json_with_comments::<Value>(&contents).map_err(|source| {
-        EnvoyError::EnvironmentBuild(format!("Invalid JSON in config file: {source}"))
-    })?;
-
-    let bundle_paths = match data {
-        Value::Object(mut object) => object.remove("bundles").unwrap_or(Value::Array(Vec::new())),
-        Value::Array(entries) => Value::Array(entries),
-        _ => {
-            return Err(EnvoyError::EnvironmentBuild(String::from(
-                "Config file must be a JSON object or array",
-            )));
-        }
-    };
-
-    let Value::Array(bundle_entries) = bundle_paths else {
-        return Err(EnvoyError::EnvironmentBuild(String::from(
-            "Config file must contain a bundles array",
-        )));
-    };
-
-    let mut bundles = Vec::new();
-    for bundle_entry in bundle_entries {
-        let Value::String(raw_path) = bundle_entry else {
-            continue;
-        };
-
-        let Some(expanded) = expand_bundle_path(&raw_path, &config_file) else {
-            continue;
-        };
-
-        let path = resolve_input_path(Path::new(&expanded));
-        if !validate_bundle(&path) {
-            continue;
-        }
-
-        let name = path
-            .file_name()
-            .map(|value| value.to_string_lossy().into_owned())
-            .unwrap_or_default();
-
-        bundles.push(BundleInfo::new(path.clone(), name, infer_namespace(&path)));
-    }
-
-    Ok(bundles)
+/// Load bundle definitions from a strict YAML `.estack` file.
+pub fn load_bundles_from_stack(stack_file: &Path) -> Result<Vec<BundleInfo>> {
+    crate::stack::Stack::new(stack_file)?.bundle_infos()
 }
 
-/// Return bundles from an explicit config file or from auto-discovery.
-pub fn get_bundles(config_file: Option<&Path>) -> Result<Vec<BundleInfo>> {
-    match config_file {
-        Some(config_file) => load_bundles_from_config(config_file),
+/// Return bundles from an explicit stack file or from auto-discovery.
+pub fn get_bundles(stack_file: Option<&Path>) -> Result<Vec<BundleInfo>> {
+    match stack_file {
+        Some(stack_file) => load_bundles_from_stack(stack_file),
         None => discover_bundles_auto(),
     }
 }
@@ -1187,7 +975,7 @@ fn root_separator() -> char {
     }
 }
 
-fn resolve_input_path(path: &Path) -> PathBuf {
+pub(crate) fn resolve_input_path(path: &Path) -> PathBuf {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -1290,14 +1078,13 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        current_timestamp, discover_bundles_auto, discover_bundles_from_roots, discovery_cache_key,
+        current_timestamp, discover_bundles_from_roots, discovery_cache_key,
         discovery_cache_lock_path, discovery_cache_path, expand_bundle_path, find_bundle_roots,
-        find_git_repos, get_bundle_commands_files, get_bundle_env_files, get_bundles,
-        has_envoy_env, infer_namespace, is_bndlid, is_git_repo, is_published_bundle,
-        load_bundles_from_config, load_discovery_cache_manifest, resolve_bndlid,
-        save_discovery_cache_manifest, validate_bundle, Bundle, BundleConfig, BundleInfo,
-        EnvoyError, BUNDLES_CONFIG_VAR, BUNDLE_CHECKOUT, BUNDLE_ENV_DIR, BUNDLE_MARKER_FILE,
-        BUNDLE_ROOTS_VAR, DISCOVERY_CACHE_DISABLE_VAR,
+        find_git_repos, get_bundle_commands_files, get_bundle_env_files, has_envoy_env,
+        infer_namespace, is_bndlid, is_git_repo, is_published_bundle,
+        load_discovery_cache_manifest, resolve_bndlid, save_discovery_cache_manifest,
+        validate_bundle, Bundle, BundleInfo, EnvoyError, BUNDLE_CHECKOUT, BUNDLE_ENV_DIR,
+        BUNDLE_MARKER_FILE, BUNDLE_ROOTS_VAR, DISCOVERY_CACHE_DISABLE_VAR,
     };
 
     struct EnvVarGuard {
@@ -1329,8 +1116,8 @@ mod tests {
 
     /// Locks the crate-wide `crate::env_test_lock::MUTEX` rather than a
     /// module-local mutex: several modules' tests mutate the same real
-    /// process environment variables (e.g. `ENVOY_CFG_ROOTS` is touched by
-    /// both `discovery` and `config_registry`), so a single shared lock is
+    /// process environment variables (e.g. `ENVOY_STACK_ROOTS` is touched by
+    /// both `discovery` and `stack_registry`), so a single shared lock is
     /// required to prevent cross-module test races under `cargo test`'s
     /// default parallel execution.
     fn with_env_lock<T>(test_fn: impl FnOnce() -> T) -> T {
@@ -1824,230 +1611,6 @@ mod tests {
         assert_eq!(bundle.version(), "1.2.3");
         assert!(bundle.is_production());
         assert!(!bundle.is_checkout());
-    }
-
-    #[test]
-    fn load_bundles_from_config_expands_env_vars_and_skips_invalid_entries() {
-        with_env_lock(|| {
-            let temp = tempdir().expect("failed to create temp dir");
-            let checkout = create_checkout_bundle(
-                temp.path(),
-                "gt",
-                "pythoncore",
-                &["python_env.json"],
-                Some(json!({"python": {}})),
-            );
-            let config = temp.path().join("bundles.json");
-            write_json(
-                &config,
-                &json!({
-                    "bundles": [
-                        "${TEST_DISCOVERY_BUNDLE}",
-                        123,
-                        "${TEST_DISCOVERY_MISSING}",
-                        temp.path().join("missing").display().to_string()
-                    ]
-                }),
-            );
-            let _bundle_guard =
-                EnvVarGuard::set("TEST_DISCOVERY_BUNDLE", Some(checkout.as_os_str()));
-            let _missing_guard = EnvVarGuard::set("TEST_DISCOVERY_MISSING", None);
-
-            let bundles = load_bundles_from_config(&config).expect("config should load");
-            assert_eq!(bundles.len(), 1);
-            assert_eq!(bundles[0].bndlid(), "gt:pythoncore");
-        });
-    }
-
-    #[test]
-    fn load_bundles_from_config_accepts_comment_annotated_json() {
-        with_env_lock(|| {
-            let temp = tempdir().expect("failed to create temp dir");
-            let checkout = create_checkout_bundle(
-                temp.path(),
-                "gt",
-                "pythoncore",
-                &["python_env.json"],
-                Some(json!({"python": {}})),
-            );
-            let config = temp.path().join("bundles.json");
-            let bundle_path_json = serde_json::to_string(&checkout.display().to_string())
-                .expect("bundle path should serialize");
-            fs::write(
-                &config,
-                format!(
-                    concat!(
-                        "{{\n",
-                        "  // bundle list\n",
-                        "  \"bundles\": [\n",
-                        "    {} /* active bundle */, \n",
-                        "    # ignored invalid entry\n",
-                        "    123\n",
-                        "  ]\n",
-                        "}}\n"
-                    ),
-                    bundle_path_json
-                ),
-            )
-            .expect("failed to write comment-annotated bundle config");
-
-            let bundles = load_bundles_from_config(&config).expect("config should load");
-            assert_eq!(bundles.len(), 1);
-            assert_eq!(bundles[0].bndlid(), "gt:pythoncore");
-        });
-    }
-
-    #[test]
-    fn load_bundles_from_config_returns_environment_build_errors() {
-        let temp = tempdir().expect("failed to create temp dir");
-        let missing = temp.path().join("missing.json");
-        let error = load_bundles_from_config(&missing).expect_err("missing config should fail");
-        assert!(matches!(error, EnvoyError::EnvironmentBuild(_)));
-
-        let invalid = temp.path().join("invalid.json");
-        fs::write(&invalid, "{not valid json").expect("failed to write invalid config");
-        let error = load_bundles_from_config(&invalid).expect_err("invalid config should fail");
-        assert!(matches!(error, EnvoyError::EnvironmentBuild(_)));
-    }
-
-    #[test]
-    fn bundle_config_loads_from_path_named_slot_and_user_config() {
-        with_env_lock(|| {
-            let temp = tempdir().expect("failed to create temp dir");
-            let bundle_root = create_checkout_bundle(
-                temp.path(),
-                "gt",
-                "pythoncore",
-                &["python_env.json"],
-                Some(json!({"python": {}, "maya_dev": {}})),
-            );
-
-            let config_path = temp.path().join("bundles.json");
-            write_json(&config_path, &json!([bundle_root.display().to_string()]));
-
-            let bundle_config =
-                BundleConfig::new(&config_path).expect("direct config path should be valid");
-            assert_eq!(bundle_config.path(), config_path.as_path());
-            assert_eq!(bundle_config.name(), None);
-            assert_eq!(bundle_config.cfg_version(), None);
-            assert_eq!(
-                bundle_config
-                    .commands()
-                    .expect("commands should load from direct config"),
-                vec!["maya_dev", "python"]
-            );
-
-            let cfg_root = temp.path().join("cfg-root");
-            let studio_dir = cfg_root.join("studio");
-            fs::create_dir_all(&studio_dir).expect("failed to create named config dir");
-            let version = "2026-06-21T10-13-00";
-            let published_config = studio_dir.join(format!("{version}.json"));
-            write_json(
-                &published_config,
-                &json!([bundle_root.display().to_string()]),
-            );
-            fs::write(studio_dir.join("latest"), format!("{version}.json"))
-                .expect("failed to write latest pointer");
-
-            let cfg_roots = env::join_paths([cfg_root.as_path()])
-                .expect("failed to join config roots for test");
-            let _cfg_roots_guard = EnvVarGuard::set("ENVOY_CFG_ROOTS", Some(cfg_roots.as_os_str()));
-
-            let named = BundleConfig::from_name("studio").expect("named config should resolve");
-            assert_eq!(named.name(), Some("studio"));
-            assert_eq!(named.cfg_version(), Some(version));
-            assert_eq!(named.path(), published_config.as_path());
-
-            let user_config_path = temp.path().join("user_config.json");
-            write_json(&user_config_path, &json!({"bundles_config": "studio"}));
-            let _user_config_guard =
-                EnvVarGuard::set("ENVOY_USER_CONFIG", Some(user_config_path.as_os_str()));
-
-            let current = BundleConfig::current(false)
-                .expect("current config should resolve")
-                .expect("current config should be present");
-            assert_eq!(current.name(), Some("studio"));
-            assert_eq!(current.cfg_version(), Some(version));
-            assert_eq!(current.path(), published_config.as_path());
-
-            assert!(BundleConfig::current(true)
-                .expect("ignore_user_config should not fail")
-                .is_none());
-        });
-    }
-
-    #[test]
-    fn discover_bundles_auto_prefers_prebuilt_config_and_falls_back_to_roots() {
-        with_env_lock(|| {
-            let temp = tempdir().expect("failed to create temp dir");
-            let root_bundle =
-                create_checkout_bundle(temp.path(), "gt", "pythoncore", &["python_env.json"], None);
-            let config_bundle = create_checkout_bundle(
-                &temp.path().join("other-root"),
-                "tools",
-                "render",
-                &["render_env.json"],
-                None,
-            );
-            let roots = join_roots(&[temp.path()]);
-            let _roots_guard = EnvVarGuard::set(BUNDLE_ROOTS_VAR, Some(roots.as_os_str()));
-
-            let config_path = temp.path().join("bundles.json");
-            write_json(&config_path, &json!([config_bundle.display().to_string()]));
-            let config_guard = EnvVarGuard::set(BUNDLES_CONFIG_VAR, Some(config_path.as_os_str()));
-
-            let bundles = discover_bundles_auto().expect("prebuilt config should load");
-            let discovered = namespaced_map(&bundles);
-            assert_eq!(discovered.get("tools:render"), Some(&config_bundle));
-            assert!(!discovered.contains_key("gt:pythoncore"));
-
-            drop(config_guard);
-            let missing_config = temp.path().join("missing.json");
-            let _missing_config_guard =
-                EnvVarGuard::set(BUNDLES_CONFIG_VAR, Some(missing_config.as_os_str()));
-
-            let bundles =
-                discover_bundles_auto().expect("missing prebuilt config should fall back");
-            let discovered = namespaced_map(&bundles);
-            assert_eq!(discovered.get("gt:pythoncore"), Some(&root_bundle));
-        });
-    }
-
-    #[test]
-    fn get_bundles_uses_explicit_config_or_auto_discovery() {
-        with_env_lock(|| {
-            let temp = tempdir().expect("failed to create temp dir");
-            let auto_bundle =
-                create_checkout_bundle(temp.path(), "gt", "pythoncore", &["python_env.json"], None);
-            let explicit_bundle = create_checkout_bundle(
-                &temp.path().join("explicit-root"),
-                "tools",
-                "render",
-                &["render_env.json"],
-                None,
-            );
-            let roots = join_roots(&[temp.path()]);
-            let _roots_guard = EnvVarGuard::set(BUNDLE_ROOTS_VAR, Some(roots.as_os_str()));
-
-            let explicit_config = temp.path().join("explicit.json");
-            write_json(
-                &explicit_config,
-                &json!([explicit_bundle.display().to_string()]),
-            );
-
-            let explicit =
-                get_bundles(Some(&explicit_config)).expect("explicit config should load");
-            assert_eq!(
-                namespaced_map(&explicit).get("tools:render"),
-                Some(&explicit_bundle)
-            );
-
-            let auto = get_bundles(None).expect("auto-discovery should succeed");
-            assert_eq!(
-                namespaced_map(&auto).get("gt:pythoncore"),
-                Some(&auto_bundle)
-            );
-        });
     }
 
     #[test]

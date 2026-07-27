@@ -285,7 +285,7 @@ mod tests {
     fn encrypt_and_decrypt_round_trip_with_matching_key() {
         let temp_dir = tempdir().expect("tempdir should be created");
         let identity_path = temp_dir.path().join("config.agekey");
-        let plaintext = "C:\\secure\\packages";
+        let plaintext = "C:\\secure\\bundles";
         let (identity, recipient) = generate_keypair();
         write_identity_file(&identity_path, &identity);
 

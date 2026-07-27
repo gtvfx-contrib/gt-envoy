@@ -36,19 +36,14 @@ createWrapper = _native.createWrapper
 BUNDLE_CHECKOUT = _native.BUNDLE_CHECKOUT
 BUNDLE_DEFAULT_NAMESPACE = _native.BUNDLE_DEFAULT_NAMESPACE
 Bundle = _native.Bundle
-BundleConfig = _native.BundleConfig
 BundleInfo = _native.BundleInfo
+Stack = _native.Stack
 discoverBundlesAuto = _native.discoverBundlesAuto
 getBundles = _native.getBundles
-loadBundlesFromConfig = _native.loadBundlesFromConfig
+loadBundlesFromStack = _native.loadBundlesFromStack
 
-# Package cache bindings.
-PackageCache = _native.PackageCache
-
-# Pipeline & context bindings.
-Pipeline = _native.Pipeline
-ContextHierarchy = _native.ContextHierarchy
-PipelineConfig = _native.PipelineConfig
+# Bundle cache bindings.
+BundleCache = _native.BundleCache
 
 # Team configuration bindings.
 TeamConfig = _native.TeamConfig
@@ -67,16 +62,16 @@ CommandRegistry = _native.CommandRegistry
 Command = _native.Command
 findCommandsFile = _native.findCommandsFile
 
-# Named-config registry and user-config metadata bindings.
-NamedConfigEntry = _native.NamedConfigEntry
-CFG_ROOTS_VAR = _native.CFG_ROOTS_VAR
+# Named-stack registry and user-config metadata bindings.
+NamedStackEntry = _native.NamedStackEntry
+STACK_ROOTS_VAR = _native.STACK_ROOTS_VAR
 USER_CONFIG_PATH = _native.USER_CONFIG_PATH
 KNOWN_SETTINGS = _native.KNOWN_SETTINGS
-isConfigName = _native.isConfigName
-resolveNamedConfig = _native.resolveNamedConfig
-listNamedConfigs = _native.listNamedConfigs
-listConfigVersions = _native.listConfigVersions
-publishConfig = _native.publishConfig
+isStackName = _native.isStackName
+resolveNamedStack = _native.resolveNamedStack
+listNamedStacks = _native.listNamedStacks
+listStackVersions = _native.listStackVersions
+publishStack = _native.publishStack
 
 getEnvironment = _native.getEnvironment
 getAllowlist = _native.getAllowlist
@@ -84,9 +79,8 @@ traceEnvironment = _native.traceEnvironment
 diagnoseEnvironment = _native.diagnoseEnvironment
 setApiVerbosity = _native.setApiVerbosity
 loadUserConfig = _native.loadUserConfig
-getCurrentBundleConfig = _native.getCurrentBundleConfig
+getCurrentStack = _native.getCurrentStack
 getCurrentTeamConfig = _native.getCurrentTeamConfig
-getCurrentPipeline = _native.getCurrentPipeline
 enable_telemetry = _native.enable_telemetry
 disable_telemetry = _native.disable_telemetry
 is_telemetry_enabled = _native.is_telemetry_enabled
@@ -163,17 +157,17 @@ __all__ = [
     "CommandDefinition",
     "CommandRegistry",
     "Bundle",
-    "BundleConfig",
     "BundleInfo",
-    "NamedConfigEntry",
-    "CFG_ROOTS_VAR",
+    "Stack",
+    "NamedStackEntry",
+    "STACK_ROOTS_VAR",
     "USER_CONFIG_PATH",
     "KNOWN_SETTINGS",
-    "isConfigName",
-    "resolveNamedConfig",
-    "listNamedConfigs",
-    "listConfigVersions",
-    "publishConfig",
+    "isStackName",
+    "resolveNamedStack",
+    "listNamedStacks",
+    "listStackVersions",
+    "publishStack",
     "findCommandsFile",
     "getEnvironment",
     "getAllowlist",
@@ -181,20 +175,16 @@ __all__ = [
     "diagnoseEnvironment",
     "setApiVerbosity",
     "loadUserConfig",
-    "getCurrentBundleConfig",
+    "getCurrentStack",
     "getCurrentTeamConfig",
-    "getCurrentPipeline",
     "enable_telemetry",
     "disable_telemetry",
     "is_telemetry_enabled",
     "cli_main",
     "discoverBundlesAuto",
     "getBundles",
-    "loadBundlesFromConfig",
-    "PackageCache",
-    "Pipeline",
-    "ContextHierarchy",
-    "PipelineConfig",
+    "loadBundlesFromStack",
+    "BundleCache",
     "TeamConfig",
     "UserHostConfig",
     "Vcs",

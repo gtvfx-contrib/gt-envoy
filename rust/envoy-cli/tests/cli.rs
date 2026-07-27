@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use assert_cmd::Command;
-use envoy_core::package_cache::PackageCache;
+use envoy_core::bundle_cache::BundleCache;
 
 fn stdout_text(assert: &assert_cmd::assert::Assert) -> String {
     String::from_utf8_lossy(&assert.get_output().stdout).into_owned()
@@ -44,10 +44,21 @@ fn base_command() -> Command {
     let mut command = Command::cargo_bin("envoy").expect("envoy binary should build");
     command
         .env_remove("ENVOY_BNDL_ROOTS")
-        .env_remove("ENVOY_BUNDLES_CONFIG")
+        .env_remove("ENVOY_STACK")
+        .env_remove("ENVOY_STACK_CONTEXT")
+        .env_remove("ENVOY_STACK_ROOTS")
         .env_remove("ENVOY_COMMANDS_FILE")
         .env_remove("ENVOY_ALLOWLIST");
     command
+}
+
+fn write_stack(path: &Path, name: &str, namespace: &str, bundle: &Path) {
+    let bundle_path = bundle.to_string_lossy().replace('\'', "''");
+    fs::write(
+        path,
+        format!("name: {name}\nnamespace: {namespace}\nbundles:\n  - path: '{bundle_path}'\n"),
+    )
+    .expect("stack should be written");
 }
 
 #[test]
@@ -60,7 +71,7 @@ fn help_lists_expected_flags() {
         "--info <COMMAND>",
         "--which <COMMAND>",
         "--commands-file <PATH>",
-        "--bundles-config <PATH>",
+        "--stack <NAME_OR_PATH>",
         "--set-config <KEY=VALUE>",
         "--get-config [<KEY>]",
         "--list-configs",
@@ -68,13 +79,27 @@ fn help_lists_expected_flags() {
         "--env <ENV_COMMAND>",
         "--trace <VAR>",
         "-cf",
-        "-bc",
+        "-s",
     ] {
         assert!(
             stdout.contains(expected),
             "expected help to mention {expected}, got:\n{stdout}"
         );
     }
+}
+
+#[test]
+fn legacy_bundles_config_flag_is_rejected() {
+    let assert = base_command()
+        .args(["--bundles-config", "legacy.json"])
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+
+    assert!(
+        stderr.contains("unexpected argument '--bundles-config'"),
+        "stderr was:\n{stderr}"
+    );
 }
 
 #[test]
@@ -162,12 +187,12 @@ fn unregistered_command_name_returns_not_found() {
 }
 
 /// End-to-end coverage for the Phase 1-3 wiring gaps closed in this pass:
-/// a *published* bundle whose `.envoy/team.json` / `.envoy/pipeline.json` /
-/// `.envoy/commands.json` come from a warm package-cache entry, all
+/// a *published* bundle whose `.envoy/team.json` and `.envoy/commands.json`
+/// come from a warm bundle-cache entry, all selected through a strict stack
 /// resolved automatically through the real `envoy` binary -- not just via
 /// direct, isolated unit calls to each module.
 #[test]
-fn verbose_run_resolves_team_config_pipeline_and_warm_package_cache_together() {
+fn verbose_run_resolves_stack_team_config_and_warm_bundle_cache_together() {
     let scratch = ScratchDir::new("envoy_full_wiring");
 
     // A published bundle (has a `.bundle` marker) discovered via
@@ -186,7 +211,7 @@ fn verbose_run_resolves_team_config_pipeline_and_warm_package_cache_together() {
 
     // The cached snapshot: a *different* commands.json (so we can prove it
     // -- not the original bundle root -- is what actually gets loaded), plus
-    // the team.json / pipeline.json that should be auto-resolved.
+    // the team.json that should be auto-resolved.
     let cached_source = scratch.path().join("cached_source");
     let cached_envoy_dir = cached_source.join(".envoy");
     fs::create_dir_all(&cached_envoy_dir).expect("cached .envoy dir should be created");
@@ -197,22 +222,20 @@ fn verbose_run_resolves_team_config_pipeline_and_warm_package_cache_together() {
     .expect("cached commands.json should be written");
     fs::write(cached_envoy_dir.join("team.json"), r#"{"name": "bfd"}"#)
         .expect("cached team.json should be written");
-    fs::write(
-        cached_envoy_dir.join("pipeline.json"),
-        r#"{"name": "build", "namespace": "bfd"}"#,
-    )
-    .expect("cached pipeline.json should be written");
+    let stack_path = scratch.path().join("studio.estack");
+    write_stack(&stack_path, "studio", "bfd", &bundle_root);
 
-    let cache_root = scratch.path().join("package_cache");
-    let mut cache = PackageCache::new(&cache_root).expect("package cache should open");
+    let cache_root = scratch.path().join("bundle_cache");
+    let mut cache = BundleCache::new(&cache_root).expect("bundle cache should open");
     cache
         .store("gt:maya", "1.0.0", &cached_source)
         .expect("storing the cached snapshot should succeed");
 
     let assert = base_command()
-        .args(["--verbose", "--list"])
-        .env("ENVOY_BNDL_ROOTS", scratch.path())
-        .env("ENVOY_PACKAGE_CACHE", &cache_root)
+        .args(["--verbose", "--stack"])
+        .arg(&stack_path)
+        .arg("--list")
+        .env("ENVOY_BUNDLE_CACHE", &cache_root)
         .assert()
         .success();
 
@@ -233,13 +256,13 @@ warm, stdout was:\n{stdout}"
         "stderr was:\n{stderr}"
     );
     assert!(
-        stderr.contains("debug: Resolved pipeline: bfd:build"),
+        stderr.contains("debug: Resolved stack: studio"),
         "stderr was:\n{stderr}"
     );
 }
 
 /// A developer's own checkout must never be silently swapped for a cached
-/// snapshot, even when a package-cache entry exists under the same bndlid.
+/// snapshot, even when a bundle-cache entry exists under the same bndlid.
 #[test]
 fn verbose_run_never_substitutes_a_checkout_bundle_for_a_cache_entry() {
     let scratch = ScratchDir::new("envoy_checkout_not_cached");
@@ -265,8 +288,8 @@ fn verbose_run_never_substitutes_a_checkout_bundle_for_a_cache_entry() {
     )
     .expect("cached commands.json should be written");
 
-    let cache_root = scratch.path().join("package_cache");
-    let mut cache = PackageCache::new(&cache_root).expect("package cache should open");
+    let cache_root = scratch.path().join("bundle_cache");
+    let mut cache = BundleCache::new(&cache_root).expect("bundle cache should open");
     cache
         .store("gt:maya", "1.0.0", &cached_source)
         .expect("storing the cache entry should succeed");
@@ -274,7 +297,7 @@ fn verbose_run_never_substitutes_a_checkout_bundle_for_a_cache_entry() {
     let assert = base_command()
         .args(["--verbose", "--list"])
         .env("ENVOY_BNDL_ROOTS", scratch.path())
-        .env("ENVOY_PACKAGE_CACHE", &cache_root)
+        .env("ENVOY_BUNDLE_CACHE", &cache_root)
         .assert()
         .success();
 
@@ -292,7 +315,7 @@ stdout was:\n{stdout}"
 }
 
 #[test]
-fn diagnose_without_command_summarizes_bundles_team_and_pipeline() {
+fn diagnose_without_command_summarizes_stack_bundles_and_team() {
     let scratch = ScratchDir::new("envoy_diagnose_summary");
 
     let bundle_root = scratch.path().join("gt").join("maya");
@@ -306,18 +329,16 @@ fn diagnose_without_command_summarizes_bundles_team_and_pipeline() {
     .expect("commands.json should be written");
     fs::write(envoy_dir.join("team.json"), r#"{"name": "bfd"}"#)
         .expect("team.json should be written");
-    fs::write(
-        envoy_dir.join("pipeline.json"),
-        r#"{"name": "build", "namespace": "bfd"}"#,
-    )
-    .expect("pipeline.json should be written");
+    let stack_path = scratch.path().join("studio.estack");
+    write_stack(&stack_path, "studio", "bfd", &bundle_root);
 
-    let cache_root = scratch.path().join("package_cache");
+    let cache_root = scratch.path().join("bundle_cache");
 
     let assert = base_command()
+        .args(["--stack"])
+        .arg(&stack_path)
         .arg("--diagnose")
-        .env("ENVOY_BNDL_ROOTS", scratch.path())
-        .env("ENVOY_PACKAGE_CACHE", &cache_root)
+        .env("ENVOY_BUNDLE_CACHE", &cache_root)
         .assert()
         .success();
     let stdout = stdout_text(&assert);
@@ -334,10 +355,10 @@ fn diagnose_without_command_summarizes_bundles_team_and_pipeline() {
     );
     assert!(stdout.contains("Team config: bfd"), "stdout was:\n{stdout}");
     assert!(
-        stdout.contains("Current pipeline: bfd:build"),
+        stdout.contains("Current stack: studio"),
         "stdout was:\n{stdout}"
     );
-    assert!(stdout.contains("Package cache:"), "stdout was:\n{stdout}");
+    assert!(stdout.contains("Bundle cache:"), "stdout was:\n{stdout}");
     assert!(stdout.contains("VCS detected:"), "stdout was:\n{stdout}");
     assert!(
         stdout.contains("Telemetry: disabled"),

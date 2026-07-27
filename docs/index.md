@@ -1,6 +1,7 @@
 # Envoy
 
-**Environment orchestration for applications** — A CLI-first tool for managing complex application environments with JSON-based configuration and multi-bundle support.
+**Environment orchestration for applications** — A CLI-first tool for managing
+complex application environments with multi-bundle runtime Stacks.
 
 ## Key Features
 
@@ -11,11 +12,11 @@
 - **Auto-Discovery** — Automatic, parallelized bundle detection via `ENVOY_BNDL_ROOTS`, with an on-disk discovery cache for fast repeat invocations
 - **Path Normalization** — Automatic OS-native path handling
 - **Null-Safe** — Undefined variables in env files warn and skip rather than propagate empty values
-- **Package Caching** — Local, content-addressed caching for production packages, resolved automatically alongside bundle discovery
-- **Team & Pipeline Context** — Automatic `.envoy/team.json` and `.envoy/pipeline.json` resolution for team-scoped settings and context-aware pipelines
+- **Bundle Caching** — Local, content-addressed caching for production bundles, resolved automatically alongside bundle discovery
+- **Runtime Stacks** — Strict YAML `.estack` runtime containers with direct, named, and context-aware resolution
 - **VCS Integration** — Auto-detects Git, Perforce, or [Lore](https://github.com/EpicGames/lore) working copies for status/change queries
 - **Opt-In Telemetry** — Disabled by default; when enabled, exports usage events via OpenTelemetry/OTLP to any compatible collector
-- **Diagnostics** — `envoy --diagnose [COMMAND]` reports discovered bundles, team/pipeline context, cache and VCS status, and full environment resolution in one place
+- **Diagnostics** — `envoy --diagnose [COMMAND]` reports discovered bundles, team/Stack context, cache and VCS status, and full environment resolution in one place
 
 ## Quick Start
 
@@ -32,7 +33,7 @@ en python script.py
 # 4. Show command details
 en --info python
 
-# 5. Diagnose your environment (bundles, team/pipeline, cache, VCS, and more)
+# 5. Diagnose your environment (bundles, team/Stack, cache, VCS, and more)
 en --diagnose python
 ```
 
@@ -45,9 +46,9 @@ Full documentation is available at **[gtvfx-contrib.github.io/gt-envoy](https://
 | [Installation](https://gtvfx-contrib.github.io/gt-envoy/installation/) | Download and setup options |
 | [Core Concepts](https://gtvfx-contrib.github.io/gt-envoy/concepts/) | Bundles, commands, and env files |
 | [Environment Files](https://gtvfx-contrib.github.io/gt-envoy/env-files/) | JSON format reference |
-| [Bundle Discovery](https://gtvfx-contrib.github.io/gt-envoy/bundle-discovery/) | Auto-discovery and config files |
+| [Bundle Discovery](https://gtvfx-contrib.github.io/gt-envoy/bundle-discovery/) | Auto-discovery and Stack files |
 | [CLI Reference](https://gtvfx-contrib.github.io/gt-envoy/cli-reference/envoy/) | `envoy` and `engit` commands |
-| [Python API](https://gtvfx-contrib.github.io/gt-envoy/reference/envoy/) | Scripting and pipeline integration |
+| [Python API](https://gtvfx-contrib.github.io/gt-envoy/reference/envoy/) | Scripting and Stack integration |
 | [Troubleshooting](https://gtvfx-contrib.github.io/gt-envoy/troubleshooting/) | Common issues and fixes |
 
 ## Contributing

@@ -3,19 +3,20 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use envoy_core::bundle_cache::{open_default_bundle_cache, resolve_bundle_cache_dir};
 use envoy_core::commands::{find_commands_file, CommandDefinition, CommandRegistry};
-use envoy_core::config_registry::{
-    is_config_name, list_named_configs, resolve_named_config, CFG_ROOTS_VAR,
-};
 use envoy_core::discovery::{get_bundles, BundleInfo};
 use envoy_core::environment::{EnvironmentManager, TraceEvent};
 use envoy_core::error::EnvoyError;
 use envoy_core::executor::ProcessExecutor;
 use envoy_core::models::WrapperConfig;
-use envoy_core::package_cache::{open_default_package_cache, resolve_package_cache_dir};
 use envoy_core::runtime::{
     collect_env_files, is_raw_path, prepare_env, resolve_cached_bundles,
-    resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
+    resolve_team_config_for_bundles,
+};
+use envoy_core::stack::{Stack, DEFAULT_STACK_MAX_DEPTH, DEFAULT_STACK_NAMESPACE};
+use envoy_core::stack_registry::{
+    is_stack_name, list_named_stacks, resolve_named_stack, STACK_ROOTS_VAR,
 };
 use envoy_core::user_config::{known_settings, UserConfig};
 use envoy_core::wrapper::ApplicationWrapper;
@@ -30,6 +31,12 @@ struct ExecutionOptions<'a> {
     inherit_env: bool,
     env_allowlist: Option<&'a [String]>,
     env_override: Option<&'a str>,
+}
+
+struct LoadedRegistry {
+    registry: CommandRegistry,
+    bundles: Option<Vec<BundleInfo>>,
+    stack: Option<Stack>,
 }
 
 pub(crate) fn run(argv: &[String]) -> i32 {
@@ -48,8 +55,7 @@ pub(crate) fn run(argv: &[String]) -> i32 {
 
 /// Install a default `tracing` subscriber writing to stderr, honoring
 /// `RUST_LOG` (falling back to `warn`) for the internal diagnostic logging
-/// envoy-core emits via the `tracing` crate (e.g. malformed team.json /
-/// pipeline.json warnings).
+/// envoy-core emits via the `tracing` crate (for example malformed team.json warnings).
 ///
 /// Uses `try_init` rather than `init` since `run()` can be invoked more than
 /// once per process -- e.g. `envoy.cli_main(...)` from a long-lived Python
@@ -86,7 +92,11 @@ fn run_cli(cli: Cli) -> i32 {
     let verbose =
         cli.verbose || (!cli.ignore_config && matches!(user_cfg.get("verbosity"), Some("verbose")));
 
-    let (registry, bundles) = match load_registry_for_cli(&cli, &user_cfg, verbose) {
+    let LoadedRegistry {
+        registry,
+        bundles,
+        stack,
+    } = match load_registry_for_cli(&cli, verbose) {
         Ok(result) => result,
         Err(code) => return code,
     };
@@ -117,6 +127,7 @@ fn run_cli(cli: Cli) -> i32 {
         return run_diagnose(
             &registry,
             bundles.as_deref(),
+            stack.as_ref(),
             Some(command_name).filter(|name| !name.is_empty()),
             cli.inherit_env,
             env_allowlist.as_deref(),
@@ -197,58 +208,50 @@ fn run_cli(cli: Cli) -> i32 {
     exit_code
 }
 
-fn load_registry_for_cli(
-    cli: &Cli,
-    user_cfg: &UserConfig,
-    verbose: bool,
-) -> Result<(CommandRegistry, Option<Vec<BundleInfo>>), i32> {
+fn load_registry_for_cli(cli: &Cli, verbose: bool) -> Result<LoadedRegistry, i32> {
     let mut registry = CommandRegistry::empty();
     let mut bundles = None;
-    let mut effective_bundles_config = None;
-
-    // Resolve the local package cache once up front so both the explicit
-    // bundles-config path and the auto-discovery path below apply it
-    // consistently. Honors `--ignore-config` the same way `bundles_config`
-    // does: skip the user-config-sourced cache directory, but still allow
-    // the `ENVOY_PACKAGE_CACHE` / `ENVOY_DISABLE_PACKAGE_CACHE` env vars.
-    let mut package_cache = open_default_package_cache(!cli.ignore_config);
-
-    if let Some(raw_value) = cli.bundles_config.as_deref() {
-        let resolved = resolve_config_value(raw_value, verbose)?;
-        effective_bundles_config = Some(resolved);
-    }
-
-    if effective_bundles_config.is_none() && !cli.ignore_config {
-        if let Some(stored) = user_cfg.get("bundles_config") {
-            let resolved = resolve_config_value(stored, verbose)?;
-            debug(
-                verbose,
-                &format!(
-                    "Using bundles_config from user config: {}",
-                    resolved.display()
-                ),
-            );
-            effective_bundles_config = Some(resolved);
+    let selected_stack = if let Some(raw_value) = cli.stack.as_deref() {
+        Some(resolve_stack_value(raw_value, verbose)?)
+    } else {
+        match Stack::current(
+            cli.ignore_config,
+            None,
+            DEFAULT_STACK_NAMESPACE,
+            DEFAULT_STACK_MAX_DEPTH,
+        ) {
+            Ok(stack) => stack,
+            Err(error) => {
+                eprintln!("Error resolving stack: {}", display_envoy_error(&error));
+                return Err(1);
+            }
         }
-    }
+    };
 
-    if let Some(config_path) = effective_bundles_config {
-        match get_bundles(Some(&config_path)) {
+    // Resolve the local bundle cache once up front so both stack-backed and
+    // root-based discovery apply it consistently. `--ignore-config` skips the
+    // user-config-sourced cache directory while still allowing
+    // the `ENVOY_BUNDLE_CACHE` / `ENVOY_DISABLE_BUNDLE_CACHE` env vars.
+    let mut bundle_cache = open_default_bundle_cache(!cli.ignore_config);
+
+    if let Some(stack) = selected_stack.as_ref() {
+        match stack.bundle_infos() {
             Ok(discovered_bundles) => {
                 if discovered_bundles.is_empty() {
-                    debug(verbose, "No bundles found in config file");
+                    debug(verbose, "No bundles found in stack");
                 } else {
                     let team_config = resolve_team_config_for_bundles(Some(&discovered_bundles));
                     let discovered_bundles = resolve_cached_bundles(
                         discovered_bundles,
-                        package_cache.as_mut(),
+                        bundle_cache.as_mut(),
                         team_config.as_ref(),
                     );
                     debug(
                         verbose,
                         &format!(
-                            "Discovered {} bundle(s) from config file",
-                            discovered_bundles.len()
+                            "Discovered {} bundle(s) from stack {}",
+                            discovered_bundles.len(),
+                            stack.name()
                         ),
                     );
                     registry.load_from_bundles(&discovered_bundles);
@@ -257,7 +260,7 @@ fn load_registry_for_cli(
             }
             Err(error) => {
                 eprintln!(
-                    "Error loading bundles config: {}",
+                    "Error loading stack bundles: {}",
                     display_envoy_error(&error)
                 );
                 return Err(1);
@@ -283,7 +286,7 @@ fn load_registry_for_cli(
                 let team_config = resolve_team_config_for_bundles(Some(&discovered_bundles));
                 let discovered_bundles = resolve_cached_bundles(
                     discovered_bundles,
-                    package_cache.as_mut(),
+                    bundle_cache.as_mut(),
                     team_config.as_ref(),
                 );
                 debug(
@@ -337,36 +340,38 @@ fn load_registry_for_cli(
         if let Some(team) = resolve_team_config_for_bundles(bundles.as_deref()) {
             debug(verbose, &format!("Resolved team config: {}", team.name));
         }
-        if let Some(pipeline) = resolve_current_pipeline_for_bundles(bundles.as_deref()) {
-            debug(
-                verbose,
-                &format!(
-                    "Resolved pipeline: {}:{}",
-                    pipeline.namespace, pipeline.name
-                ),
-            );
+        if let Some(stack) = selected_stack.as_ref() {
+            debug(verbose, &format!("Resolved stack: {}", stack.name()));
         }
     }
 
-    Ok((registry, bundles))
+    Ok(LoadedRegistry {
+        registry,
+        bundles,
+        stack: selected_stack,
+    })
 }
 
-fn resolve_config_value(raw: &str, verbose: bool) -> Result<PathBuf, i32> {
-    if is_config_name(raw) {
-        let Some(resolved) = resolve_named_config(raw) else {
-            eprintln!(
-                "Error: Named config {raw:?} not found in {CFG_ROOTS_VAR}. Run 'envoy --list-configs' to see available configs."
-            );
+fn resolve_stack_value(raw: &str, verbose: bool) -> Result<Stack, i32> {
+    if is_stack_name(raw) {
+        let Some(resolved) = resolve_named_stack(raw) else {
+            eprintln!("Error: Named stack {raw:?} not found in {STACK_ROOTS_VAR}.");
             return Err(1);
         };
         debug(
             verbose,
-            &format!("Resolved named config {raw:?} to: {}", resolved.display()),
+            &format!("Resolved named stack {raw:?} to: {}", resolved.display()),
         );
-        return Ok(resolved);
+        return Stack::from_name(raw).map_err(|error| {
+            eprintln!("Error loading named stack: {}", display_envoy_error(&error));
+            1
+        });
     }
 
-    Ok(PathBuf::from(raw))
+    Stack::new(raw).map_err(|error| {
+        eprintln!("Error loading stack: {}", display_envoy_error(&error));
+        1
+    })
 }
 
 fn raw_path_without_env_override(command: Option<&str>, env_override: Option<&str>) -> bool {
@@ -375,13 +380,12 @@ fn raw_path_without_env_override(command: Option<&str>, env_override: Option<&st
 
 /// Implements `envoy --diagnose [COMMAND]`.
 ///
-/// Surfaces discovered bundles/commands, resolved team/pipeline context,
-/// package cache status, VCS detection, telemetry status, and bundle-root
+/// Surfaces the current stack, discovered bundles/commands, resolved team,
+/// bundle cache status, VCS detection, telemetry status, and bundle-root
 /// reachability -- everything the stretch-goals plan's Phase 5.3 "Diagnostic
 /// Tools" design called for in one place, wrapping the underlying
 /// `envoy_core` pieces (`resolve_team_config_for_bundles`,
-/// `resolve_current_pipeline_for_bundles`, `envoy_core::vcs::detect`,
-/// `open_default_package_cache`, `EnvironmentManager::diagnose_environment`)
+/// `open_default_bundle_cache`, `EnvironmentManager::diagnose_environment`)
 /// that are each individually reachable via other flags/the Python API but
 /// were not previously surfaced together in one CLI report.
 ///
@@ -391,6 +395,7 @@ fn raw_path_without_env_override(command: Option<&str>, env_override: Option<&st
 fn run_diagnose(
     registry: &CommandRegistry,
     bundles: Option<&[BundleInfo]>,
+    stack: Option<&Stack>,
     command_name: Option<&str>,
     inherit_env: bool,
     env_allowlist: Option<&[String]>,
@@ -399,6 +404,22 @@ fn run_diagnose(
     println!("{separator}");
     println!("envoy diagnose");
     println!("{separator}");
+    println!();
+
+    match stack {
+        Some(stack) => {
+            println!(
+                "Current stack: {} ({})",
+                stack.name(),
+                stack.path().display()
+            );
+            println!("  namespace: {}", stack.namespace());
+            if let Some(version) = stack.registry_version() {
+                println!("  registry_version: {version}");
+            }
+        }
+        None => println!("Current stack: none (using bundle-root fallback)"),
+    }
     println!();
 
     match bundles {
@@ -423,36 +444,28 @@ fn run_diagnose(
     match resolve_team_config_for_bundles(bundles) {
         Some(team) => {
             println!("Team config: {}", team.name);
-            if let Some(root) = team.prod_packages_root.as_ref() {
-                println!("  prod_packages_root:  {}", root.display());
+            if let Some(root) = team.prod_bundles_root.as_ref() {
+                println!("  prod_bundles_root:  {}", root.display());
             }
-            if let Some(root) = team.prod_pipelines_root.as_ref() {
-                println!("  prod_pipelines_root: {}", root.display());
+            if let Some(root) = team.prod_stacks_root.as_ref() {
+                println!("  prod_stacks_root: {}", root.display());
             }
         }
         None => println!("Team config: none discovered (.envoy/team.json not found)"),
     }
     println!();
 
-    match resolve_current_pipeline_for_bundles(bundles) {
-        Some(pipeline) => println!("Current pipeline: {}:{}", pipeline.namespace, pipeline.name),
-        None => println!(
-            "Current pipeline: none discovered (.envoy/pipeline.json not found, or no match)"
-        ),
-    }
-    println!();
-
-    match resolve_package_cache_dir(true) {
+    match resolve_bundle_cache_dir(true) {
         Some(dir) => {
-            let reachable = open_default_package_cache(true).is_some();
+            let reachable = open_default_bundle_cache(true).is_some();
             let note = if reachable {
                 "reachable"
             } else {
                 "configured but could not be opened"
             };
-            println!("Package cache: {} ({note})", dir.display());
+            println!("Bundle cache: {} ({note})", dir.display());
         }
-        None => println!("Package cache: disabled (ENVOY_DISABLE_PACKAGE_CACHE is set)"),
+        None => println!("Bundle cache: disabled (ENVOY_DISABLE_BUNDLE_CACHE is set)"),
     }
     println!();
 
@@ -1053,20 +1066,20 @@ fn handle_list_configs() -> i32 {
     println!("Usage:  envoy --set-config KEY=VALUE");
     println!("        envoy --set-config KEY=       (clear a setting)");
 
-    let named_configs = list_named_configs();
-    if !named_configs.is_empty() {
+    let named_stacks = list_named_stacks();
+    if !named_stacks.is_empty() {
         println!();
-        println!("Available named configs ({CFG_ROOTS_VAR}):");
+        println!("Available named stacks ({STACK_ROOTS_VAR}):");
         println!();
-        for entry in named_configs {
+        for entry in named_stacks {
             println!("  {:<20}  version: {}", entry.name, entry.version);
             println!("    {}", entry.path.display());
         }
         println!();
-        println!("Usage:  envoy --set-config bundles_config=<name>");
-    } else if env::var_os(CFG_ROOTS_VAR).is_some() {
+        println!("Usage:  envoy --set-config stack=<name>");
+    } else if env::var_os(STACK_ROOTS_VAR).is_some() {
         println!();
-        println!("No named configs found in {CFG_ROOTS_VAR}.");
+        println!("No named stacks found in {STACK_ROOTS_VAR}.");
     }
 
     0

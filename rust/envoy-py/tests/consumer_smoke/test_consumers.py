@@ -36,13 +36,13 @@ def test_globals_vscode_wrapper_write_local_bundles(tmp_path, monkeypatch):
     if not (globals_py / "gt" / "vscode" / "wrapper" / "_wrapper.py").is_file():
         pytest.skip("gt/globals is not checked out as a sibling directory")
 
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     sys.path.insert(0, str(globals_py))
     try:
         from gt.vscode.wrapper import _wrapper
     finally:
         sys.path.remove(str(globals_py))
 
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setenv("ENVOY_BNDL_ROOTS", str(Path(__file__).parents[5]))
 
     bundles_path = _wrapper.write_local_bundles(force=True)

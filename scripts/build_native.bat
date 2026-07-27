@@ -55,6 +55,14 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 
+echo.
+echo building local pyd (maturin develop --release)...
+maturin develop --release
+if %errorlevel% neq 0 (
+    echo ERROR: maturin develop failed.
+    exit /b %errorlevel%
+)
+
 :done
 echo.
 echo Build complete. Native binaries written to:
