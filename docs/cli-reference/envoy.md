@@ -67,8 +67,10 @@ en --info python
 
 ```
 Command: python
-Bundle:  gt:ext:python
-Executable: python -X dev
+Target: linux/x86_64
+Configuration: base -> linux -> x86_64
+Bundle: gt:ext:python
+Executable: python
 Environment files:
   - python_env.json
 Environment directory: R:/repo/.../pythoncore/.envoy
@@ -121,6 +123,8 @@ en --diagnose python
 ================================================================
 envoy diagnose
 ================================================================
+
+Target: linux/x86_64
 
 Bundles discovered: 2
   - gt:pythoncore            R:/repo/gtvfx-contrib/gt/pythoncore
@@ -182,7 +186,7 @@ en -c R:/my-project/.envoy/commands.json my_command
 
 | Variable | Description |
 |---|---|
-| `ENVOY_BNDL_ROOTS` | Semicolon-separated root directories for bundle auto-discovery |
+| `ENVOY_BNDL_ROOTS` | Platform-separated roots for bundle auto-discovery (`;` on Windows, `:` on Unix) |
 | `ENVOY_STACK` | Named Stack or `.estack` path used when `--stack` is omitted |
 | `ENVOY_STACK_ROOTS` | Platform-separated roots containing versioned named Stacks |
 | `ENVOY_STACK_CONTEXT` | Colon-separated context used for most-specific namespace matching |

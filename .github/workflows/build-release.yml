@@ -3,215 +3,266 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version label for a validation build
+        required: true
+        default: dev
 
 permissions:
-  contents: write   # required to create/upload to releases
+  contents: write
+
+env:
+  RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
 
 jobs:
-  build-windows:
-    name: Build Windows executables
+  windows-x86_64:
+    name: Windows x64 release
     runs-on: [self-hosted, X64, Windows, synology]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # full history so `git describe` can derive the version from the tag
+          fetch-depth: 0
 
-      - name: Set up Python 3.11.9
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11.9'
+          python-version: "3.11"
 
       - name: Ensure Git Bash is on PATH
-        # dtolnay/rust-toolchain's composite steps declare `shell: bash`.
-        # GitHub-hosted Windows runners ship Git for Windows with its `bin`
-        # dir already on PATH, so `bash` resolves for free. This self-hosted
-        # Windows runner has Git for Windows installed (git.exe is used for
-        # checkout above) but only `Git\cmd` is on PATH, not `Git\bin`/
-        # `Git\usr\bin` where bash.exe and its POSIX utils live, so `bash`
-        # otherwise fails with "command not found".
         shell: pwsh
         run: |
-          $gitBashPaths = @(
-            'C:\Program Files\Git\bin',
-            'C:\Program Files\Git\usr\bin'
-          ) | Where-Object { Test-Path $_ }
+          $paths = @('C:\Program Files\Git\bin', 'C:\Program Files\Git\usr\bin') |
+              Where-Object { Test-Path $_ }
+          if (-not $paths) { throw 'Git Bash is required by the Rust toolchain action.' }
+          foreach ($entry in $paths) { Add-Content -Path $env:GITHUB_PATH -Value $entry }
 
-          if (-not $gitBashPaths) {
-            throw "Git for Windows (bash.exe) not found on this runner; install it from https://gitforwindows.org/."
-          }
-
-          foreach ($path in $gitBashPaths) {
-            Add-Content -Path $env:GITHUB_PATH -Value $path
-          }
-
-      - name: Install stable Rust toolchain (1.75+ for Windows response file support)
+      - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustc
 
-      - name: Cache cargo registry/build artifacts
+      - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
 
-      - name: Clean Cargo build cache (fixes link.exe argument limit)
-        # Removes stale build artifacts that may have been compiled with an older
-        # Rust toolchain. This prevents `link.exe extra operand` errors on Windows
-        # where object file paths exceed command-line limits.
-        run: cargo clean --manifest-path rust/envoy-py/Cargo.toml
+      - name: Test native workspace
+        working-directory: rust
+        run: cargo test --workspace --exclude envoy-py
 
-      - name: Verify MSVC build tools are available
-        # Ensures the self-hosted runner has proper Visual Studio build tools installed.
-        # The `link.exe extra operand` error often indicates missing or outdated MSVC tools.
+      - name: Test Rust Python bindings
+        working-directory: rust
+        run: cargo test -p envoy-py --lib
+
+      - name: Build native CLIs
+        run: python scripts/build_native.py --skip-wheel
+
+      - name: Build and test Python wheel
         shell: pwsh
         run: |
-          $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (Test-Path $vsWhere) {
-            & $vsWhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Out-Null
-            Write-Host "Visual Studio build tools found at: $LASTEXITCODE"
-          } else {
-            throw "Visual Studio build tools not found. Install 'Desktop development with C++' workload."
-          }
-
-      - name: Install envoy (with docs extras)
-        # Builds+installs the maturin-backed envoy-py wheel (compiling the
-        # Rust extension via cargo, which the Rust toolchain step above set
-        # up), so mkdocstrings can introspect its docstrings below.
-        # envoy.__version__ is derived from `git describe` at build time via
-        # rust/envoy-py/build.rs, independent of this install step.
-        run: pip install .[docs]
-
-      - name: Build documentation
-        working-directory: ${{ github.workspace }}
-        run: python -m properdocs build --clean
-
-      - name: Build native executables
-        # Replaces the old PyInstaller (envoy.spec) build: envoy-cli/engit-cli
-        # are native Rust binaries with no bundled Python interpreter and no
-        # PyInstaller step required. See rust/README.md.
-        working-directory: ${{ github.workspace }}/rust
-        run: cargo build --workspace --exclude envoy-py --release
-
-      - name: Stage executables into dist/
-        run: |
-          New-Item -ItemType Directory -Path dist -Force | Out-Null
-          Copy-Item rust\target\release\envoy.exe dist\envoy.exe -Force
-          Copy-Item rust\target\release\engit.exe dist\engit.exe -Force
-
-      - name: Verify executables
-        run: |
-          .\dist\envoy.exe --version
-          .\dist\engit.exe --help
-
-      - name: Build envoy Python wheel for release
-        # The envoy-py (PyO3) wheel is now the distributed `envoy` Python
-        # package (see pyproject.toml's maturin build-backend). Built
-        # directly into dist/ so it's picked up by the release-upload step
-        # below alongside the native executables.
-        run: |
-          pip install maturin
+          python -m pip install maturin pytest
           python -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml --out dist
+          python -m pip install --force-reinstall --no-index --find-links dist envoy
+          python -m pytest rust/envoy-py/tests -v
 
-      - name: Create publish zip
-        # Staged publish: copy only deployment-relevant items into a clean
-        # staging directory, place EXEs into bin/ (replacing their bat
-        # counterparts), then zip the result. en.bat is kept as a tiny alias
-        # wrapper that calls envoy.exe directly.
+      - name: Verify native CLIs
+        shell: pwsh
         run: |
-          $version   = "${{ github.ref_name }}"
-          $workspace = "${{ github.workspace }}"
-          $staging   = "$workspace\_publish_staging"
-          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          .\rust\target\release\envoy.exe --version
+          .\rust\target\release\engit.exe --help
 
-          foreach ($item in @('bin', '.envoy', 'LICENSE', 'README.md')) {
-              $src = "$workspace\$item"
-              if (Test-Path $src) {
-                  Copy-Item $src "$staging\" -Recurse -Force
-              }
-          }
+      - name: Package Windows bundle
+        run: >-
+          python scripts/package_release.py
+          --version $env:RELEASE_VERSION
+          --target-name windows-x86_64
+          --binary-dir rust/target/release
+          --windows
 
-          # Include built documentation as docs/
-          if (Test-Path "$workspace\site") {
-              Copy-Item "$workspace\site" "$staging\docs" -Recurse -Force
-          }
-
-          # Remove bat launchers that are replaced by EXEs in the publish layout
-          Remove-Item "$staging\bin\envoy.bat" -Force -ErrorAction SilentlyContinue
-          Remove-Item "$staging\bin\engit.bat" -Force -ErrorAction SilentlyContinue
-
-          # Place EXEs into bin/ (envoy.exe also serves as the target for en.bat)
-          Copy-Item "$workspace\dist\envoy.exe" "$staging\bin\envoy.exe" -Force
-          Copy-Item "$workspace\dist\engit.exe" "$staging\bin\engit.exe" -Force
-
-          # Wrap staged contents in a versioned subdirectory so the zip has
-          # internal paths gt/envoy/<version>/... matching the envoy bundle
-          # naming convention (repo name segments → directory segments).
-          $repoName    = "${{ github.event.repository.name }}"
-          $publishPath = $repoName -replace '-', '/'
-          $bndlid      = $repoName -replace '-', ':'
-          $bndlName    = ($bndlid -split ':', 2)[1]
-          $topDir      = ($publishPath -split '/')[0]
-
-          $innerDir = Join-Path $staging ($publishPath.Replace('/', '\') + "\$version")
-          New-Item -ItemType Directory -Path $innerDir -Force | Out-Null
-
-          Get-ChildItem $staging | Where-Object { $_.Name -ne $topDir } |
-              ForEach-Object { Move-Item $_.FullName $innerDir -Force }
-
-          $published  = (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
-          $markerJson = "{`n  `"bndlid`": `"$bndlid`",`n  `"name`": `"$bndlName`",`n  `"version`": `"$version`",`n  `"published`": `"$published`"`n}"
-          Set-Content -Path "$innerDir\.bundle" -Value $markerJson -Encoding UTF8
-
-          $zipPath = "$workspace\dist\envoy-$version.zip"
-          Compress-Archive -Path "$staging\*" -DestinationPath $zipPath
-          Remove-Item $staging -Recurse -Force
-
-      - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
         with:
-          files: |
-            dist/envoy.exe
-            dist/engit.exe
+          name: release-windows-x86_64
+          path: |
+            dist/envoy-*-windows-x86_64.zip
             dist/envoy-*.whl
-            dist/envoy-v*.zip
-          fail_on_unmatched_files: true
+          if-no-files-found: error
 
-  build-native-cross-platform:
-    # Cross-platform build verification for the native Rust binaries. This
-    # job does NOT (yet) produce release assets -- Linux/macOS distribution
-    # of envoy/engit is not yet an established workflow (bin/*.bat, the
-    # bundle-publish zip layout, etc. are still Windows-oriented) -- it only
-    # confirms the Rust workspace builds cleanly on each platform, catching
-    # cross-platform regressions early. Promote this to a real release
-    # artifact once Linux/macOS distribution is actually needed.
-    name: Build native binaries (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  linux-x86_64:
+    name: Linux x64 release
+    runs-on: [self-hosted, Linux, X64, synology]
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install stable Rust toolchain
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust with musl target
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
 
-      - name: Cache cargo registry/build artifacts
+      - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
 
-      - name: Build native executables
-        working-directory: ${{ github.workspace }}/rust
-        run: cargo build --workspace --exclude envoy-py --release
+      - name: Install pinned cross
+        run: cargo install cross --version 0.2.5 --locked
 
-      - name: Verify executables
-        working-directory: ${{ github.workspace }}/rust
+      - name: Build and test static native CLIs
+        working-directory: rust
         run: |
-          ./target/release/envoy --version
-          ./target/release/engit --help
+          cross test --workspace --exclude envoy-py --target x86_64-unknown-linux-musl
+          cross build --workspace --exclude envoy-py --release --target x86_64-unknown-linux-musl
+
+      - name: Verify static native CLIs
+        run: |
+          rust/target/x86_64-unknown-linux-musl/release/envoy --version
+          rust/target/x86_64-unknown-linux-musl/release/engit --help
+          file rust/target/x86_64-unknown-linux-musl/release/envoy | grep -Eq 'statically linked|static-pie linked'
+          file rust/target/x86_64-unknown-linux-musl/release/engit | grep -Eq 'statically linked|static-pie linked'
+
+      - name: Build manylinux2014 wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: x86_64
+          manylinux: "2014"
+          args: >-
+            --release --out dist
+            --manifest-path rust/envoy-py/Cargo.toml
+
+      - name: Test Python wheel
+        run: |
+          python -m pip install pytest
+          python -m pip install --force-reinstall --no-index --find-links dist envoy
+          python -m pytest rust/envoy-py/tests -v
+
+      - name: Package Linux bundle
+        run: >-
+          python scripts/package_release.py
+          --version "$RELEASE_VERSION"
+          --target-name linux-x86_64-musl
+          --binary-dir rust/target/x86_64-unknown-linux-musl/release
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux-x86_64
+          path: |
+            dist/envoy-*-linux-x86_64-musl.tar.gz
+            dist/envoy-*.whl
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.target_name }} release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            target_name: macos-x86_64
+          - runner: macos-15
+            target_name: macos-aarch64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Test native workspace
+        working-directory: rust
+        run: cargo test --workspace --exclude envoy-py
+
+      - name: Test Rust Python bindings
+        working-directory: rust
+        run: cargo test -p envoy-py --lib
+
+      - name: Build native CLIs
+        run: python3 scripts/build_native.py --skip-wheel
+
+      - name: Build and test Python wheel
+        run: |
+          python3 -m pip install maturin pytest
+          python3 -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml --out dist
+          python3 -m pip install --force-reinstall --no-index --find-links dist envoy
+          python3 -m pytest rust/envoy-py/tests -v
+
+      - name: Verify native CLIs
+        run: |
+          rust/target/release/envoy --version
+          rust/target/release/engit --help
+
+      # Signing and notarization will be inserted here when repository
+      # credentials and an ENABLE_ARTIFACT_SIGNING variable are available.
+      - name: Package macOS bundle
+        run: >-
+          python3 scripts/package_release.py
+          --version "$RELEASE_VERSION"
+          --target-name ${{ matrix.target_name }}
+          --binary-dir rust/target/release
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.target_name }}
+          path: |
+            dist/envoy-*-macos-*.tar.gz
+            dist/envoy-*.whl
+          if-no-files-found: error
+
+  publish:
+    name: Publish checksummed release
+    if: github.event_name == 'push'
+    needs: [windows-x86_64, linux-x86_64, macos]
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create SHA-256 manifest
+        working-directory: dist
+        run: find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.whl
+            dist/SHA256SUMS
+          fail_on_unmatched_files: true
+          body: |
+            Envoy supports Windows, Linux, and macOS. These artifacts are
+            checksummed but currently unsigned. See the installation guide
+            for Windows SmartScreen and macOS Gatekeeper guidance.

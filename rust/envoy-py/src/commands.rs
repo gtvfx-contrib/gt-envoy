@@ -90,6 +90,7 @@ impl CommandDefinition {
                 bundle,
                 envoy_env_dir: resolve_optional_path(envoy_env_dir)?,
                 source_file: resolve_optional_path(source_file)?,
+                platform_overrides: Vec::new(),
             },
         })
     }
@@ -135,6 +136,18 @@ impl CommandDefinition {
     #[getter]
     fn source_file(&self, py: Python<'_>) -> PyResult<PyObject> {
         optional_path_to_pyobject(py, self.inner.source_file.as_deref())
+    }
+
+    /// Return the OS and CPU override levels applied to this command.
+    #[getter]
+    fn platform_overrides(&self) -> Vec<String> {
+        self.inner.platform_overrides.clone()
+    }
+
+    /// Return the effective configuration resolution chain.
+    #[getter]
+    fn platform_resolution(&self) -> String {
+        self.inner.platform_resolution()
     }
 
     /// Return the executable that should be launched for this command.
@@ -587,6 +600,8 @@ mod tests {
                 command_ref.base_args(),
                 vec![String::from("-m"), String::from("pip")]
             );
+            assert!(command_ref.platform_overrides().is_empty());
+            assert_eq!(command_ref.platform_resolution(), String::from("base"));
         });
     }
 

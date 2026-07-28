@@ -36,9 +36,23 @@ pub struct CommandDefinition {
     pub envoy_env_dir: Option<PathBuf>,
     /// `commands.json` file this definition was loaded from.
     pub source_file: Option<PathBuf>,
+    /// Platform override levels applied while loading this definition.
+    ///
+    /// Values use the canonical Rust target names, for example `linux` and
+    /// `x86_64`. An empty list means the base command definition was used.
+    pub platform_overrides: Vec<String>,
 }
 
 impl CommandDefinition {
+    /// Describe how the effective command configuration was resolved.
+    pub fn platform_resolution(&self) -> String {
+        if self.platform_overrides.is_empty() {
+            String::from("base")
+        } else {
+            format!("base -> {}", self.platform_overrides.join(" -> "))
+        }
+    }
+
     /// Return the executable for this command.
     ///
     /// This is `alias[0]` when an alias exists, otherwise `name`.
@@ -261,14 +275,14 @@ impl CommandRegistry {
                 ));
                 continue;
             };
-            let Some(environment) = json_array_to_strings(environment_value) else {
+            let Some(mut environment) = json_array_to_strings(environment_value) else {
                 log_warning(&format!(
                     "Command '{command_name}' has invalid 'environment' field, skipping"
                 ));
                 continue;
             };
 
-            let alias = match command_object.get("alias") {
+            let mut alias = match command_object.get("alias") {
                 Some(alias_value) => match json_array_to_strings(alias_value) {
                     Some(alias) => Some(alias),
                     None => {
@@ -281,6 +295,16 @@ impl CommandRegistry {
                 None => None,
             };
 
+            let Some(platform_overrides) = apply_platform_overrides(
+                &command_name,
+                commands_file,
+                command_object.get("platforms"),
+                &mut environment,
+                &mut alias,
+            ) else {
+                continue;
+            };
+
             let command_definition = CommandDefinition {
                 name: command_name.clone(),
                 environment,
@@ -288,6 +312,7 @@ impl CommandRegistry {
                 bundle: bundle_name.map(ToOwned::to_owned),
                 envoy_env_dir: Some(wrapper_env_dir.clone()),
                 source_file: Some(commands_file.to_path_buf()),
+                platform_overrides,
             };
 
             if self.commands.contains_key(&command_name) {
@@ -460,6 +485,148 @@ fn json_array_to_strings(value: &Value) -> Option<Vec<String>> {
         .collect()
 }
 
+const SUPPORTED_OPERATING_SYSTEMS: &[&str] = &["windows", "linux", "macos"];
+const SUPPORTED_ARCHITECTURES: &[&str] = &["x86_64", "aarch64"];
+
+fn apply_platform_overrides(
+    command_name: &str,
+    commands_file: &Path,
+    platforms_value: Option<&Value>,
+    environment: &mut Vec<String>,
+    alias: &mut Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    let Some(platforms_value) = platforms_value else {
+        return Some(Vec::new());
+    };
+    let Some(platforms) = platforms_value.as_object() else {
+        log_warning(&format!(
+            "Command '{command_name}' in {} has invalid 'platforms' field, skipping",
+            commands_file.display()
+        ));
+        return None;
+    };
+
+    for operating_system in platforms.keys() {
+        if !SUPPORTED_OPERATING_SYSTEMS.contains(&operating_system.as_str()) {
+            log_warning(&format!(
+                "Command '{command_name}' in {} has unknown operating system \
+override '{operating_system}'",
+                commands_file.display()
+            ));
+        }
+    }
+
+    let operating_system = env::consts::OS;
+    let Some(os_value) = platforms.get(operating_system) else {
+        return Some(Vec::new());
+    };
+    let Some(os_override) = os_value.as_object() else {
+        log_warning(&format!(
+            "Command '{command_name}' in {} has invalid '{operating_system}' \
+override, skipping",
+            commands_file.display()
+        ));
+        return None;
+    };
+
+    if !apply_command_override(
+        command_name,
+        commands_file,
+        operating_system,
+        os_override,
+        environment,
+        alias,
+    ) {
+        return None;
+    }
+
+    let mut applied = vec![operating_system.to_string()];
+    let Some(architectures_value) = os_override.get("architectures") else {
+        return Some(applied);
+    };
+    let Some(architectures) = architectures_value.as_object() else {
+        log_warning(&format!(
+            "Command '{command_name}' in {} has invalid 'architectures' field \
+in its '{operating_system}' override, skipping",
+            commands_file.display()
+        ));
+        return None;
+    };
+
+    for architecture in architectures.keys() {
+        if !SUPPORTED_ARCHITECTURES.contains(&architecture.as_str()) {
+            log_warning(&format!(
+                "Command '{command_name}' in {} has unknown architecture \
+override '{architecture}' under '{operating_system}'",
+                commands_file.display()
+            ));
+        }
+    }
+
+    let architecture = env::consts::ARCH;
+    let Some(architecture_value) = architectures.get(architecture) else {
+        return Some(applied);
+    };
+    let Some(architecture_override) = architecture_value.as_object() else {
+        log_warning(&format!(
+            "Command '{command_name}' in {} has invalid '{architecture}' \
+override under '{operating_system}', skipping",
+            commands_file.display()
+        ));
+        return None;
+    };
+
+    let override_name = format!("{operating_system}.{architecture}");
+    if !apply_command_override(
+        command_name,
+        commands_file,
+        &override_name,
+        architecture_override,
+        environment,
+        alias,
+    ) {
+        return None;
+    }
+
+    applied.push(architecture.to_string());
+    Some(applied)
+}
+
+fn apply_command_override(
+    command_name: &str,
+    commands_file: &Path,
+    override_name: &str,
+    command_override: &serde_json::Map<String, Value>,
+    environment: &mut Vec<String>,
+    alias: &mut Option<Vec<String>>,
+) -> bool {
+    if let Some(environment_value) = command_override.get("environment") {
+        let Some(override_environment) = json_array_to_strings(environment_value) else {
+            log_warning(&format!(
+                "Command '{command_name}' in {} has invalid 'environment' \
+field in its '{override_name}' override, skipping",
+                commands_file.display()
+            ));
+            return false;
+        };
+        *environment = override_environment;
+    }
+
+    if let Some(alias_value) = command_override.get("alias") {
+        let Some(override_alias) = json_array_to_strings(alias_value) else {
+            log_warning(&format!(
+                "Command '{command_name}' in {} has invalid 'alias' field in \
+its '{override_name}' override, skipping",
+                commands_file.display()
+            ));
+            return false;
+        };
+        *alias = Some(override_alias);
+    }
+
+    true
+}
+
 fn format_python_list(values: &[String]) -> String {
     let contents = values
         .iter()
@@ -595,6 +762,7 @@ mod tests {
             bundle: Some(String::from("gt:pythoncore")),
             envoy_env_dir: None,
             source_file: None,
+            platform_overrides: Vec::new(),
         };
 
         assert_eq!(command.executable(), "python.exe");
@@ -627,6 +795,7 @@ mod tests {
             bundle: None,
             envoy_env_dir: Some(envoy_env_dir.clone()),
             source_file: None,
+            platform_overrides: Vec::new(),
         };
         let env_vars = HashMap::from([(String::from("HOME"), String::from("C:/Users/Test"))]);
 
@@ -760,6 +929,139 @@ mod tests {
     }
 
     #[test]
+    fn load_from_file_applies_os_and_architecture_overrides() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let envoy_env_dir = temp_dir.path().join(BUNDLE_ENV_DIR);
+        fs::create_dir_all(&envoy_env_dir).expect("failed to create .envoy directory");
+        let commands_file = envoy_env_dir.join("commands.json");
+
+        write_json(
+            &commands_file,
+            &json!({
+                "tool": {
+                    "environment": ["base.json"],
+                    "alias": ["base-tool"],
+                    "platforms": {
+                        "windows": {
+                            "environment": ["windows.json"],
+                            "alias": ["windows-tool"],
+                            "architectures": {
+                                "x86_64": {"alias": ["windows-x86_64-tool"]},
+                                "aarch64": {"alias": ["windows-aarch64-tool"]}
+                            }
+                        },
+                        "linux": {
+                            "environment": ["linux.json"],
+                            "alias": ["linux-tool"],
+                            "architectures": {
+                                "x86_64": {"alias": ["linux-x86_64-tool"]},
+                                "aarch64": {"alias": ["linux-aarch64-tool"]}
+                            }
+                        },
+                        "macos": {
+                            "environment": ["macos.json"],
+                            "alias": ["macos-tool"],
+                            "architectures": {
+                                "x86_64": {"alias": ["macos-x86_64-tool"]},
+                                "aarch64": {"alias": ["macos-aarch64-tool"]}
+                            }
+                        }
+                    }
+                }
+            }),
+        );
+
+        let registry =
+            CommandRegistry::new(Some(&commands_file)).expect("failed to load commands file");
+        let command = registry
+            .get("tool")
+            .expect("tool command should be present");
+
+        assert_eq!(
+            command.environment,
+            vec![format!("{}.json", env::consts::OS)]
+        );
+        assert_eq!(
+            command.alias,
+            Some(vec![format!(
+                "{}-{}-tool",
+                env::consts::OS,
+                env::consts::ARCH
+            )])
+        );
+        assert_eq!(
+            command.platform_overrides,
+            vec![env::consts::OS.to_string(), env::consts::ARCH.to_string()]
+        );
+        assert_eq!(
+            command.platform_resolution(),
+            format!("base -> {} -> {}", env::consts::OS, env::consts::ARCH)
+        );
+    }
+
+    #[test]
+    fn platform_overrides_inherit_unspecified_fields() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let envoy_env_dir = temp_dir.path().join(BUNDLE_ENV_DIR);
+        fs::create_dir_all(&envoy_env_dir).expect("failed to create .envoy directory");
+        let commands_file = envoy_env_dir.join("commands.json");
+        let config_text = format!(
+            r#"{{
+                "tool": {{
+                    "environment": ["base.json"],
+                    "alias": ["base-tool"],
+                    "platforms": {{
+                        "{}": {{
+                            "alias": ["os-tool"],
+                            "architectures": {{
+                                "{}": {{"environment": ["arch.json"]}}
+                            }}
+                        }}
+                    }}
+                }}
+            }}"#,
+            env::consts::OS,
+            env::consts::ARCH
+        );
+        fs::write(&commands_file, config_text).expect("failed to write commands file");
+
+        let registry =
+            CommandRegistry::new(Some(&commands_file)).expect("failed to load commands file");
+        let command = registry
+            .get("tool")
+            .expect("tool command should be present");
+
+        assert_eq!(command.environment, vec![String::from("arch.json")]);
+        assert_eq!(command.alias, Some(vec![String::from("os-tool")]));
+    }
+
+    #[test]
+    fn invalid_current_platform_override_skips_command() {
+        let temp_dir = tempdir().expect("failed to create tempdir");
+        let envoy_env_dir = temp_dir.path().join(BUNDLE_ENV_DIR);
+        fs::create_dir_all(&envoy_env_dir).expect("failed to create .envoy directory");
+        let commands_file = envoy_env_dir.join("commands.json");
+
+        write_json(
+            &commands_file,
+            &json!({
+                "tool": {
+                    "environment": [],
+                    "platforms": {
+                        "windows": "invalid",
+                        "linux": "invalid",
+                        "macos": "invalid"
+                    }
+                }
+            }),
+        );
+
+        let registry =
+            CommandRegistry::new(Some(&commands_file)).expect("commands file should be readable");
+        assert!(!registry.contains("tool"));
+    }
+
+    #[test]
     fn resolve_environment_splices_references_in_declaration_order() {
         let mut registry = CommandRegistry::empty();
         let fake_dir = PathBuf::from("C:\\fake\\bundle\\.envoy");
@@ -773,6 +1075,7 @@ mod tests {
                 bundle: None,
                 envoy_env_dir: Some(fake_dir.clone()),
                 source_file: None,
+                platform_overrides: Vec::new(),
             },
         );
         registry.commands.insert(
@@ -788,6 +1091,7 @@ mod tests {
                 bundle: None,
                 envoy_env_dir: Some(fake_dir.clone()),
                 source_file: None,
+                platform_overrides: Vec::new(),
             },
         );
 
@@ -817,6 +1121,7 @@ mod tests {
                 bundle: None,
                 envoy_env_dir: None,
                 source_file: None,
+                platform_overrides: Vec::new(),
             },
         );
 
@@ -837,6 +1142,7 @@ mod tests {
                 bundle: None,
                 envoy_env_dir: None,
                 source_file: None,
+                platform_overrides: Vec::new(),
             },
         );
         cyclic_registry.commands.insert(
@@ -848,6 +1154,7 @@ mod tests {
                 bundle: None,
                 envoy_env_dir: None,
                 source_file: None,
+                platform_overrides: Vec::new(),
             },
         );
 

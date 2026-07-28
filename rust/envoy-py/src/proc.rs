@@ -779,6 +779,7 @@ fn build_cached_environment(
             bundle: None,
             envoy_env_dir: None,
             source_file: None,
+            platform_overrides: Vec::new(),
         };
         return Ok(CachedEnvironment {
             env,

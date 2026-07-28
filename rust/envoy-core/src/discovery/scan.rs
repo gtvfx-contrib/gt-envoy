@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 
 use crate::discovery::types::BundleInfo;
-use crate::discovery::util::{name_and_namespace};
+use crate::discovery::util::name_and_namespace;
 
 /// Return `true` if `path` contains a `.git/` directory.
 pub fn is_git_repo(path: &Path) -> bool {

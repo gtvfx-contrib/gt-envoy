@@ -1,70 +1,34 @@
-name: Bundle Publish
+name: Publish Envoy Bundle
 
-# Reusable workflow for publishing a simple envoy bundle.
-#
-# Produces a versioned zip (<bundle-name>-<version>.zip) with internal
-# paths derived by splitting the repo name on hyphens:
-#   gt-pythoncore  ->  gt/pythoncore/<version>/...
-#   gt-ext-python  ->  gt/ext/python/<version>/...
-# The archive can be extracted directly into any install root.
-#
-# The bndlid written to the .bundle marker follows the same rule with
-# colons as separators:
-#   gt-pythoncore  ->  gt:pythoncore
-#   gt-ext-python  ->  gt:ext:python
-#
-# Usage from a bundle's own build-release.yml:
-#
-#   jobs:
-#     publish:
-#       uses: <org>/<envoy-repo>/.github/workflows/bundle-publish.yml@main
-#       with:
-#         extra_excludes: 'myspec.spec pyproject.toml scripts'
-#       secrets: inherit
-#       permissions:
-#         contents: write
+# Reusable workflow for publishing any Envoy bundle. Archive construction is
+# performed by engit and is identical on Windows, Linux, and macOS. Artifact
+# storage must already be mounted on Unix; Windows UNC roots can optionally be
+# authenticated below.
 
 on:
   workflow_call:
     inputs:
       extra_excludes:
-        description: >
-          Space-separated list of additional glob patterns to exclude from the
-          publish zip (e.g. "myapp.spec pyproject.toml scripts"). These are
-          passed as repeated --exclude arguments to engit publish.
+        description: Space-separated additional exclude patterns
         type: string
         required: false
-        default: ''
+        default: ""
       prerelease:
-        description: >
-          Controls the GitHub release prerelease flag.
-          'auto' (default): detects from the tag name — suffixes matching
-          alpha, beta, rc, preview, or dev are marked as prerelease; all
-          other tags (including ext-style -envoy.N suffixes) are treated as
-          production releases.
-          'true': force prerelease regardless of tag name.
-          'false': force production regardless of tag name.
+        description: Prerelease policy (auto, true, or false)
         type: string
         required: false
-        default: 'auto'
+        default: auto
       runner:
-        description: >
-          JSON array of runner labels (e.g. '["self-hosted","Windows","X64"]').
-          Defaults to the synology self-hosted runner.
+        description: JSON array of runner labels
         type: string
         required: false
         default: '["self-hosted", "X64", "Windows", "synology"]'
     secrets:
       ARTIFACTS_NAS_USER:
-        description: >
-          Username for authenticating to the artifact NAS share when
-          ENVOY_STUDIO_ARTIFACTS points to a UNC path (e.g. \\server\share).
-          Only required when the runner service cannot authenticate via
-          Credential Manager alone.
+        description: Optional username for a Windows UNC artifact root
         required: false
       ARTIFACTS_NAS_PASS:
-        description: >
-          Password for the ARTIFACTS_NAS_USER account.
+        description: Optional password for a Windows UNC artifact root
         required: false
 
 permissions:
@@ -72,7 +36,7 @@ permissions:
 
 jobs:
   publish:
-    name: Create and upload publish zip
+    name: Create and upload publish archive
     runs-on: ${{ fromJson(inputs.runner) }}
 
     steps:
@@ -80,151 +44,114 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          path: bundle
 
-      - name: Mount artifact share
+      - name: Checkout Envoy publishing tools
+        uses: actions/checkout@v4
+        with:
+          repository: gtvfx-contrib/gt-envoy
+          ref: main
+          path: envoy-tools
+
+      - name: Ensure Git Bash is on PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $paths = @('C:\Program Files\Git\bin', 'C:\Program Files\Git\usr\bin') |
+              Where-Object { Test-Path $_ }
+          if (-not $paths) { throw 'Git Bash is required by the Rust toolchain action.' }
+          foreach ($entry in $paths) { Add-Content -Path $env:GITHUB_PATH -Value $entry }
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache engit build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: envoy-tools/rust
+
+      - name: Build engit
+        working-directory: envoy-tools/rust
+        run: cargo build -p engit-cli --release
+
+      - name: Authenticate Windows UNC artifact root
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           NAS_USER: ${{ secrets.ARTIFACTS_NAS_USER }}
           NAS_PASS: ${{ secrets.ARTIFACTS_NAS_PASS }}
         run: |
           $root = $env:ENVOY_STUDIO_ARTIFACTS
-          if ($root -and $root -match '^\\\\([^\\]+)') {
+          if ($root -and $root -match '^\\\\([^\\]+)' -and $env:NAS_USER) {
               $server = $Matches[1]
-              if ($env:NAS_USER) {
-                  Write-Host "Mounting \\$server with provided credentials..."
-                  net use "\\$server" /user:"$env:NAS_USER" "$env:NAS_PASS" /persistent:no
-                  if ($LASTEXITCODE -ne 0) {
-                      throw "net use failed mounting \\$server (exit $LASTEXITCODE)"
-                  }
-              } else {
-                  Write-Host "ARTIFACTS_NAS_USER not set — relying on Credential Manager for \\$server"
+              net use "\\$server" /user:"$env:NAS_USER" "$env:NAS_PASS" /persistent:no
+              if ($LASTEXITCODE -ne 0) {
+                  throw "net use failed mounting \\$server (exit $LASTEXITCODE)"
               }
           }
 
-      - name: Fetch bundle assets
+      - name: Validate Unix artifact root
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [[ -n "${ENVOY_STUDIO_ARTIFACTS:-}" && ! -d "$ENVOY_STUDIO_ARTIFACTS" ]]; then
+            echo "ENVOY_STUDIO_ARTIFACTS must be mounted before this workflow runs." >&2
+            exit 1
+          fi
+
+      - name: Publish bundle on Windows
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $artifactsFile = Join-Path $env:GITHUB_WORKSPACE '.envoy\bundle-artifacts.json'
-          if (Test-Path $artifactsFile) {
-              $version     = "${{ github.ref_name }}"
-              $baseVersion = $version -replace '-envoy\.\d+$', ''
-
-              # Expand ${VAR} tokens: built-ins first, then OS env vars.
-              # Unknown tokens are left unexpanded so misconfiguration is visible.
-              function Resolve-AssetTokens([string]$value) {
-                  $builtins = @{ VERSION = $version; BASE_VERSION = $baseVersion }
-                  [regex]::Replace($value, '\$\{([^}]+)\}', {
-                      param($m)
-                      $name = $m.Groups[1].Value
-                      if ($builtins.ContainsKey($name)) { return $builtins[$name] }
-                      $envVal = [Environment]::GetEnvironmentVariable($name)
-                      if ($null -ne $envVal) { return $envVal }
-                      return $m.Value
-                  })
-              }
-
-              $config = Get-Content $artifactsFile -Raw | ConvertFrom-Json
-              foreach ($artifact in $config.artifacts) {
-                  $src = Resolve-AssetTokens $artifact.source
-                  $dst = if ($artifact.dest -and $artifact.dest -ne '.') {
-                             Join-Path $env:GITHUB_WORKSPACE $artifact.dest
-                         } else { $env:GITHUB_WORKSPACE }
-                  New-Item -ItemType Directory -Path $dst -Force | Out-Null
-                  robocopy $src $dst /E /NP /NJH /NJS
-                  $rc = $LASTEXITCODE
-                  if ($rc -ge 8) {
-                      throw "robocopy failed fetching artifacts from '$src' (exit $rc)"
-                  }
-                  # robocopy exits 0-7 for success; clear $LASTEXITCODE so
-                  # PowerShell does not propagate the non-zero robocopy code
-                  # as the step's exit code.
-                  $global:LASTEXITCODE = 0
-                  Write-Host "Fetched artifacts: $src -> $dst (robocopy exit $rc)"
-              }
-          }
-
-      - name: Build publish zip
-        shell: pwsh
-        run: |
-          $version     = "${{ github.ref_name }}"
-          $workspace   = $env:GITHUB_WORKSPACE
-          $bundleName  = "${{ github.event.repository.name }}"
-          $publishPath = $bundleName -replace '-', '/'
-          $bndlid      = $bundleName -replace '-', ':'
-          $bndlName    = ($bndlid -split ':', 2)[1]
-          $distDir     = Join-Path $workspace 'dist'
-          New-Item -ItemType Directory -Path $distDir -Force | Out-Null
-
-          # Patterns excluded by default (matched against each path component).
-          $excludeDirs  = [System.Collections.Generic.HashSet[string]]@(
-              '.git', '.gitignore', '.github', 'build', 'dist',
-              '.pytest_cache', '__pycache__'
+          $engit = Join-Path $env:GITHUB_WORKSPACE 'envoy-tools\rust\target\release\engit.exe'
+          $arguments = @(
+              'publish',
+              (Join-Path $env:GITHUB_WORKSPACE 'bundle'),
+              '--output', (Join-Path $env:GITHUB_WORKSPACE 'dist'),
+              '--version', '${{ github.ref_name }}',
+              '--zip'
           )
-          $excludeGlobs = @('*.pyc', '*.pyo')
-
-          # Merge extra excludes from workflow input.
-          $extras = '${{ inputs.extra_excludes }}' -split '\s+' | Where-Object { $_ }
-          foreach ($x in $extras) { $excludeDirs.Add($x) | Out-Null }
-
-          $sep = [IO.Path]::DirectorySeparatorChar
-
-          # Collect files, pruning excluded path components.
-          $files = Get-ChildItem -Path $workspace -Recurse -File | Where-Object {
-              $rel   = $_.FullName.Substring($workspace.Length).TrimStart($sep)
-              $parts = $rel -split [regex]::Escape($sep)
-              $skip  = $false
-              foreach ($part in $parts) {
-                  if ($excludeDirs.Contains($part)) { $skip = $true; break }
-                  foreach ($glob in $excludeGlobs) {
-                      if ($part -like $glob) { $skip = $true; break }
-                  }
-                  if ($skip) { break }
-              }
-              -not $skip
+          foreach ($exclude in ('${{ inputs.extra_excludes }}' -split '\s+' | Where-Object { $_ })) {
+              $arguments += @('--exclude', $exclude)
           }
+          & $engit @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          # Write versioned zip: <publish-path>/<version>/<relative-path>
-          $zipPath = Join-Path $distDir "$bundleName-$version.zip"
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
-          try {
-              foreach ($file in $files) {
-                  $rel     = $file.FullName.Substring($workspace.Length).TrimStart($sep)
-                  $arcName = ("$publishPath/$version/$rel").Replace('\', '/')
-                  [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-                      $zip, $file.FullName, $arcName, 'Optimal'
-                  ) | Out-Null
-              }
-
-              # Write .bundle marker so envoy auto-discovery recognises this
-              # as a production bundle when extracted (no .git/ present).
-              $published  = (Get-Date -AsUTC).ToString('yyyy-MM-ddTHH:mm:ssZ')
-              $markerJson = "{`n  `"bndlid`": `"$bndlid`",`n  `"name`": `"$bndlName`",`n  `"version`": `"$version`",`n  `"published`": `"$published`"`n}"
-              $markerArc  = "$publishPath/$version/.bundle"
-              $entry = $zip.CreateEntry($markerArc, 'Optimal')
-              $writer = [System.IO.StreamWriter]::new($entry.Open())
-              try { $writer.Write($markerJson) } finally { $writer.Dispose() }
-          } finally {
-              $zip.Dispose()
-          }
-
-          Write-Host "Published zip: $zipPath"
+      - name: Publish bundle on Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          engit="$GITHUB_WORKSPACE/envoy-tools/rust/target/release/engit"
+          arguments=(
+            publish "$GITHUB_WORKSPACE/bundle"
+            --output "$GITHUB_WORKSPACE/dist"
+            --version "${{ github.ref_name }}"
+            --zip
+          )
+          read -r -a excludes <<< "${{ inputs.extra_excludes }}"
+          for exclude in "${excludes[@]}"; do
+            [[ -n "$exclude" ]] && arguments+=(--exclude "$exclude")
+          done
+          "$engit" "${arguments[@]}"
 
       - name: Resolve release type
         id: release_type
-        shell: pwsh
+        shell: bash
         run: |
-          $tag   = "${{ github.ref_name }}"
-          $input = '${{ inputs.prerelease }}'
-          if ($input -eq 'auto') {
-              $isPrerelease = ($tag -match '-(alpha|beta|rc|preview|dev)(\.\d+)*$').ToString().ToLower()
-          } else {
-              $isPrerelease = $input
-          }
-          Write-Host "Tag: $tag  →  is_prerelease=$isPrerelease"
-          echo "is_prerelease=$isPrerelease" >> $env:GITHUB_OUTPUT
+          tag="${{ github.ref_name }}"
+          policy="${{ inputs.prerelease }}"
+          if [[ "$policy" == "auto" ]]; then
+            if [[ "$tag" =~ -(alpha|beta|rc|preview|dev)(\.[0-9]+)*$ ]]; then
+              is_prerelease=true
+            else
+              is_prerelease=false
+            fi
+          else
+            is_prerelease="$policy"
+          fi
+          echo "is_prerelease=$is_prerelease" >> "$GITHUB_OUTPUT"
 
-      - name: Upload to GitHub Release
+      - name: Upload GitHub release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.zip

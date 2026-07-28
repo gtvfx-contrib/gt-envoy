@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+
+# Development entry point for the Envoy CLI on Linux and macOS.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+
+for executable in \
+    "$repo_root/rust/target/release/envoy" \
+    "$repo_root/rust/target/debug/envoy" \
+    "$repo_root/dist/envoy"
+do
+    if [ -x "$executable" ]; then
+        exec "$executable" "$@"
+    fi
+done
+
+if command -v python3 >/dev/null 2>&1; then
+    exec python3 -m envoy "$@"
+fi
+
+echo "envoy executable and Python package not found." >&2
+echo "Build with: python3 scripts/build_native.py" >&2
+exit 1

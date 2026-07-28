@@ -459,6 +459,7 @@ pub fn prepare_env(
             bundle: None,
             envoy_env_dir: None,
             source_file: None,
+            platform_overrides: Vec::new(),
         }
     } else {
         registry.get(command_name).cloned().ok_or_else(|| {
@@ -483,7 +484,7 @@ pub fn prepare_env(
 
 #[cfg(windows)]
 fn envoy_program_names() -> &'static [&'static str] {
-    &["envoy.exe", "envoy"]
+    &["envoy.exe"]
 }
 
 #[cfg(not(windows))]
@@ -493,7 +494,7 @@ fn envoy_program_names() -> &'static [&'static str] {
 
 #[cfg(windows)]
 fn python_program_names() -> &'static [&'static str] {
-    &["python.exe", "python"]
+    &["python.exe"]
 }
 
 #[cfg(not(windows))]
@@ -541,8 +542,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        collect_env_files, is_raw_path, load_registry, prepare_env, resolve_cached_bundles,
-        resolve_team_config_for_bundles,
+        collect_env_files, envoy_program_names, is_raw_path, load_registry, prepare_env,
+        python_program_names, resolve_cached_bundles, resolve_team_config_for_bundles,
     };
     use crate::bundle_cache::BundleCache;
     use crate::commands::CommandRegistry;
@@ -587,6 +588,21 @@ mod tests {
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         test_fn()
+    }
+
+    #[test]
+    fn executable_candidates_use_platform_native_names() {
+        #[cfg(windows)]
+        {
+            assert_eq!(envoy_program_names(), &["envoy.exe"]);
+            assert_eq!(python_program_names(), &["python.exe"]);
+        }
+
+        #[cfg(not(windows))]
+        {
+            assert_eq!(envoy_program_names(), &["envoy"]);
+            assert_eq!(python_program_names(), &["python3"]);
+        }
     }
 
     fn write_json(path: &Path, value: &Value) {

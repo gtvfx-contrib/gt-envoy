@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+
+# Short alias for envoy.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$script_dir/envoy" "$@"

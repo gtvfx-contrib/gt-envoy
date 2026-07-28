@@ -1,81 +1,121 @@
 # Installation
 
-Each GitHub Release ships the following artefacts. Choose the one that matches your use case.
+Envoy releases support Windows, Linux, and macOS. Download the archive or
+wheel matching the operating system and CPU from the latest
+[GitHub Release](https://github.com/gtvfx-contrib/gt-envoy/releases).
 
-## Full Bundle [CLI + Python API] (Recommended)
+## Full Bundle (Recommended)
 
-Download `envoy-v<version>.zip` from the latest
-[GitHub Release](https://github.com/gtvfx-contrib/gt-envoy/releases), extract
-it, and add the `bin/` directory to your `PATH`. To make the Python API
-available, either add the envoy version folder to `ENVOY_BNDL_ROOTS` or add
-it to a Stack.
+| Platform | Archive |
+|---|---|
+| Windows x64 | `envoy-v<version>-windows-x86_64.zip` |
+| Linux x64 | `envoy-v<version>-linux-x86_64-musl.tar.gz` |
+| macOS Intel | `envoy-v<version>-macos-x86_64.tar.gz` |
+| macOS Apple silicon | `envoy-v<version>-macos-aarch64.tar.gz` |
 
+Each archive contains `gt/envoy/<version>/bin`. Add that directory to `PATH`.
 
-```powershell
-# Extract to a tools directory
-Expand-Archive envoy-v1.0.0.zip -DestinationPath C:\tools
-
-# Add the bin/ directory to your PATH.
-$env:PATH = "envoy/v1.0.0/bin;$PATH" # current shell only
-```
-
-**`studio.estack`:**
-
-```yaml
-name: studio
-bundles:
-  - path: C:/tools/envoy/v1.0.0
-```
-
-## CLI Tools Only
-
-Download `envoy.exe` and `engit.exe` from the latest [GitHub Release](https://github.com/gtvfx-contrib/gt-envoy/releases) and add their directory to your `PATH`.
-
-```powershell
-$env:PATH = "C:\tools\envoy;$env:PATH"
-```
-
-## Python API (Wheel)
-
-Download `envoy-*.whl` from the latest [GitHub Release](https://github.com/gtvfx-contrib/gt-envoy/releases) and install it:
-
-```bash
-pip install envoy-1.0.0-py3-none-any.whl
-```
-
-Then use it in Python:
-
-```python
-import envoy
-import envoy.proc as proc
-```
-
-## Developer / From Source
-
-```powershell
-git clone https://github.com/gtvfx-contrib/gt-envoy.git envoy
-cd envoy
-pip install -e py
-# Add bin/ to PATH for the en / engit launchers
-$env:PATH = "$PWD\bin;$env:PATH"
-```
-
-## PATH Setup
-
-Add the `bin/` directory (or the directory containing the EXEs in a deployed bundle) to your `PATH`. The short alias `en` is the most convenient entry point for daily use.
-
-=== "PowerShell (session)"
+=== "Windows PowerShell"
 
     ```powershell
-    $env:PATH = "C:\tools\envoy;$env:PATH"
+    Expand-Archive envoy-v1.0.0-windows-x86_64.zip -DestinationPath C:\tools
+    $env:PATH = "C:\tools\gt\envoy\v1.0.0\bin;$env:PATH"
+    envoy --version
     ```
 
-=== "System PATH (permanent)"
+=== "Linux"
 
-    Add `C:\tools\envoy` via **System Properties → Environment Variables → PATH**.
-
-=== "cmd"
-
-    ```batch
-    set PATH=C:\tools\envoy;%PATH%
+    ```bash
+    tar -xzf envoy-v1.0.0-linux-x86_64-musl.tar.gz -C "$HOME/.local"
+    export PATH="$HOME/.local/gt/envoy/v1.0.0/bin:$PATH"
+    envoy --version
     ```
+
+=== "macOS"
+
+    ```bash
+    tar -xzf envoy-v1.0.0-macos-aarch64.tar.gz -C "$HOME/.local"
+    export PATH="$HOME/.local/gt/envoy/v1.0.0/bin:$PATH"
+    envoy --version
+    ```
+
+The Linux native binaries use musl and do not require a particular glibc
+version. Features that integrate with other tools still require those tools,
+such as `git`, `gh`, a shell, or `xdg-open`.
+
+## Python API
+
+Download the wheel whose filename matches the current Python platform, then install it:
+
+```console
+python -m pip install ./envoy-<version>-<python-and-platform-tags>.whl
+```
+
+The wheel uses Python's stable ABI and supports CPython 3.10 or newer. Linux
+wheels follow the manylinux2014 compatibility contract; they are separate
+from the musl-native standalone CLI archive.
+
+## Verify Checksums
+
+Every release contains `SHA256SUMS`.
+
+=== "Windows PowerShell"
+
+    ```powershell
+    Get-FileHash .\envoy-v1.0.0-windows-x86_64.zip -Algorithm SHA256
+    ```
+
+=== "Linux"
+
+    ```bash
+    sha256sum -c SHA256SUMS --ignore-missing
+    ```
+
+=== "macOS"
+
+    ```bash
+    shasum -a 256 -c SHA256SUMS
+    ```
+
+## Unsigned Artifact Notice
+
+Release artifacts are currently unsigned while signing and Apple
+notarization infrastructure is being established.
+
+- Windows may display a Microsoft Defender SmartScreen unknown-publisher warning.
+- macOS may quarantine the archive. After verifying `SHA256SUMS`, remove the
+  quarantine attribute from the extracted version directory if Gatekeeper blocks it:
+
+  ```bash
+  xattr -dr com.apple.quarantine "$HOME/.local/gt/envoy/v1.0.0"
+  ```
+
+Signing hooks are reserved in the release workflow and can be enabled later
+without changing archive names or layout.
+
+## Developer Build
+
+Requirements are Rust, Python 3.10 or newer, and `maturin` for the Python wheel.
+
+=== "Windows"
+
+    ```powershell
+    git clone https://github.com/gtvfx-contrib/gt-envoy.git envoy
+    cd envoy
+    python -m pip install maturin
+    .\scripts\build_native.bat
+    .\bin\envoy.bat --version
+    ```
+
+=== "Linux/macOS"
+
+    ```bash
+    git clone https://github.com/gtvfx-contrib/gt-envoy.git envoy
+    cd envoy
+    python3 -m pip install maturin
+    ./scripts/build_native.sh
+    ./bin/envoy --version
+    ```
+
+Pass `--skip-wheel` for a native-only build or `--develop` to install the
+compiled Python extension into the active environment.

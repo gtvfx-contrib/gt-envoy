@@ -5,9 +5,11 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   ruff:
@@ -27,10 +29,10 @@ jobs:
         run: python -m pip install --upgrade pip && pip install ruff
 
       - name: Run ruff check
-        run: ruff check rust/envoy-py/python rust/envoy-py/tests
+        run: ruff check scripts rust/envoy-py/python rust/envoy-py/tests
 
       - name: Run ruff format --check
-        run: ruff format --check rust/envoy-py/python rust/envoy-py/tests
+        run: ruff format --check scripts rust/envoy-py/python rust/envoy-py/tests
 
   rust:
     name: Rust (fmt + clippy + test)
@@ -126,3 +128,128 @@ jobs:
         # rust/envoy-py/tests/python_contract/README.md and
         # rust/envoy-py/tests/consumer_smoke/README.md for scope/rationale.
         run: python -m pytest rust/envoy-py/tests -v
+
+  windows:
+    name: Windows x64 tests
+    runs-on: ["self-hosted", "Windows", "X64", "synology"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Ensure Git Bash is on PATH
+        shell: pwsh
+        run: |
+          $paths = @('C:\Program Files\Git\bin', 'C:\Program Files\Git\usr\bin') |
+              Where-Object { Test-Path $_ }
+          if (-not $paths) { throw 'Git Bash is required by the Rust toolchain action.' }
+          foreach ($entry in $paths) { Add-Content -Path $env:GITHUB_PATH -Value $entry }
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Test native workspace
+        working-directory: rust
+        run: cargo test --workspace --exclude envoy-py
+
+      - name: Test Rust Python bindings
+        working-directory: rust
+        run: cargo test -p envoy-py --lib
+
+      - name: Build wheel
+        shell: pwsh
+        run: |
+          python -m pip install maturin pytest
+          python -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml
+
+      - name: Test installed wheel
+        shell: pwsh
+        run: |
+          python -m pip install --force-reinstall --no-index --find-links rust/target/wheels envoy
+          python -m pytest rust/envoy-py/tests -v
+
+  changes:
+    name: Detect macOS-relevant changes
+    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            code:
+              - "rust/**"
+              - "bin/**"
+              - "scripts/**"
+              - ".envoy/**"
+              - ".github/workflows/**"
+              - "pyproject.toml"
+
+  macos:
+    name: macOS tests (${{ matrix.architecture }})
+    needs: changes
+    if: >-
+      github.event_name != 'pull_request' ||
+      needs.changes.outputs.code == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            architecture: x86_64
+          - runner: macos-15
+            architecture: aarch64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Test native workspace
+        working-directory: rust
+        run: cargo test --workspace --exclude envoy-py
+
+      - name: Test Rust Python bindings
+        working-directory: rust
+        run: cargo test -p envoy-py --lib
+
+      - name: Build wheel
+        run: |
+          python3 -m pip install maturin pytest
+          python3 -m maturin build --release --manifest-path rust/envoy-py/Cargo.toml
+
+      - name: Test installed wheel
+        run: |
+          python3 -m pip install --force-reinstall --no-index --find-links rust/target/wheels envoy
+          python3 -m pytest rust/envoy-py/tests -v

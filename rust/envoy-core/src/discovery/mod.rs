@@ -20,11 +20,9 @@ use std::path::Path;
 
 use rayon::prelude::*;
 
-use crate::error::Result;
-use crate::discovery::cache::{
-    load_cached_discovery_results, store_cached_discovery_results,
-};
+use crate::discovery::cache::{load_cached_discovery_results, store_cached_discovery_results};
 use crate::discovery::scan::discover_bundles_for_root;
+use crate::error::Result;
 
 const BUNDLE_ROOTS_VAR: &str = "ENVOY_BNDL_ROOTS";
 
@@ -48,11 +46,9 @@ mod tests;
 pub mod types;
 pub(crate) mod util;
 
-pub use bndlid::{is_bndlid, resolve_bndlid};
 pub(crate) use bndlid::expand_bundle_path;
-pub use cache::{
-    discovery_cache_key, discovery_cache_lock_path, discovery_cache_path,
-};
+pub use bndlid::{is_bndlid, resolve_bndlid};
+pub use cache::{discovery_cache_key, discovery_cache_lock_path, discovery_cache_path};
 pub use files::{get_bundle_commands_files, get_bundle_env_files};
 pub use scan::{
     find_bundle_roots, find_git_repos, has_envoy_env, is_git_repo, is_published_bundle,

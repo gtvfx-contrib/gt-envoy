@@ -22,12 +22,12 @@ Each bundle has a **bundle ID** (`bndlid`) of the form `<namespace>:<name>`. The
 
 ```mermaid
 graph TD
-    ROOT["R:\\repo\\"]
-    NS["gtvfx-contrib\\ ← namespace: gt"]
-    GT["gt\\"]
-    G["globals\\ → gt:globals"]
-    E["envoy\\  → gt:envoy"]
-    P["pythoncore\\ → gt:pythoncore"]
+    ROOT["/workspace/repos/"]
+    NS["gtvfx-contrib/ ← namespace: gt"]
+    GT["gt/"]
+    G["globals/ → gt:globals"]
+    E["envoy/  → gt:envoy"]
+    P["pythoncore/ → gt:pythoncore"]
 
     ROOT --> NS --> GT --> G
     GT --> E
@@ -61,9 +61,51 @@ Commands are defined in `.envoy/commands.json`:
 | `environment` | Yes | List of env JSON files to load (relative to `.envoy/`) |
 | `alias` | No | Executable + base args. `alias[0]` is the exe; `alias[1:]` are prepended args. If omitted, the command name is used as the executable. |
 
+### Platform Overrides
+
+A single command definition can describe Windows, Linux, and macOS behavior.
+The base `environment` and `alias` work on every platform unless an override
+replaces them. Resolution is deterministic:
+
+1. Base command definition
+2. Current operating-system override
+3. Current CPU architecture override
+
+Supported operating-system keys are `windows`, `linux`, and `macos`.
+Supported architecture keys are `x86_64` and `aarch64`. Each override replaces
+only the fields it contains, so the other effective fields remain inherited.
+
+```json
+{
+    "tool": {
+        "environment": ["tool_env.json"],
+        "alias": ["tool"],
+        "platforms": {
+            "windows": {
+                "alias": ["tool.exe"]
+            },
+            "macos": {
+                "architectures": {
+                    "aarch64": {
+                        "environment": [
+                            "tool_env.json",
+                            "tool_apple_silicon_env.json"
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+Use `envoy --info tool` to see the current target and applied override chain.
+`envoy --diagnose tool` includes the same information with the resolved
+environment.
+
 ### Running Commands
 
-```powershell
+```console
 en python script.py --arg value
 en unreal MyGame.uproject
 en build --target Release
@@ -113,8 +155,8 @@ bundle and stack roots, plus an optional per-user/host config file path:
 ```json
 {
     "name": "bfd",
-    "prodBundlesRoot": "\\\\server\\bundles",
-    "prodStacksRoot": "\\\\server\\stacks"
+    "prodBundlesRoot": "/studio/bundles",
+    "prodStacksRoot": "/studio/stacks"
 }
 ```
 
@@ -137,7 +179,7 @@ namespace: team:project
 metadata:
   owner: build-tools
 bundles:
-  - path: R:/bundles/gt/pythoncore
+  - path: ${STUDIO_ROOT}/bundles/gt/pythoncore
     metadata:
       role: core
 ```

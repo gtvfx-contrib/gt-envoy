@@ -1,0 +1,5 @@
+# Keep POSIX entry points runnable even when contributors work on Windows.
+*.sh text eol=lf
+/bin/en text eol=lf
+/bin/engit text eol=lf
+/bin/envoy text eol=lf
