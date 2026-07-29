@@ -41,13 +41,13 @@ jobs:
 
     steps:
       - name: Checkout bundle
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           path: bundle
 
       - name: Checkout Envoy publishing tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: gtvfx-contrib/gt-envoy
           ref: main

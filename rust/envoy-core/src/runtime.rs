@@ -549,6 +549,7 @@ mod tests {
     use crate::commands::CommandRegistry;
     use crate::discovery::{BundleInfo, BUNDLE_ENV_DIR};
     use crate::error::EnvoyError;
+    use crate::path_test::assert_same_path;
     use crate::semver::VersionSpec;
     use crate::team_config::TeamConfig;
 
@@ -745,7 +746,7 @@ mod tests {
         assert!(registry.contains("python"));
         let bundles = bundles.expect("bundle discovery should be present");
         assert_eq!(bundles.len(), 1);
-        assert_eq!(bundles[0].root, bundle_root);
+        assert_same_path(&bundles[0].root, &bundle_root);
     }
 
     #[test]
@@ -775,7 +776,7 @@ mod tests {
             assert!(registry.contains("maya_dev"));
             let bundles = bundles.expect("bundle discovery should be present");
             assert_eq!(bundles.len(), 1);
-            assert_eq!(bundles[0].root, bundle_root);
+            assert_same_path(&bundles[0].root, &bundle_root);
         });
     }
 

@@ -29,6 +29,7 @@ mod tests {
     use crate::discovery::util::{current_timestamp, infer_namespace};
     use crate::discovery::{BUNDLE_CHECKOUT, BUNDLE_ENV_DIR, BUNDLE_MARKER_FILE, BUNDLE_ROOTS_VAR};
     use crate::error::EnvoyError;
+    use crate::path_test::assert_same_path;
 
     struct EnvVarGuard {
         key: &'static str,
@@ -334,8 +335,18 @@ mod tests {
             let bundles = discover_bundles_from_roots(&[root.display().to_string()]);
             let discovered = namespaced_map(&bundles);
 
-            assert_eq!(discovered.get("gt:pythoncore"), Some(&checkout));
-            assert_eq!(discovered.get("tools:render"), Some(&published));
+            assert_same_path(
+                discovered
+                    .get("gt:pythoncore")
+                    .expect("checkout bundle should be discovered"),
+                &checkout,
+            );
+            assert_same_path(
+                discovered
+                    .get("tools:render")
+                    .expect("published bundle should be discovered"),
+                &published,
+            );
         });
     }
 
@@ -508,7 +519,7 @@ mod tests {
             let _roots_guard = EnvVarGuard::set(BUNDLE_ROOTS_VAR, Some(roots.as_os_str()));
 
             let resolved = resolve_bndlid("tools:render").expect("published bundle should resolve");
-            assert_eq!(resolved, published);
+            assert_same_path(&resolved, &published);
         });
     }
 
@@ -537,7 +548,7 @@ mod tests {
 
             let by_bndlid =
                 Bundle::new("gt:pythoncore", Some("ignored")).expect("bundle ID should resolve");
-            assert_eq!(by_bndlid.path(), checkout.as_path());
+            assert_same_path(by_bndlid.path(), &checkout);
 
             let overridden = Bundle::new(&checkout, Some("tools"))
                 .expect("bundle path with namespace override should be valid");

@@ -64,3 +64,15 @@ pub(crate) mod env_test_lock {
     /// poison.into_inner())`) before mutating `std::env` in a test.
     pub(crate) static MUTEX: Mutex<()> = Mutex::new(());
 }
+
+#[cfg(test)]
+pub(crate) mod path_test {
+    use std::fs;
+    use std::path::Path;
+
+    pub(crate) fn assert_same_path(actual: &Path, expected: &Path) {
+        let actual = fs::canonicalize(actual).expect("actual path should canonicalize");
+        let expected = fs::canonicalize(expected).expect("expected path should canonicalize");
+        assert_eq!(actual, expected);
+    }
+}
