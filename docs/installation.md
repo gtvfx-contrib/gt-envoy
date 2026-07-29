@@ -4,7 +4,11 @@ Each GitHub Release ships the following artefacts. Choose the one that matches y
 
 ## Full Bundle [CLI + Python API] (Recommended)
 
-Download `envoy-v<version>.zip` from the latest [GitHub Release](https://github.com/gtvfx-contrib/gt-envoy/releases), extract it and add the `bin/` directory to your `PATH`. To esnsure the Python api is available, you can either add the envoy version folder to your `ENVOY_BNDL_ROOTS` or you can add the path to your bundle config file.
+Download `envoy-v<version>.zip` from the latest
+[GitHub Release](https://github.com/gtvfx-contrib/gt-envoy/releases), extract
+it, and add the `bin/` directory to your `PATH`. To make the Python API
+available, either add the envoy version folder to `ENVOY_BNDL_ROOTS` or add
+it to a Stack.
 
 
 ```powershell
@@ -15,13 +19,12 @@ Expand-Archive envoy-v1.0.0.zip -DestinationPath C:\tools
 $env:PATH = "envoy/v1.0.0/bin;$PATH" # current shell only
 ```
 
-**`bundles.json`:**
-```json
-{
-  "bundles": [
-    "C:/tools/envoy/v1.0.0"
-  ]
-}
+**`studio.estack`:**
+
+```yaml
+name: studio
+bundles:
+  - path: C:/tools/envoy/v1.0.0
 ```
 
 ## CLI Tools Only

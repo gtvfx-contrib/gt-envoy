@@ -5,12 +5,12 @@
 Before digging into a specific symptom below, run:
 
 ```powershell
-en --diagnose               # bundles, team/pipeline, cache, VCS, telemetry status
+en --diagnose               # bundles, team/stack, cache, VCS, telemetry status
 en --diagnose python    # also shows the command's full resolved environment
 ```
 
-This surfaces discovered bundles and commands, resolved team/pipeline context,
-package cache location and reachability, detected VCS backend, and
+This surfaces discovered bundles and commands, resolved team/stack context,
+bundle cache location and reachability, detected VCS backend, and
 bundle-root reachability (flagging unreachable network paths) in one report —
 often enough to spot the problem before checking the more specific sections
 below.
@@ -20,7 +20,7 @@ below.
 Envoy has no commands to load. Fix one of:
 
 - Set `ENVOY_BNDL_ROOTS` to point to a directory containing bundle subdirectories
-- Use `--bundles-config` / `-b` with a path to a `bundles.json`
+- Use `--stack` / `-s` with a path to a `studio.estack`
 - Use `--commands-file` / `-c` with a direct path to `commands.json`
 - Run from inside a project that has `.envoy/commands.json`
 

@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 
+use crate::bundle_cache::BundleCache;
 use crate::commands::{find_commands_file, CommandDefinition, CommandRegistry};
 use crate::discovery::{
     discover_bundles_auto, discover_bundles_from_roots, is_published_bundle, Bundle, BundleInfo,
@@ -27,7 +28,6 @@ use crate::discovery::{
 };
 use crate::environment::EnvironmentManager;
 use crate::error::{EnvoyError, Result};
-use crate::package_cache::PackageCache;
 use crate::retry::{retry_sync, RetryConfig};
 use crate::semver::VersionSpec;
 use crate::team_config::TeamConfig;
@@ -102,16 +102,16 @@ const IO_RETRY_CONFIG: RetryConfig = RetryConfig {
 pub fn load_registry(
     bundle_roots: Option<&[String]>,
     commands_file: Option<&Path>,
-    package_cache: Option<&PackageCache>,
+    bundle_cache: Option<&BundleCache>,
 ) -> Result<(CommandRegistry, Option<Vec<BundleInfo>>)> {
     let mut registry = CommandRegistry::empty();
     let mut bundles = None;
-    let mut package_cache = package_cache.and_then(|cache| match PackageCache::new(cache.root()) {
+    let mut bundle_cache = bundle_cache.and_then(|cache| match BundleCache::new(cache.root()) {
         Ok(cache) => Some(cache),
         Err(error) => {
             tracing::warn!(
                 cache_root = %cache.root().display(),
-                "Failed to open package cache for runtime resolution: {error}"
+                "Failed to open bundle cache for runtime resolution: {error}"
             );
             None
         }
@@ -131,7 +131,7 @@ pub fn load_registry(
             // Try to resolve cached versions for each discovered bundle.
             let team_config = resolve_team_config_for_bundles(Some(&discovered));
             let resolved =
-                resolve_cached_bundles(discovered, package_cache.as_mut(), team_config.as_ref());
+                resolve_cached_bundles(discovered, bundle_cache.as_mut(), team_config.as_ref());
             registry.load_from_bundles(&resolved);
             bundles = Some(resolved);
         }
@@ -142,7 +142,7 @@ pub fn load_registry(
             // Try to resolve cached versions for each discovered bundle.
             let team_config = resolve_team_config_for_bundles(Some(&discovered));
             let resolved =
-                resolve_cached_bundles(discovered, package_cache.as_mut(), team_config.as_ref());
+                resolve_cached_bundles(discovered, bundle_cache.as_mut(), team_config.as_ref());
             registry.load_from_bundles(&resolved);
             bundles = Some(resolved);
         }
@@ -170,33 +170,33 @@ pub fn load_registry(
 /// Resolve cached versions for discovered bundles.
 ///
 /// For each **published/production** bundle, attempts to find a matching
-/// entry in the package cache using the bundle's bndlid as the package_id.
+/// entry in the bundle cache using the bundle's bndlid as the bundle_id.
 /// If found, returns a new BundleInfo with the cached path. On a cache miss,
-/// envoy can also try to fetch the published package from the active team's
-/// production package root and populate the cache before retrying the
+/// envoy can also try to fetch the published bundle from the active team's
+/// production bundle root and populate the cache before retrying the
 /// substitution. Any fetch failure is logged and treated as a soft fallback
 /// to the original discovered path.
 ///
 /// Checkout (dev) bundles -- i.e. any bundle root without a `.bundle` marker
 /// file, per [`is_published_bundle`] -- are always returned unchanged and
-/// never consulted against the cache. Package caching exists to speed up
-/// *production* package resolution (per its own design intent); silently
+/// never consulted against the cache. Bundle caching exists to speed up
+/// *production* bundle resolution (per its own design intent); silently
 /// swapping a developer's own working checkout for a stale cached snapshot
 /// just because its `namespace:name` happens to match a cached entry would
 /// be actively harmful, not a performance optimization.
 ///
 /// Public so callers with their own bundle-discovery path (e.g. `envoy-cli`'s
 /// `load_registry_for_cli`, which does not go through [`load_registry`]) can
-/// still apply package-cache resolution consistently. Pass `None` to skip
-/// caching entirely; see [`crate::package_cache::open_default_package_cache`]
-/// for the standard way to obtain a cache honoring `ENVOY_PACKAGE_CACHE` /
-/// `ENVOY_DISABLE_PACKAGE_CACHE` / the `package_cache_dir` user setting.
+/// still apply bundle-cache resolution consistently. Pass `None` to skip
+/// caching entirely; see [`crate::bundle_cache::open_default_bundle_cache`]
+/// for the standard way to obtain a cache honoring `ENVOY_BUNDLE_CACHE` /
+/// `ENVOY_DISABLE_BUNDLE_CACHE` / the `bundle_cache_dir` user setting.
 pub fn resolve_cached_bundles(
     bundles: Vec<BundleInfo>,
-    package_cache: Option<&mut PackageCache>,
+    bundle_cache: Option<&mut BundleCache>,
     team_config: Option<&TeamConfig>,
 ) -> Vec<BundleInfo> {
-    let Some(cache) = package_cache else {
+    let Some(cache) = bundle_cache else {
         return bundles;
     };
 
@@ -218,11 +218,11 @@ pub fn resolve_cached_bundles(
         let bndlid = bundle.bndlid();
         let resolved_root = match cache.resolve(&bndlid, &wildcard_spec) {
             Ok(Some(cached)) => Some(cached.path),
-            Ok(None) => fetch_and_cache_published_package(&bundle, team_config, cache),
+            Ok(None) => fetch_and_cache_published_bundle(&bundle, team_config, cache),
             Err(error) => {
                 tracing::warn!(
-                    package_id = %bndlid,
-                    "Failed to resolve package cache entry: {error}"
+                    bundle_id = %bndlid,
+                    "Failed to resolve bundle cache entry: {error}"
                 );
                 None
             }
@@ -242,31 +242,31 @@ pub fn resolve_cached_bundles(
     resolved_bundles
 }
 
-/// Try to fill a published package cache miss from the team package root.
+/// Try to fill a published bundle cache miss from the team bundle root.
 ///
-/// The production package root is expected to mirror bundle discovery's
+/// The production bundle root is expected to mirror bundle discovery's
 /// namespace/name layout with a version leaf:
-/// `<prod_packages_root>\namespace\name\version\`.
-/// That keeps package lookup deterministic from a discovered published
+/// `<prod_bundles_root>\namespace\name\version\`.
+/// That keeps bundle lookup deterministic from a discovered published
 /// bundle's `namespace:name` and its `.bundle` marker version.
-fn fetch_and_cache_published_package(
+fn fetch_and_cache_published_bundle(
     bundle: &BundleInfo,
     team_config: Option<&TeamConfig>,
-    cache: &mut PackageCache,
+    cache: &mut BundleCache,
 ) -> Option<PathBuf> {
     let bndlid = bundle.bndlid();
     let Some(team_config) = team_config else {
         tracing::warn!(
-            package_id = %bndlid,
-            "Package cache miss could not be filled because no team config was resolved"
+            bundle_id = %bndlid,
+            "Bundle cache miss could not be filled because no team config was resolved"
         );
         return None;
     };
-    let Some(prod_packages_root) = team_config.prod_packages_root.as_ref() else {
+    let Some(prod_bundles_root) = team_config.prod_bundles_root.as_ref() else {
         tracing::warn!(
-            package_id = %bndlid,
+            bundle_id = %bndlid,
             team = %team_config.name,
-            "Package cache miss could not be filled because prod_packages_root is not configured"
+            "Bundle cache miss could not be filled because prod_bundles_root is not configured"
         );
         return None;
     };
@@ -274,23 +274,23 @@ fn fetch_and_cache_published_package(
     let version = Bundle::from_info(bundle.clone()).version();
     if version == BUNDLE_CHECKOUT {
         tracing::warn!(
-            package_id = %bndlid,
+            bundle_id = %bndlid,
             bundle_root = %bundle.root.display(),
-            "Package cache miss could not be filled because the published version is unavailable"
+            "Bundle cache miss could not be filled because the published version is unavailable"
         );
         return None;
     }
 
-    let source_dir = prod_packages_root
+    let source_dir = prod_bundles_root
         .join(&bundle.namespace)
         .join(&bundle.name)
         .join(&version);
 
     if !source_dir.is_dir() {
         tracing::warn!(
-            package_id = %bndlid,
+            bundle_id = %bndlid,
             source_dir = %source_dir.display(),
-            "Package cache miss could not be filled because the package directory was not found"
+            "Bundle cache miss could not be filled because the bundle directory was not found"
         );
         return None;
     }
@@ -298,9 +298,9 @@ fn fetch_and_cache_published_package(
     let envoy_dir = source_dir.join(BUNDLE_ENV_DIR);
     if !envoy_dir.is_dir() {
         tracing::warn!(
-            package_id = %bndlid,
+            bundle_id = %bndlid,
             source_dir = %source_dir.display(),
-            "Package cache miss could not be filled because the package directory is invalid"
+            "Bundle cache miss could not be filled because the bundle directory is invalid"
         );
         return None;
     }
@@ -309,9 +309,9 @@ fn fetch_and_cache_published_package(
         Ok(cached) => Some(cached.path),
         Err(error) => {
             tracing::warn!(
-                package_id = %bndlid,
+                bundle_id = %bndlid,
                 source_dir = %source_dir.display(),
-                "Package cache miss could not be filled because storing the package failed: {error}"
+                "Bundle cache miss could not be filled because storing the bundle failed: {error}"
             );
             None
         }
@@ -338,27 +338,6 @@ pub fn resolve_team_config_for_bundles(
         return None;
     }
     crate::team_config::resolve_team_config(bundles, None).ok()
-}
-
-/// Resolve the current pipeline for the given bundles based on
-/// `ENVOY_PIPELINE_CONTEXT`, if any bundle defines a pipeline.
-///
-/// Returns `None` when no bundle defines a `.envoy/pipeline.json`, or no
-/// pipeline matches the current context or default namespace -- this is
-/// "no pipeline configured" rather than a hard error, matching the
-/// graceful-degradation approach used elsewhere in envoy.
-///
-/// This is the wiring point that makes [`crate::pipeline::Pipeline`]
-/// resolution reachable from the default runtime/CLI flow instead of only
-/// via direct, manual calls to `pipeline::get_current_pipeline`.
-pub fn resolve_current_pipeline_for_bundles(
-    bundles: Option<&[BundleInfo]>,
-) -> Option<crate::pipeline::Pipeline> {
-    let bundles = bundles?;
-    if bundles.is_empty() {
-        return None;
-    }
-    crate::pipeline::get_current_pipeline(bundles, &crate::pipeline::PipelineConfig::default()).ok()
 }
 
 /// Collect the ordered env-file list for `command_name`.
@@ -563,12 +542,12 @@ mod tests {
 
     use super::{
         collect_env_files, is_raw_path, load_registry, prepare_env, resolve_cached_bundles,
-        resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
+        resolve_team_config_for_bundles,
     };
+    use crate::bundle_cache::BundleCache;
     use crate::commands::CommandRegistry;
     use crate::discovery::{BundleInfo, BUNDLE_ENV_DIR};
     use crate::error::EnvoyError;
-    use crate::package_cache::PackageCache;
     use crate::semver::VersionSpec;
     use crate::team_config::TeamConfig;
 
@@ -771,7 +750,7 @@ mod tests {
             let roots = env::join_paths([temp_dir.path()]).expect("roots should join");
             let _env_guard = EnvVarGuard::set_many(&[
                 ("ENVOY_BNDL_ROOTS", Some(roots.as_os_str())),
-                ("ENVOY_BUNDLES_CONFIG", None),
+                ("ENVOY_STACK", None),
             ]);
 
             let (registry, bundles) =
@@ -797,10 +776,8 @@ mod tests {
                 }),
                 &[("houdini_env.json", json!({"HOUDINI_HOME": "C:/houdini"}))],
             );
-            let _env_guard = EnvVarGuard::set_many(&[
-                ("ENVOY_BNDL_ROOTS", None),
-                ("ENVOY_BUNDLES_CONFIG", None),
-            ]);
+            let _env_guard =
+                EnvVarGuard::set_many(&[("ENVOY_BNDL_ROOTS", None), ("ENVOY_STACK", None)]);
 
             let (registry, bundles) = load_registry(None, Some(&commands_file), None)
                 .expect("commands file fallback should load");
@@ -1018,30 +995,30 @@ mod tests {
         BundleInfo::new(bundle_dir, name.to_string(), namespace.to_string())
     }
 
-    fn create_prod_package(
+    fn create_prod_bundle(
         prod_root: &Path,
         namespace: &str,
         name: &str,
         version: &str,
         commands: &Value,
     ) -> PathBuf {
-        let package_dir = prod_root.join(namespace).join(name).join(version);
-        let envoy_dir = package_dir.join(".envoy");
-        fs::create_dir_all(&envoy_dir).expect("package .envoy dir should be created");
+        let bundle_dir = prod_root.join(namespace).join(name).join(version);
+        let envoy_dir = bundle_dir.join(".envoy");
+        fs::create_dir_all(&envoy_dir).expect("bundle .envoy dir should be created");
         write_json(&envoy_dir.join("commands.json"), commands);
         fs::write(
-            package_dir.join(".bundle"),
+            bundle_dir.join(".bundle"),
             format!(r#"{{"version": "{version}"}}"#),
         )
         .expect(".bundle marker should write");
-        package_dir
+        bundle_dir
     }
 
     fn team_config_with_prod_root(prod_root: &Path) -> TeamConfig {
         TeamConfig {
             name: String::from("team"),
-            prod_packages_root: Some(prod_root.to_path_buf()),
-            prod_pipelines_root: None,
+            prod_bundles_root: Some(prod_root.to_path_buf()),
+            prod_stacks_root: None,
             user_host_config_file: None,
             metadata: std::collections::HashMap::new(),
         }
@@ -1073,7 +1050,7 @@ mod tests {
             "gt",
             "maya",
             "team.json",
-            r#"{"name": "bfd", "prodPackagesRoot": "\\\\server\\packages"}"#,
+            r#"{"name": "bfd", "prodBundlesRoot": "\\\\server\\bundles"}"#,
         );
 
         let team = resolve_team_config_for_bundles(Some(&[bundle]))
@@ -1083,42 +1060,12 @@ mod tests {
     }
 
     #[test]
-    fn resolve_current_pipeline_for_bundles_returns_none_without_bundles() {
-        with_env_lock(|| {
-            let _env_guard = EnvVarGuard::set_many(&[("ENVOY_PIPELINE_CONTEXT", None)]);
-            assert!(resolve_current_pipeline_for_bundles(None).is_none());
-            assert!(resolve_current_pipeline_for_bundles(Some(&[])).is_none());
-        });
-    }
-
-    #[test]
-    fn resolve_current_pipeline_for_bundles_finds_pipeline_json() {
-        with_env_lock(|| {
-            let _env_guard = EnvVarGuard::set_many(&[("ENVOY_PIPELINE_CONTEXT", None)]);
-            let temp_dir = tempdir().expect("tempdir should be created");
-            let bundle = bundle_with_file(
-                temp_dir.path(),
-                "gt",
-                "maya",
-                "pipeline.json",
-                r#"{"name": "build", "namespace": "bfd"}"#,
-            );
-
-            let pipeline = resolve_current_pipeline_for_bundles(Some(&[bundle]))
-                .expect("pipeline should be discovered automatically");
-
-            assert_eq!(pipeline.name, "build");
-            assert_eq!(pipeline.namespace, "bfd");
-        });
-    }
-
-    #[test]
     fn resolve_cached_bundles_never_substitutes_checkout_bundles() {
         let temp_dir = tempdir().expect("tempdir should be created");
         let checkout = bundle_with_file(temp_dir.path(), "gt", "maya", "global_env.json", "{}");
 
         let cache_root = temp_dir.path().join("cache");
-        let mut cache = PackageCache::new(&cache_root).expect("cache should open");
+        let mut cache = BundleCache::new(&cache_root).expect("cache should open");
         let source_dir = temp_dir.path().join("cached_source");
         fs::create_dir_all(&source_dir).expect("cached source dir should be created");
         fs::write(source_dir.join("marker.txt"), "cached").expect("marker file should write");
@@ -1148,7 +1095,7 @@ even when a matching cache entry exists"
         );
 
         let cache_root = temp_dir.path().join("cache");
-        let mut cache = PackageCache::new(&cache_root).expect("cache should open");
+        let mut cache = BundleCache::new(&cache_root).expect("cache should open");
         let source_dir = temp_dir.path().join("cached_source");
         fs::create_dir_all(source_dir.join(".envoy")).expect("cached source dir should be created");
         write_json(
@@ -1170,7 +1117,7 @@ be substituted with the cached path"
     }
 
     #[test]
-    fn resolve_cached_bundles_fetches_published_packages_from_prod_root() {
+    fn resolve_cached_bundles_fetches_published_bundles_from_prod_root() {
         let temp_dir = tempdir().expect("tempdir should be created");
         let original = create_published_bundle(
             temp_dir.path(),
@@ -1179,8 +1126,8 @@ be substituted with the cached path"
             "1.2.3",
             &json!({"tool": {"alias": ["original.exe"]}}),
         );
-        let prod_root = temp_dir.path().join("prod_packages");
-        create_prod_package(
+        let prod_root = temp_dir.path().join("prod_bundles");
+        create_prod_bundle(
             &prod_root,
             "gt",
             "maya",
@@ -1189,7 +1136,7 @@ be substituted with the cached path"
         );
 
         let cache_root = temp_dir.path().join("cache");
-        let mut cache = PackageCache::new(&cache_root).expect("cache should open");
+        let mut cache = BundleCache::new(&cache_root).expect("cache should open");
         let team_config = team_config_with_prod_root(&prod_root);
 
         let resolved =
@@ -1201,13 +1148,13 @@ be substituted with the cached path"
         let commands = fs::read_to_string(&commands_file).expect("cached commands should read");
         assert!(
             commands.contains("fetched.exe"),
-            "the fetched package copy should be the one written into the cache"
+            "the fetched bundle copy should be the one written into the cache"
         );
 
         let cached = cache
             .resolve(&original.bndlid(), &any_version_spec())
             .expect("cache lookup should succeed")
-            .expect("fetched package should be cached");
+            .expect("fetched bundle should be cached");
         assert_eq!(cached.path, resolved[0].root);
     }
 
@@ -1221,8 +1168,8 @@ be substituted with the cached path"
             "2.0.0",
             &json!({"tool": {"alias": ["original.exe"]}}),
         );
-        let prod_root = temp_dir.path().join("prod_packages");
-        let source_dir = create_prod_package(
+        let prod_root = temp_dir.path().join("prod_bundles");
+        let source_dir = create_prod_bundle(
             &prod_root,
             "gt",
             "maya",
@@ -1231,14 +1178,14 @@ be substituted with the cached path"
         );
 
         let cache_root = temp_dir.path().join("cache");
-        let mut cache = PackageCache::new(&cache_root).expect("cache should open");
+        let mut cache = BundleCache::new(&cache_root).expect("cache should open");
         let team_config = team_config_with_prod_root(&prod_root);
 
         let first_resolved =
             resolve_cached_bundles(vec![original.clone()], Some(&mut cache), Some(&team_config));
         let first_path = first_resolved[0].root.clone();
 
-        fs::remove_dir_all(&source_dir).expect("prod package source should be removed");
+        fs::remove_dir_all(&source_dir).expect("prod bundle source should be removed");
 
         let second_resolved =
             resolve_cached_bundles(vec![original.clone()], Some(&mut cache), Some(&team_config));
@@ -1252,7 +1199,7 @@ be substituted with the cached path"
     }
 
     #[test]
-    fn resolve_cached_bundles_falls_back_when_prod_package_source_is_missing() {
+    fn resolve_cached_bundles_falls_back_when_prod_bundle_source_is_missing() {
         let temp_dir = tempdir().expect("tempdir should be created");
         let original = create_published_bundle(
             temp_dir.path(),
@@ -1261,11 +1208,11 @@ be substituted with the cached path"
             "3.0.0",
             &json!({"tool": {"alias": ["original.exe"]}}),
         );
-        let prod_root = temp_dir.path().join("prod_packages");
+        let prod_root = temp_dir.path().join("prod_bundles");
         fs::create_dir_all(&prod_root).expect("prod root should be created");
 
         let cache_root = temp_dir.path().join("cache");
-        let mut cache = PackageCache::new(&cache_root).expect("cache should open");
+        let mut cache = BundleCache::new(&cache_root).expect("cache should open");
         let team_config = team_config_with_prod_root(&prod_root);
 
         let resolved =
@@ -1287,8 +1234,8 @@ be substituted with the cached path"
     fn resolve_cached_bundles_never_fetches_checkout_bundles() {
         let temp_dir = tempdir().expect("tempdir should be created");
         let checkout = bundle_with_file(temp_dir.path(), "gt", "maya", "commands.json", "{}");
-        let prod_root = temp_dir.path().join("prod_packages");
-        create_prod_package(
+        let prod_root = temp_dir.path().join("prod_bundles");
+        create_prod_bundle(
             &prod_root,
             "gt",
             "maya",
@@ -1297,7 +1244,7 @@ be substituted with the cached path"
         );
 
         let cache_root = temp_dir.path().join("cache");
-        let mut cache = PackageCache::new(&cache_root).expect("cache should open");
+        let mut cache = BundleCache::new(&cache_root).expect("cache should open");
         let team_config = team_config_with_prod_root(&prod_root);
 
         let resolved =

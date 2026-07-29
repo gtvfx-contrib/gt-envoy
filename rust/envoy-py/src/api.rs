@@ -5,18 +5,20 @@
 //! This module exposes the small convenience surface that historically lived
 //! at `envoy.getEnvironment`, `envoy.getAllowlist`, `envoy.traceEnvironment`,
 //! `envoy.setApiVerbosity`, `envoy.loadUserConfig`, and
-//! `envoy.getCurrentBundleConfig`.
+//! `envoy.getCurrentStack`.
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use crate::exceptions::envoy_error_to_pyerr;
+use envoy_core::bundle_cache::{
+    open_default_bundle_cache, BundleCache as CoreBundleCache, BundleCacheError,
+};
 use envoy_core::discovery::{
     discover_bundles_auto as core_discover_bundles_auto, get_bundles as core_get_bundles,
-    load_bundles_from_config as core_load_bundles_from_config, Bundle as CoreBundle,
-    BundleConfig as CoreBundleConfig, BundleInfo as CoreBundleInfo, BUNDLE_CHECKOUT,
-    BUNDLE_DEFAULT_NAMESPACE,
+    load_bundles_from_stack as core_load_bundles_from_stack, Bundle as CoreBundle,
+    BundleInfo as CoreBundleInfo, BUNDLE_CHECKOUT, BUNDLE_DEFAULT_NAMESPACE,
 };
 use envoy_core::environment::{
     core_env_vars, envoy_env_vars, EnvironmentManager,
@@ -24,19 +26,15 @@ use envoy_core::environment::{
     TraceStepEvent as CoreTraceStepEvent,
 };
 use envoy_core::error::EnvoyError;
-use envoy_core::package_cache::{
-    open_default_package_cache, PackageCache as CorePackageCache, PackageCacheError,
-};
-use envoy_core::pipeline::{
-    ContextHierarchy as CoreContextHierarchy, Pipeline as CorePipeline,
-    PipelineConfig as CorePipelineConfig, PipelineSource as CorePipelineSource,
-};
 use envoy_core::runtime::{
-    collect_env_files, is_raw_path, load_registry, prepare_env,
-    resolve_current_pipeline_for_bundles, resolve_team_config_for_bundles,
+    collect_env_files, is_raw_path, load_registry, prepare_env, resolve_team_config_for_bundles,
 };
 use envoy_core::semver::{
     Constraint as CoreConstraint, SemVer as CoreSemVer, VersionSpec as CoreVersionSpec,
+};
+use envoy_core::stack::{
+    Stack as CoreStack, StackSource as CoreStackSource, DEFAULT_STACK_MAX_DEPTH,
+    DEFAULT_STACK_NAMESPACE,
 };
 use envoy_core::team_config::{TeamConfig as CoreTeamConfig, UserHostConfig as CoreUserHostConfig};
 use envoy_core::user_config::UserConfig as CoreUserConfig;
@@ -217,7 +215,7 @@ impl UserConfig {
         self.inner
             .borrow_mut()
             .set(key, value)
-            .map_err(bundle_config_to_pyerr)
+            .map_err(envoy_error_to_pyerr)
     }
 
     fn unset(&self, key: &str) -> bool {
@@ -399,26 +397,55 @@ impl BundleInfo {
 }
 
 #[pyclass(module = "envoy")]
-struct BundleConfig {
-    inner: CoreBundleConfig,
+struct Stack {
+    inner: CoreStack,
 }
 
 #[pymethods]
-impl BundleConfig {
+impl Stack {
+    /// Load a strict YAML stack from an `.estack` path.
     #[new]
     fn new(path: &Bound<'_, PyAny>) -> PyResult<Self> {
-        Ok(Self {
-            inner: CoreBundleConfig::new(path_like_to_pathbuf(path)?)
-                .map_err(bundle_config_to_pyerr)?,
-        })
+        CoreStack::new(path_like_to_pathbuf(path)?)
+            .map(Self::from_inner)
+            .map_err(stack_to_pyerr)
     }
 
+    /// Load the latest publication of a named stack.
     #[classmethod]
-    #[pyo3(signature = (*, ignore_user_config=false))]
-    fn current(_cls: &Bound<'_, PyType>, ignore_user_config: bool) -> PyResult<Option<Self>> {
-        CoreBundleConfig::current(ignore_user_config)
+    fn from_name(_cls: &Bound<'_, PyType>, name: &str) -> PyResult<Self> {
+        CoreStack::from_name(name)
+            .map(Self::from_inner)
+            .map_err(stack_to_pyerr)
+    }
+
+    /// Return the configured or context-resolved current stack.
+    #[classmethod]
+    #[pyo3(signature = (*, ignore_user_config=false, context=None, default_namespace=DEFAULT_STACK_NAMESPACE, max_depth=DEFAULT_STACK_MAX_DEPTH))]
+    fn current(
+        _cls: &Bound<'_, PyType>,
+        ignore_user_config: bool,
+        context: Option<&str>,
+        default_namespace: &str,
+        max_depth: usize,
+    ) -> PyResult<Option<Self>> {
+        CoreStack::current(ignore_user_config, context, default_namespace, max_depth)
             .map(|value| value.map(Self::from_inner))
-            .map_err(bundle_config_to_pyerr)
+            .map_err(stack_to_pyerr)
+    }
+
+    /// Resolve a stack from the named-stack registry for `context`.
+    #[classmethod]
+    #[pyo3(signature = (context, *, default_namespace=DEFAULT_STACK_NAMESPACE, max_depth=DEFAULT_STACK_MAX_DEPTH))]
+    fn resolve(
+        _cls: &Bound<'_, PyType>,
+        context: &str,
+        default_namespace: &str,
+        max_depth: usize,
+    ) -> PyResult<Self> {
+        CoreStack::resolve(context, default_namespace, max_depth)
+            .map(Self::from_inner)
+            .map_err(stack_to_pyerr)
     }
 
     #[getter]
@@ -427,20 +454,47 @@ impl BundleConfig {
     }
 
     #[getter]
-    fn name(&self) -> Option<String> {
-        self.inner.name().map(ToOwned::to_owned)
+    fn name(&self) -> String {
+        self.inner.name().to_string()
     }
 
     #[getter]
-    fn cfg_version(&self) -> Option<String> {
-        self.inner.cfg_version().map(ToOwned::to_owned)
+    fn namespace(&self) -> String {
+        self.inner.namespace().to_string()
+    }
+
+    #[getter]
+    fn source(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let source = PyDict::new_bound(py);
+        match self.inner.source() {
+            CoreStackSource::Local { path } => {
+                source.set_item("type", "local")?;
+                source.set_item("path", path_to_py_path(py, path)?)?;
+            }
+        }
+        Ok(source.into_any().unbind())
+    }
+
+    #[getter]
+    fn pinned_version(&self) -> Option<String> {
+        self.inner.pinned_version().map(ToOwned::to_owned)
+    }
+
+    #[getter]
+    fn registry_version(&self) -> Option<String> {
+        self.inner.registry_version().map(ToOwned::to_owned)
+    }
+
+    #[getter]
+    fn metadata(&self, py: Python<'_>) -> PyResult<PyObject> {
+        json_map_to_pyobject(py, self.inner.metadata())
     }
 
     #[getter]
     fn bundles(&self, py: Python<'_>) -> PyResult<Vec<Py<Bundle>>> {
         self.inner
             .bundles()
-            .map_err(bundle_config_to_pyerr)?
+            .map_err(stack_to_pyerr)?
             .into_iter()
             .map(|bundle| Py::new(py, Bundle::from_inner(bundle)))
             .collect()
@@ -448,7 +502,7 @@ impl BundleConfig {
 
     #[getter]
     fn commands(&self) -> PyResult<Vec<String>> {
-        self.inner.commands().map_err(bundle_config_to_pyerr)
+        self.inner.commands().map_err(stack_to_pyerr)
     }
 
     fn __repr__(&self) -> String {
@@ -460,8 +514,8 @@ impl BundleConfig {
     }
 }
 
-impl BundleConfig {
-    fn from_inner(inner: CoreBundleConfig) -> Self {
+impl Stack {
+    fn from_inner(inner: CoreStack) -> Self {
         Self { inner }
     }
 }
@@ -487,7 +541,7 @@ fn get_environment(
     let (registry, bundles) = load_registry(
         bundle_roots.as_deref(),
         commands_file.as_deref(),
-        open_default_package_cache(true).as_ref(),
+        open_default_bundle_cache(true).as_ref(),
     )
     .map_err(envoy_error_to_pyerr)?;
     let (env, _) = prepare_env(
@@ -538,7 +592,7 @@ fn trace_environment(
         let (registry, bundles) = load_registry(
             bundle_roots.as_deref(),
             commands_file.as_deref(),
-            open_default_package_cache(true).as_ref(),
+            open_default_bundle_cache(true).as_ref(),
         )
         .map_err(envoy_error_to_pyerr)?;
         let env_files = collect_env_files(command, &registry, bundles.as_deref())
@@ -585,7 +639,7 @@ fn diagnose_environment(
         let (registry, bundles) = load_registry(
             bundle_roots.as_deref(),
             commands_file.as_deref(),
-            open_default_package_cache(true).as_ref(),
+            open_default_bundle_cache(true).as_ref(),
         )
         .map_err(envoy_error_to_pyerr)?;
         let env_files = collect_env_files(command, &registry, bundles.as_deref())
@@ -622,18 +676,21 @@ fn load_user_config(py: Python<'_>, path: Option<&Bound<'_, PyAny>>) -> PyResult
     )
 }
 
-/// Return the active bundle config as configured by the user.
-#[pyfunction(name = "getCurrentBundleConfig")]
-#[pyo3(signature = (*, ignore_user_config=false))]
-fn get_current_bundle_config(
+/// Return the configured or context-resolved current stack.
+#[pyfunction(name = "getCurrentStack")]
+#[pyo3(signature = (*, ignore_user_config=false, context=None, default_namespace=DEFAULT_STACK_NAMESPACE, max_depth=DEFAULT_STACK_MAX_DEPTH))]
+fn get_current_stack(
     py: Python<'_>,
     ignore_user_config: bool,
-) -> PyResult<Option<Py<BundleConfig>>> {
-    let config = CoreBundleConfig::current(ignore_user_config)
-        .map_err(bundle_config_to_pyerr)?
-        .map(BundleConfig::from_inner);
+    context: Option<&str>,
+    default_namespace: &str,
+    max_depth: usize,
+) -> PyResult<Option<Py<Stack>>> {
+    let stack = CoreStack::current(ignore_user_config, context, default_namespace, max_depth)
+        .map_err(stack_to_pyerr)?
+        .map(Stack::from_inner);
 
-    config.map(|value| Py::new(py, value)).transpose()
+    stack.map(|value| Py::new(py, value)).transpose()
 }
 
 /// Return the active team configuration resolved from discovered bundles.
@@ -652,38 +709,12 @@ fn get_current_team_config(
     let (_registry, bundles) = load_registry(
         bundle_roots.as_deref(),
         commands_file.as_deref(),
-        open_default_package_cache(true).as_ref(),
+        open_default_bundle_cache(true).as_ref(),
     )
     .map_err(envoy_error_to_pyerr)?;
 
     resolve_team_config_for_bundles(bundles.as_deref())
         .map(|inner| Py::new(py, TeamConfig { inner }))
-        .transpose()
-}
-
-/// Return the current pipeline resolved from discovered bundles, honoring
-/// the `ENVOY_PIPELINE_CONTEXT` environment variable.
-///
-/// Returns `None` when no discovered bundle defines a `.envoy/pipeline.json`
-/// or no pipeline matches the current context or default namespace. This is
-/// the automatic-discovery counterpart to `Pipeline.resolve`.
-#[pyfunction(name = "getCurrentPipeline")]
-#[pyo3(signature = (*, bundle_roots=None, commands_file=None))]
-fn get_current_pipeline(
-    py: Python<'_>,
-    bundle_roots: Option<Vec<String>>,
-    commands_file: Option<&Bound<'_, PyAny>>,
-) -> PyResult<Option<Py<Pipeline>>> {
-    let commands_file = resolve_optional_path(commands_file)?;
-    let (_registry, bundles) = load_registry(
-        bundle_roots.as_deref(),
-        commands_file.as_deref(),
-        open_default_package_cache(true).as_ref(),
-    )
-    .map_err(envoy_error_to_pyerr)?;
-
-    resolve_current_pipeline_for_bundles(bundles.as_deref())
-        .map(|inner| Py::new(py, Pipeline { inner }))
         .transpose()
 }
 
@@ -695,26 +726,26 @@ fn discover_bundles_auto(py: Python<'_>) -> PyResult<Vec<Py<BundleInfo>>> {
     )
 }
 
-#[pyfunction(name = "getBundles", signature = (config_file=None))]
+#[pyfunction(name = "getBundles", signature = (stack_file=None))]
 fn get_bundles(
     py: Python<'_>,
-    config_file: Option<&Bound<'_, PyAny>>,
+    stack_file: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<Vec<Py<BundleInfo>>> {
-    let config_file = resolve_optional_path(config_file)?;
+    let stack_file = resolve_optional_path(stack_file)?;
     bundle_infos_to_py(
         py,
-        core_get_bundles(config_file.as_deref()).map_err(envoy_error_to_pyerr)?,
+        core_get_bundles(stack_file.as_deref()).map_err(envoy_error_to_pyerr)?,
     )
 }
 
-#[pyfunction(name = "loadBundlesFromConfig")]
-fn load_bundles_from_config(
+#[pyfunction(name = "loadBundlesFromStack")]
+fn load_bundles_from_stack(
     py: Python<'_>,
-    config_file: &Bound<'_, PyAny>,
+    stack_file: &Bound<'_, PyAny>,
 ) -> PyResult<Vec<Py<BundleInfo>>> {
     bundle_infos_to_py(
         py,
-        core_load_bundles_from_config(&path_like_to_pathbuf(config_file)?)
+        core_load_bundles_from_stack(&path_like_to_pathbuf(stack_file)?)
             .map_err(envoy_error_to_pyerr)?,
     )
 }
@@ -732,11 +763,8 @@ pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResul
     m.add_class::<UserConfig>()?;
     m.add_class::<Bundle>()?;
     m.add_class::<BundleInfo>()?;
-    m.add_class::<BundleConfig>()?;
-    m.add_class::<PackageCache>()?;
-    m.add_class::<Pipeline>()?;
-    m.add_class::<ContextHierarchy>()?;
-    m.add_class::<PipelineConfig>()?;
+    m.add_class::<Stack>()?;
+    m.add_class::<BundleCache>()?;
     m.add_class::<TeamConfig>()?;
     m.add_class::<UserHostConfig>()?;
     m.add_class::<Vcs>()?;
@@ -751,12 +779,11 @@ pub fn register_api_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResul
     m.add_function(wrap_pyfunction!(diagnose_environment, m)?)?;
     m.add_function(wrap_pyfunction!(set_api_verbosity, m)?)?;
     m.add_function(wrap_pyfunction!(load_user_config, m)?)?;
-    m.add_function(wrap_pyfunction!(get_current_bundle_config, m)?)?;
+    m.add_function(wrap_pyfunction!(get_current_stack, m)?)?;
     m.add_function(wrap_pyfunction!(get_current_team_config, m)?)?;
-    m.add_function(wrap_pyfunction!(get_current_pipeline, m)?)?;
     m.add_function(wrap_pyfunction!(discover_bundles_auto, m)?)?;
     m.add_function(wrap_pyfunction!(get_bundles, m)?)?;
-    m.add_function(wrap_pyfunction!(load_bundles_from_config, m)?)?;
+    m.add_function(wrap_pyfunction!(load_bundles_from_stack, m)?)?;
     Ok(())
 }
 
@@ -851,8 +878,21 @@ fn user_config_save_to_pyerr(error: EnvoyError) -> PyErr {
     }
 }
 
-fn bundle_config_to_pyerr(error: EnvoyError) -> PyErr {
+fn stack_to_pyerr(error: EnvoyError) -> PyErr {
     envoy_error_to_pyerr(error)
+}
+
+fn json_map_to_pyobject(
+    py: Python<'_>,
+    values: &HashMap<String, serde_json::Value>,
+) -> PyResult<PyObject> {
+    let serialized =
+        serde_json::to_string(values).map_err(|error| PyValueError::new_err(error.to_string()))?;
+    Ok(PyModule::import_bound(py, "json")?
+        .getattr("loads")?
+        .call1((serialized,))?
+        .into_any()
+        .unbind())
 }
 
 // ---------------------------------------------------------------------------
@@ -1032,37 +1072,37 @@ impl VersionSpec {
     }
 }
 
-/// Python wrapper for the content-addressed package cache.
+/// Python wrapper for the content-addressed bundle cache.
 ///
-/// Packages are stored under `<cache_root>/<content_hash>/` and indexed by
-/// logical package ID + version in a JSON manifest at `<cache_root>/.index.json`.
+/// Bundles are stored under `<cache_root>/<content_hash>/` and indexed by
+/// logical bundle ID + version in a JSON manifest at `<cache_root>/.index.json`.
 #[pyclass(module = "envoy")]
-struct PackageCache {
-    inner: CorePackageCache,
+struct BundleCache {
+    inner: CoreBundleCache,
 }
 
 #[pymethods]
-impl PackageCache {
-    /// Open (or create) a package cache at `root`.
+impl BundleCache {
+    /// Open (or create) a bundle cache at `root`.
     #[new]
     fn new(root: &Bound<'_, PyAny>) -> PyResult<Self> {
         let path = path_like_to_pathbuf(root)?;
-        let inner = CorePackageCache::new(&path).map_err(|e| PyOSError::new_err(e.to_string()))?;
+        let inner = CoreBundleCache::new(&path).map_err(|e| PyOSError::new_err(e.to_string()))?;
         Ok(Self { inner })
     }
 
-    /// Store a package directory in the cache and return its metadata.
+    /// Store a bundle directory in the cache and return its metadata.
     fn store(
         &mut self,
         py: Python<'_>,
-        package_id: &str,
+        bundle_id: &str,
         version: &str,
         source_dir: &Bound<'_, PyAny>,
     ) -> PyResult<PyObject> {
         let path = path_like_to_pathbuf(source_dir)?;
         let cached = self
             .inner
-            .store(package_id, version, &path)
+            .store(bundle_id, version, &path)
             .map_err(|e| PyOSError::new_err(e.to_string()))?;
 
         // Return a dict with content_hash, path, and last_accessed.
@@ -1076,9 +1116,9 @@ impl PackageCache {
         Ok(dict.into_any().unbind())
     }
 
-    /// Retrieve a previously stored package by ID and version.
-    fn get(&self, py: Python<'_>, package_id: &str, version: &str) -> PyResult<Option<PyObject>> {
-        match self.inner.get(package_id, version) {
+    /// Retrieve a previously stored bundle by ID and version.
+    fn get(&self, py: Python<'_>, bundle_id: &str, version: &str) -> PyResult<Option<PyObject>> {
+        match self.inner.get(bundle_id, version) {
             Ok(cached) => {
                 let dict = PyDict::new_bound(py);
                 dict.set_item("content_hash", cached.content_hash)?;
@@ -1090,23 +1130,23 @@ impl PackageCache {
                 dict.set_item("last_accessed", cached.last_accessed)?;
                 Ok(Some(dict.into_any().unbind()))
             }
-            Err(PackageCacheError::NotFound { .. }) => Ok(None),
+            Err(BundleCacheError::NotFound { .. }) => Ok(None),
             Err(e) => Err(PyOSError::new_err(e.to_string())),
         }
     }
 
-    /// List all packages in the cache.
+    /// List all bundles in the cache.
     fn list(&self) -> Vec<(String, String)> {
         self.inner
             .list()
             .into_iter()
-            .map(|(id, ver)| (id.to_string(), ver.to_string()))
+            .map(|(bundle_id, version)| (bundle_id.to_string(), version.to_string()))
             .collect()
     }
 
-    /// Remove a package from the cache by ID and version.
-    fn remove(&mut self, package_id: &str, version: &str) -> PyResult<bool> {
-        match self.inner.remove(package_id, version) {
+    /// Remove a bundle from the cache by ID and version.
+    fn remove(&mut self, bundle_id: &str, version: &str) -> PyResult<bool> {
+        match self.inner.remove(bundle_id, version) {
             Ok(removed) => Ok(removed),
             Err(e) => Err(PyOSError::new_err(e.to_string())),
         }
@@ -1128,150 +1168,6 @@ impl PackageCache {
     }
 }
 
-/// Python wrapper for a resolved pipeline definition.
-#[pyclass(module = "envoy")]
-struct Pipeline {
-    inner: CorePipeline,
-}
-
-#[pymethods]
-impl Pipeline {
-    /// Human-readable name (e.g., `"build"`, `"test"`).
-    #[getter]
-    fn name(&self) -> String {
-        self.inner.name.clone()
-    }
-
-    /// Namespace this pipeline belongs to.
-    #[getter]
-    fn namespace(&self) -> String {
-        self.inner.namespace.clone()
-    }
-
-    /// Optional pinned version string for reproducible builds.
-    #[getter]
-    fn pinned_version(&self) -> Option<String> {
-        self.inner.pinned_version.clone()
-    }
-
-    /// Where the pipeline definition was loaded from (as a dict).
-    #[getter]
-    fn source_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        match &self.inner.source {
-            CorePipelineSource::Local { path } => {
-                let dict = PyDict::new_bound(py);
-                dict.set_item("type", "local")?;
-                dict.set_item(
-                    "path",
-                    path_to_py_path(py, path).map_err(|e| PyOSError::new_err(e.to_string()))?,
-                )?;
-                Ok(dict.into_any().unbind())
-            }
-        }
-    }
-
-    /// Arbitrary metadata attached by the bundle author.
-    #[getter]
-    fn metadata(&self) -> HashMap<String, String> {
-        self.inner
-            .metadata
-            .iter()
-            .map(|(k, v)| (k.clone(), serde_json::to_string(v).unwrap_or_default()))
-            .collect()
-    }
-
-    /// Return the namespaced pipeline identifier (`namespace:name`).
-    fn __repr__(&self) -> String {
-        format!("Pipeline('{}:{}')", self.inner.namespace, self.inner.name)
-    }
-
-    fn __str__(&self) -> String {
-        self.__repr__()
-    }
-}
-
-/// Python wrapper for a context hierarchy path like `"team:project"`.
-#[pyclass(module = "envoy")]
-struct ContextHierarchy {
-    inner: CoreContextHierarchy,
-}
-
-#[pymethods]
-impl ContextHierarchy {
-    /// Create from a colon-separated string.
-    #[new]
-    fn new(raw: &str) -> Self {
-        Self {
-            inner: CoreContextHierarchy::new(raw),
-        }
-    }
-
-    /// Return the individual context levels from broadest to most specific.
-    fn levels(&self) -> Vec<String> {
-        self.inner.levels()
-    }
-
-    /// Return `true` if this is a parent of another hierarchy.
-    fn contains(&self, other: &ContextHierarchy) -> bool {
-        self.inner.contains(&other.inner)
-    }
-
-    /// Return the top-level (broadest) context.
-    #[getter]
-    fn root_context(&self) -> String {
-        self.inner.root_context()
-    }
-
-    fn __repr__(&self) -> String {
-        format!("ContextHierarchy('{}')", self.inner.raw)
-    }
-
-    fn __str__(&self) -> String {
-        self.__repr__()
-    }
-}
-
-/// Python wrapper for pipeline resolution configuration.
-#[pyclass(module = "envoy")]
-struct PipelineConfig {
-    inner: CorePipelineConfig,
-}
-
-#[pymethods]
-impl PipelineConfig {
-    /// Create a new config with default settings.
-    #[new]
-    fn new() -> Self {
-        Self {
-            inner: CorePipelineConfig::default(),
-        }
-    }
-
-    /// Default namespace for fallback resolution.
-    #[getter]
-    fn default_namespace(&self) -> String {
-        self.inner.default_namespace.clone()
-    }
-
-    /// Set the default namespace.
-    #[setter]
-    fn set_default_namespace(&mut self, ns: &str) {
-        self.inner.default_namespace = ns.to_string();
-    }
-
-    /// Maximum depth of context hierarchy traversal (0 = unlimited).
-    #[getter]
-    fn max_depth(&self) -> usize {
-        self.inner.max_depth
-    }
-
-    /// Set the maximum depth.
-    #[setter]
-    fn set_max_depth(&mut self, depth: usize) {
-        self.inner.max_depth = depth;
-    }
-}
-
 /// Python wrapper for a resolved team configuration.
 #[pyclass(module = "envoy")]
 struct TeamConfig {
@@ -1286,20 +1182,20 @@ impl TeamConfig {
         self.inner.name.clone()
     }
 
-    /// Absolute path to the production packages root directory.
+    /// Absolute path to the production bundles root directory.
     #[getter]
-    fn prod_packages_root(&self) -> Option<String> {
+    fn prod_bundles_root(&self) -> Option<String> {
         self.inner
-            .prod_packages_root
+            .prod_bundles_root
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned())
     }
 
-    /// Absolute path to the production pipelines root directory.
+    /// Absolute path to the production stacks root directory.
     #[getter]
-    fn prod_pipelines_root(&self) -> Option<String> {
+    fn prod_stacks_root(&self) -> Option<String> {
         self.inner
-            .prod_pipelines_root
+            .prod_stacks_root
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned())
     }
@@ -1473,28 +1369,28 @@ struct UserHostConfig {
 
 #[pymethods]
 impl UserHostConfig {
-    /// Override for the production packages root (empty string = use team default).
+    /// Override for the production bundles root (empty string = use team default).
     #[getter]
-    fn prod_packages_root(&self) -> String {
-        self.inner.prod_packages_root.clone()
+    fn prod_bundles_root(&self) -> String {
+        self.inner.prod_bundles_root.clone()
     }
 
-    /// Set override for the production packages root.
+    /// Set override for the production bundles root.
     #[setter]
-    fn set_prod_packages_root(&mut self, path: &str) {
-        self.inner.prod_packages_root = path.to_string();
+    fn set_prod_bundles_root(&mut self, path: &str) {
+        self.inner.prod_bundles_root = path.to_string();
     }
 
-    /// Override for the production pipelines root (empty string = use team default).
+    /// Override for the production stacks root (empty string = use team default).
     #[getter]
-    fn prod_pipelines_root(&self) -> String {
-        self.inner.prod_pipelines_root.clone()
+    fn prod_stacks_root(&self) -> String {
+        self.inner.prod_stacks_root.clone()
     }
 
-    /// Set override for the production pipelines root.
+    /// Set override for the production stacks root.
     #[setter]
-    fn set_prod_pipelines_root(&mut self, path: &str) {
-        self.inner.prod_pipelines_root = path.to_string();
+    fn set_prod_stacks_root(&mut self, path: &str) {
+        self.inner.prod_stacks_root = path.to_string();
     }
 
     /// Arbitrary additional settings from user/host config.
@@ -1510,9 +1406,9 @@ impl UserHostConfig {
     /// Return the user/host config as a dict.
     fn __repr__(&self) -> String {
         format!(
-            "UserHostConfig(prod_packages_root='{}', prod_pipelines_root='{}/{})",
-            self.inner.prod_packages_root,
-            self.inner.prod_pipelines_root,
+            "UserHostConfig(prod_bundles_root='{}', prod_stacks_root='{}', metadata={})",
+            self.inner.prod_bundles_root,
+            self.inner.prod_stacks_root,
             if !self.inner.metadata.is_empty() {
                 "..."
             } else {

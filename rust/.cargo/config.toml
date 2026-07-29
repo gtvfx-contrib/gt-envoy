@@ -1,9 +1,0 @@
-# Cargo configuration for Windows builds
-# Forces use of response files to avoid link.exe command-line argument limits
-
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "link-args=/STACK:16777216"]
-
-[build]
-# Use response files for linking to handle long object file paths
-rustflags = ["-C", "link-args=/STACK:16777216"]

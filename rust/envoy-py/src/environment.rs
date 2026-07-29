@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use envoy_core::package_cache::open_default_package_cache;
+use envoy_core::bundle_cache::open_default_bundle_cache;
 use envoy_core::runtime::{is_raw_path, load_registry, prepare_env};
 use pyo3::exceptions::{PyKeyError, PyValueError};
 use pyo3::prelude::*;
@@ -272,7 +272,7 @@ fn build_environment(
     let (registry, bundles) = load_registry(
         bundle_roots,
         commands_file,
-        open_default_package_cache(true).as_ref(),
+        open_default_bundle_cache(true).as_ref(),
     )
     .map_err(|e| PyValueError::new_err(format!("Failed to load registry: {}", e)))?;
 

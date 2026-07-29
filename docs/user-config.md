@@ -19,13 +19,13 @@ environment variable.
 ### Set a value
 
 ```powershell
-envoy --set-config bundles_config=R:/studio/envoy/studio_bundles.json
+envoy --set-config stack=R:/studio/envoy/studio.estack
 ```
 
 ### Clear a value
 
 ```powershell
-envoy --set-config bundles_config=
+envoy --set-config stack=
 ```
 
 (Empty value after `=` removes the setting.)
@@ -37,7 +37,7 @@ envoy --set-config bundles_config=
 envoy --get-config
 
 # One specific setting
-envoy --get-config bundles_config
+envoy --get-config stack
 ```
 
 ### List all configurable settings
@@ -47,8 +47,8 @@ envoy --list-configs
 ```
 
 This prints each setting name, its current value (or `not set`), a description,
-and the allowed choices where applicable.  When `ENVOY_CFG_ROOTS` is set, it
-also lists all available named configs.
+and the allowed choices where applicable. When `ENVOY_STACK_ROOTS` is set, it
+also lists all available named stacks.
 
 ### Bypass the config for one run
 
@@ -56,25 +56,26 @@ also lists all available named configs.
 envoy --ignore-config python script.py
 ```
 
-`--ignore-config` (`-ic`) skips the user config entirely for that invocation,
-reverting to `ENVOY_BNDL_ROOTS` auto-discovery as if no config is set.
+`--ignore-config` (`-ic`) skips only the user config for that invocation.
+`ENVOY_STACK`, context resolution, and `ENVOY_BNDL_ROOTS` discovery remain
+available.
 
 ## Available settings
 
-### `bundles_config`
+### `stack`
 
-Path **or name** of the default bundles config.
+Path **or name** of the default Stack.
 
 ```powershell
 # Point at a specific file
-envoy --set-config bundles_config=R:/studio/envoy/bundles.json
+envoy --set-config stack=R:/studio/envoy/studio.estack
 
-# Reference a named config (resolved via ENVOY_CFG_ROOTS)
-envoy --set-config bundles_config=studio
+# Reference a named Stack (resolved via ENVOY_STACK_ROOTS)
+envoy --set-config stack=studio
 ```
 
-Once set, this is used automatically whenever `--bundles-config` is not
-supplied on the command line.  See [Named configs](#named-configs) below.
+Once set, this is used automatically whenever neither `--stack` nor
+`ENVOY_STACK` is supplied. See [Named stacks](#named-stacks) below.
 
 ### `verbosity`
 
@@ -86,18 +87,18 @@ envoy --set-config verbosity=verbose
 
 The `--verbose` (`-v`) flag always overrides this for the current run.
 
-### `package_cache_dir`
+### `bundle_cache_dir`
 
-Directory used for the local package cache. Set to an empty string to fall
-back to the platform default location (`%LOCALAPPDATA%\envoy\package_cache`
-on Windows, `~/.cache/envoy/package_cache` elsewhere).
+Directory used for the local bundle cache. Set to an empty string to fall
+back to the platform default location (`%LOCALAPPDATA%\envoy\bundle_cache`
+on Windows, `~/.cache/envoy/bundle_cache` elsewhere).
 
 ```powershell
-envoy --set-config package_cache_dir=R:/studio/envoy/package_cache
-envoy --set-config package_cache_dir=   # clear it, fall back to the default
+envoy --set-config bundle_cache_dir=R:/studio/envoy/bundle_cache
+envoy --set-config bundle_cache_dir=   # clear it, fall back to the default
 ```
 
-The `ENVOY_PACKAGE_CACHE` environment variable and the `--ignore-config` flag
+The `ENVOY_BUNDLE_CACHE` environment variable and the `--ignore-config` flag
 both take precedence over this setting — see the
 [CLI reference](cli-reference/envoy.md#environment-variables) for the full
 precedence order.
@@ -108,101 +109,107 @@ When envoy determines which bundles to load it follows this priority order:
 
 ```mermaid
 flowchart TD
-    A([envoy starts]) --> B{--bundles-config\nflag?}
-    B -- Yes --> R1[Resolve path or named config]
-    B -- No --> C{--ignore-config\nflag?}
-    C -- Yes --> E[Auto-discover via\nENVOY_BNDL_ROOTS]
-    C -- No --> D{User config\nbundles_config set?}
-    D -- Yes --> R2[Resolve path or named config]
-    D -- No --> E
-    R1 --> F[Use that config file]
-    R2 --> F
-    E --> G[Local fallback\n.envoy/commands.json]
-    F --> H([Commands ready])
+    A([envoy starts]) --> B{--stack\nflag?}
+    B -- Yes --> S[Resolve path or named Stack]
+    B -- No --> C{ENVOY_STACK\nset?}
+    C -- Yes --> S
+    C -- No --> D{User config enabled\nand stack set?}
+    D -- Yes --> S
+    D -- No --> E{Stack context\nset?}
+    E -- Yes --> S
+    E -- No --> F[Discover bundles via\nENVOY_BNDL_ROOTS]
+    S --> G[Load bundles from Stack]
+    F --> H[Bundle-local commands]
     G --> H
+    H --> I[Local fallback\n.envoy/commands.json]
+    I --> J([Commands ready])
 ```
 
-## Named configs
+The context comes from an explicit API argument or `ENVOY_STACK_CONTEXT`.
+Context lookup is not performed when no context is supplied.
 
-A named config (e.g. `studio`) is a config slot stored under
-`ENVOY_CFG_ROOTS` with versioned history and a `latest` pointer.  This lets
-teams publish and update a shared bundles config that all users pull
-automatically by name, without distributing a specific file path.
+## Named stacks
+
+A named Stack (for example, `studio`) is a slot stored under
+`ENVOY_STACK_ROOTS` with versioned history and a `latest` pointer.  This lets
+teams publish and update a shared runtime environment without distributing a
+specific file path.
 
 ### How envoy tells names from paths
 
 A value is treated as a **name** when it contains no path separator characters
-(`/`, `\`, `:`) and does not start with a dot.  Everything else is a path.
+(`/`, `\`, `:`), does not start with a dot, and does not end in `.estack`.
+Everything else is a path.
 
 ```powershell
-envoy --set-config bundles_config=studio          # name → resolved via ENVOY_CFG_ROOTS
-envoy --set-config bundles_config=R:/my/f.json   # path → used directly
+envoy --set-config stack=studio          # name → resolved via ENVOY_STACK_ROOTS
+envoy --set-config stack=R:/my/f.estack  # path → used directly
 ```
 
-### `ENVOY_CFG_ROOTS`
+### `ENVOY_STACK_ROOTS`
 
-Set this to one or more config root directories (semicolon-separated on Windows,
-colon-separated on Unix).  Envoy scans each root for named config slots.
+Set this to one or more stack root directories (semicolon-separated on Windows,
+colon-separated on Unix).  Envoy scans each root for named stack slots.
 
 === "PowerShell"
 
     ```powershell
-    $env:ENVOY_CFG_ROOTS = "R:/studio/envoy/configs"
+    $env:ENVOY_STACK_ROOTS = "R:/studio/envoy/stacks"
     ```
 
 === "cmd"
 
     ```batch
-    set ENVOY_CFG_ROOTS=R:/studio/envoy/configs
+    set ENVOY_STACK_ROOTS=R:/studio/envoy/stacks
     ```
 
 === "Unix/macOS"
 
     ```bash
-    export ENVOY_CFG_ROOTS=/studio/envoy/configs
+    export ENVOY_STACK_ROOTS=/studio/envoy/stacks
     ```
 
-### Named config directory structure
+### Named Stack directory structure
 
 ```
-R:\studio\envoy\configs\
+R:\studio\envoy\stacks\
 └── studio\
-    ├── 2026-06-21T10-13-00.json   ← versioned config
-    ├── 2026-06-22T09-00-00.json   ← newer version
-    └── latest                     ← text file: "2026-06-22T09-00-00.json"
+    ├── 2026-06-21T10-13-00.estack   ← versioned Stack
+    ├── 2026-06-22T09-00-00.estack   ← newer version
+    └── latest                       ← text: "2026-06-22T09-00-00.estack"
 ```
 
-Each version is a timestamped copy of a bundles-config JSON file.  The `latest`
+Each version is a timestamped copy of an `.estack` YAML file. The `latest`
 file contains just the filename of the most recently published version.
 
-### Publishing a named config
+### Publishing a named Stack
 
-Use `engit publish-config` to publish a new version and update `latest`:
+Use `engit publish-stack` to publish a new version and update `latest`:
 
 ```powershell
-engit publish-config studio R:/my/bundles.json
+engit publish-stack studio R:/my/studio.estack
 ```
 
-With an explicit config root (instead of using `ENVOY_CFG_ROOTS`):
+With an explicit stack root (instead of using `ENVOY_STACK_ROOTS`):
 
 ```powershell
-engit publish-config studio R:/my/bundles.json --cfg-root R:/studio/envoy/configs
+engit publish-stack studio R:/my/studio.estack --stack-root R:/studio/envoy/stacks
 ```
 
 Dry-run to preview without writing:
 
 ```powershell
-engit publish-config studio R:/my/bundles.json --dry-run
+engit publish-stack studio R:/my/studio.estack --dry-run
 ```
 
-### Listing available named configs
+### Listing available named stacks
 
 ```powershell
 envoy --list-configs
 ```
 
-When `ENVOY_CFG_ROOTS` is set, `--list-configs` appends a table of all
-available named configs with their current version and resolved path.
+When `ENVOY_STACK_ROOTS` is set, `--list-configs` appends a table of all
+available named stacks with their current version and resolved path.
 
 ## Config file format
 
@@ -210,7 +217,7 @@ The user config file is plain JSON:
 
 ```json
 {
-  "bundles_config": "studio",
+  "stack": "studio",
   "verbosity": "verbose"
 }
 ```
@@ -219,7 +226,7 @@ You can edit it directly in any text editor — envoy reads it on every invocati
 
 ## Python API
 
-All user-config and named-config functionality is available in the `envoy`
+All user-config and named-Stack functionality is available in the `envoy`
 Python package, making it easy to read or manipulate configuration
 programmatically.
 
@@ -230,15 +237,15 @@ import envoy
 
 # Load the current user config (never raises; returns empty config if absent)
 cfg = envoy.loadUserConfig()
-print(cfg.get('bundles_config'))   # 'studio' or None
+print(cfg.get('stack'))   # 'studio' or None
 
 # Modify and save
-cfg.set('bundles_config', 'studio')
+cfg.set('stack', 'studio')
 cfg.set('verbosity', 'verbose')
 cfg.save()
 
 # Inspect all stored settings
-print(cfg.items())  # {'bundles_config': 'studio', 'verbosity': 'verbose'}
+print(cfg.items())  # {'stack': 'studio', 'verbosity': 'verbose'}
 
 # Remove a setting
 cfg.unset('verbosity')
@@ -248,71 +255,78 @@ cfg.save()
 The config file path is exposed as `envoy.USER_CONFIG_PATH` and the registry
 of valid settings as `envoy.KNOWN_SETTINGS`.
 
-### `BundleConfig`
+### `Stack`
 
-`BundleConfig` can now be constructed from a named config slot or from the
-current user configuration, in addition to an explicit path.
+`Stack` can be constructed from an explicit path, a named Stack, the current
+selection sources, or a context.
 
 ```python
 import envoy
 
-# ── From an explicit path ──────────────────────────────────────────────────
-cfg = envoy.BundleConfig('R:/studio/envoy/studio_bundles.json')
-for bundle in cfg.bundles:
+# From an explicit path
+stack = envoy.Stack('R:/studio/envoy/studio.estack')
+for bundle in stack.bundles:
     print(bundle.bndlid, bundle.version)
 
-# ── From a named config slot (resolved via ENVOY_CFG_ROOTS) ───────────────
-cfg = envoy.BundleConfig.from_name('studio')
-print(cfg.name)         # 'studio'
-print(cfg.cfg_version)  # '2026-06-21T10-13-00'
-print(cfg.path)         # /studio/envoy/configs/studio/2026-...json
-print(cfg.commands)     # merged command list
+# From a named Stack slot (resolved via ENVOY_STACK_ROOTS)
+stack = envoy.Stack.from_name('studio')
+print(stack.name)              # 'studio'
+print(stack.namespace)         # 'gt'
+print(stack.registry_version)  # '2026-06-21T10-13-00'
+print(stack.path)              # /studio/envoy/stacks/studio/2026-...estack
+print(stack.commands)          # merged command list
 
-# ── From whatever the user has configured ─────────────────────────────────
-cfg = envoy.BundleConfig.current()
-if cfg is not None:
-    print(cfg.commands)
+# From the current CLI-equivalent selection sources
+stack = envoy.Stack.current()
+if stack is not None:
+    print(stack.commands)
 else:
-    print("No bundle config set — use ENVOY_BNDL_ROOTS auto-discovery")
+    print('No Stack selected; use ENVOY_BNDL_ROOTS discovery')
 
-# Convenience alias
-cfg = envoy.getCurrentBundleConfig()
+# Convenience function
+stack = envoy.getCurrentStack()
 
 # Skip the user config for this call (mirrors --ignore-config)
-cfg = envoy.BundleConfig.current(ignore_user_config=True)
+stack = envoy.Stack.current(ignore_user_config=True)
+
+# Resolve the most specific named Stack for a context
+stack = envoy.Stack.resolve('studio:lighting:show_a')
 ```
 
-### Named config registry
+See [Bundle discovery](bundle-discovery.md) for the strict `.estack` YAML
+schema and the full resolution behavior.
+
+### Named Stack registry
 
 ```python
 import envoy
 
-# Check whether a string is a config name or a path
-envoy.isConfigName('studio')          # True
-envoy.isConfigName('/path/to/f.json') # False
+# Check whether a string is a Stack name or a path
+envoy.isStackName('studio')                # True
+envoy.isStackName('/path/to/f.estack')     # False
 
 # Resolve a name to the latest published path
-path = envoy.resolveNamedConfig('studio')
-print(path)  # Path('/studio/envoy/configs/studio/2026-06-22T09-00-00.json')
+path = envoy.resolveNamedStack('studio')
+print(path)  # Path('/studio/envoy/stacks/studio/2026-06-22T09-00-00.estack')
 
-# List all available configs
-for entry in envoy.listNamedConfigs():
+# List all available named Stacks
+for entry in envoy.listNamedStacks():
     print(entry.name, entry.version, entry.path)
 
 # All published versions for one name (newest first)
-for version, path in envoy.listConfigVersions('studio'):
+for version, path in envoy.listStackVersions('studio'):
     print(version, path)
 
 # Publish a new version programmatically
 from pathlib import Path
-envoy.publishConfig(
-    cfg_root=Path('R:/studio/envoy/configs'),
+envoy.publishStack(
+    stack_root=Path('R:/studio/envoy/stacks'),
     name='studio',
-    source_path=Path('R:/my/bundles.json'),
+    source_path=Path('R:/my/studio.estack'),
 )
 ```
 
-The config root environment variable name is available as `envoy.CFG_ROOTS_VAR`
-(`'ENVOY_CFG_ROOTS'`).  Named config entries are instances of
-`envoy.NamedConfigEntry` — a dataclass with `.name`, `.version`, `.path`, and
-`.cfg_root` attributes.
+The Stack root environment variable name is available as
+`envoy.STACK_ROOTS_VAR` (`'ENVOY_STACK_ROOTS'`). Named entries are instances
+of `envoy.NamedStackEntry`, with `.name`, `.version`, `.path`, and
+`.stack_root` properties.

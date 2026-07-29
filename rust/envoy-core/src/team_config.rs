@@ -1,7 +1,7 @@
 //! Team configuration loading and merging for `envoy`.
 //!
 //! This module implements team configuration discovery. Each bundle's
-//! `.envoy/team.json` defines team-level settings (package roots, pipeline
+//! `.envoy/team.json` defines team-level settings (bundle roots, stack
 //! roots, user config paths). These are merged with per-user host configs to
 //! produce the final resolved [`TeamConfig`] used throughout envoy.
 
@@ -50,10 +50,10 @@ pub enum TeamConfigError {
 pub struct TeamConfig {
     /// Human-readable team name (e.g., `"bfd"`).
     pub name: String,
-    /// Absolute or UNC path to the production packages root directory.
-    pub prod_packages_root: Option<PathBuf>,
-    /// Absolute or UNC path to the production pipelines root directory.
-    pub prod_pipelines_root: Option<PathBuf>,
+    /// Absolute or UNC path to the production bundles root directory.
+    pub prod_bundles_root: Option<PathBuf>,
+    /// Absolute or UNC path to the production stacks root directory.
+    pub prod_stacks_root: Option<PathBuf>,
     /// Path (possibly with `~` expansion) to a user/host config JSON file.
     pub user_host_config_file: Option<String>,
     /// Arbitrary additional settings from team.json.
@@ -65,8 +65,8 @@ impl TeamConfig {
     pub fn empty() -> Self {
         Self {
             name: String::new(),
-            prod_packages_root: None,
-            prod_pipelines_root: None,
+            prod_bundles_root: None,
+            prod_stacks_root: None,
             user_host_config_file: None,
             metadata: HashMap::new(),
         }
@@ -111,13 +111,13 @@ impl TeamConfig {
         })?;
 
         // Parse optional fields.
-        let prod_packages_root = value
-            .get("prodPackagesRoot")
+        let prod_bundles_root = value
+            .get("prodBundlesRoot")
             .and_then(|v| v.as_str())
             .map(Self::expand_tilde);
 
-        let prod_pipelines_root = value
-            .get("prodPipelinesRoot")
+        let prod_stacks_root = value
+            .get("prodStacksRoot")
             .and_then(|v| v.as_str())
             .map(Self::expand_tilde);
 
@@ -131,7 +131,7 @@ impl TeamConfig {
         for (key, val) in value.as_object().unwrap() {
             if !matches!(
                 key.as_str(),
-                "name" | "prodPackagesRoot" | "prodPipelinesRoot" | "userHostConfigFile"
+                "name" | "prodBundlesRoot" | "prodStacksRoot" | "userHostConfigFile"
             ) {
                 metadata.insert(key.clone(), val.clone());
             }
@@ -139,8 +139,8 @@ impl TeamConfig {
 
         Ok(TeamConfig {
             name: name.to_string(),
-            prod_packages_root,
-            prod_pipelines_root,
+            prod_bundles_root,
+            prod_stacks_root,
             user_host_config_file,
             metadata,
         })
@@ -153,11 +153,11 @@ impl TeamConfig {
         let mut merged = self.clone();
 
         // User/host config overrides team-level paths if set.
-        if !user.prod_packages_root.is_empty() {
-            merged.prod_packages_root = Some(PathBuf::from(&user.prod_packages_root));
+        if !user.prod_bundles_root.is_empty() {
+            merged.prod_bundles_root = Some(PathBuf::from(&user.prod_bundles_root));
         }
-        if !user.prod_pipelines_root.is_empty() {
-            merged.prod_pipelines_root = Some(PathBuf::from(&user.prod_pipelines_root));
+        if !user.prod_stacks_root.is_empty() {
+            merged.prod_stacks_root = Some(PathBuf::from(&user.prod_stacks_root));
         }
 
         // Merge user metadata on top of team metadata.
@@ -172,10 +172,10 @@ impl TeamConfig {
 /// Per-user/host configuration that overrides team defaults.
 #[derive(Clone, Debug, Default)]
 pub struct UserHostConfig {
-    /// Override for the production packages root (empty = use team default).
-    pub prod_packages_root: String,
-    /// Override for the production pipelines root (empty = use team default).
-    pub prod_pipelines_root: String,
+    /// Override for the production bundles root (empty = use team default).
+    pub prod_bundles_root: String,
+    /// Override for the production stacks root (empty = use team default).
+    pub prod_stacks_root: String,
     /// Arbitrary additional settings from user/host config.
     pub metadata: HashMap<String, serde_json::Value>,
 }
@@ -202,26 +202,22 @@ impl UserHostConfig {
         }
 
         let key_file_path = configured_key_file_path();
-        let prod_packages_root =
-            Self::resolve_string_field(&value, "prodPackagesRoot", path, key_file_path.as_deref())?;
-        let prod_pipelines_root = Self::resolve_string_field(
-            &value,
-            "prodPipelinesRoot",
-            path,
-            key_file_path.as_deref(),
-        )?;
+        let prod_bundles_root =
+            Self::resolve_string_field(&value, "prodBundlesRoot", path, key_file_path.as_deref())?;
+        let prod_stacks_root =
+            Self::resolve_string_field(&value, "prodStacksRoot", path, key_file_path.as_deref())?;
 
         // Collect remaining fields as metadata.
         let mut metadata = HashMap::new();
         for (key, val) in value.as_object().unwrap() {
-            if !matches!(key.as_str(), "prodPackagesRoot" | "prodPipelinesRoot") {
+            if !matches!(key.as_str(), "prodBundlesRoot" | "prodStacksRoot") {
                 metadata.insert(key.clone(), val.clone());
             }
         }
 
         Ok(UserHostConfig {
-            prod_packages_root,
-            prod_pipelines_root,
+            prod_bundles_root,
+            prod_stacks_root,
             metadata,
         })
     }
@@ -413,8 +409,8 @@ mod tests {
             &path,
             r#"{
                 "name": "bfd",
-                "prodPackagesRoot": "\\\\server\\packages",
-                "prodPipelinesRoot": "\\\\server\\pipelines"
+                "prodBundlesRoot": "\\\\server\\bundles",
+                "prodStacksRoot": "\\\\server\\stacks"
             }"#,
         )
         .unwrap();
@@ -422,8 +418,8 @@ mod tests {
         let config = TeamConfig::load_from_file(&path).unwrap();
         assert_eq!(config.name, "bfd");
         assert_eq!(
-            config.prod_packages_root.as_deref(),
-            Some(PathBuf::from("\\\\server\\packages").as_path())
+            config.prod_bundles_root.as_deref(),
+            Some(PathBuf::from("\\\\server\\bundles").as_path())
         );
     }
 
@@ -434,16 +430,16 @@ mod tests {
             let path = temp.path().join("team.json");
             fs::write(
                 &path,
-                r#"{"name": "myteam", "prodPackagesRoot": "~/packages"}"#,
+                r#"{"name": "myteam", "prodBundlesRoot": "~/bundles"}"#,
             )
             .unwrap();
 
             let _env_guard = EnvVarGuard::set_many(&[("USERPROFILE", Some(temp.path()))]);
             let config = TeamConfig::load_from_file(&path).unwrap();
-            let expected_home_pkg = temp.path().join("packages");
+            let expected_home_bundle = temp.path().join("bundles");
             assert_eq!(
-                config.prod_packages_root.as_deref(),
-                Some(expected_home_pkg.as_path())
+                config.prod_bundles_root.as_deref(),
+                Some(expected_home_bundle.as_path())
             );
         });
     }
@@ -452,7 +448,7 @@ mod tests {
     fn load_team_config_rejects_missing_name() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("team.json");
-        fs::write(&path, r#"{"prodPackagesRoot": "\\\\server\\packages"}"#).unwrap();
+        fs::write(&path, r#"{"prodBundlesRoot": "\\\\server\\bundles"}"#).unwrap();
 
         assert!(TeamConfig::load_from_file(&path).is_err());
     }
@@ -465,7 +461,7 @@ mod tests {
             &path,
             r#"{
                 "name": "bfd",
-                "prodPackagesRoot": "\\\\server\\packages",
+                "prodBundlesRoot": "\\\\server\\bundles",
                 "customSetting": true,
                 "tags": ["build", "ci"]
             }"#,
@@ -492,8 +488,8 @@ mod tests {
             r#"{
                 // Team identifier.
                 "name": "bfd",
-                "prodPackagesRoot": "\\\\server\\packages", /* package share */
-                "prodPipelinesRoot": "\\\\server\\pipelines",
+                "prodBundlesRoot": "\\\\server\\bundles", /* bundle share */
+                "prodStacksRoot": "\\\\server\\stacks",
                 # extra metadata
                 "customSetting": true
             }"#,
@@ -503,12 +499,12 @@ mod tests {
         let config = TeamConfig::load_from_file(&path).unwrap();
         assert_eq!(config.name, "bfd");
         assert_eq!(
-            config.prod_packages_root.as_deref(),
-            Some(PathBuf::from("\\\\server\\packages").as_path())
+            config.prod_bundles_root.as_deref(),
+            Some(PathBuf::from("\\\\server\\bundles").as_path())
         );
         assert_eq!(
-            config.prod_pipelines_root.as_deref(),
-            Some(PathBuf::from("\\\\server\\pipelines").as_path())
+            config.prod_stacks_root.as_deref(),
+            Some(PathBuf::from("\\\\server\\stacks").as_path())
         );
         assert_eq!(
             config
@@ -523,7 +519,7 @@ mod tests {
     fn discover_team_configs_finds_all_in_bundles() {
         let temp = TempDir::new().unwrap();
         let bundles = vec![
-            create_test_bundle(&temp, "bfd", "build-pipeline", Some(r#"{"name": "bfd"}"#)),
+            create_test_bundle(&temp, "bfd", "build-stack", Some(r#"{"name": "bfd"}"#)),
             create_test_bundle(&temp, "gt", "test-bundle", None), // no team.json
         ];
 
@@ -554,21 +550,21 @@ mod tests {
             &path,
             r#"{
                 "name": "bfd",
-                "prodPackagesRoot": "\\\\server\\packages"
+                "prodBundlesRoot": "\\\\server\\bundles"
             }"#,
         )
         .unwrap();
 
         let team = TeamConfig::load_from_file(&path).unwrap();
         let user = UserHostConfig {
-            prod_packages_root: "\\\\local\\packages".to_string(),
+            prod_bundles_root: "\\\\local\\bundles".to_string(),
             ..Default::default()
         };
 
         let merged = team.merge_with_user(&user);
-        let expected_local = PathBuf::from("\\\\local\\packages");
+        let expected_local = PathBuf::from("\\\\local\\bundles");
         assert_eq!(
-            merged.prod_packages_root.as_deref(),
+            merged.prod_bundles_root.as_deref(),
             Some(expected_local.as_path())
         );
     }
@@ -581,7 +577,7 @@ mod tests {
             &path,
             r#"{
                 "name": "bfd",
-                "prodPackagesRoot": "\\\\server\\packages"
+                "prodBundlesRoot": "\\\\server\\bundles"
             }"#,
         )
         .unwrap();
@@ -592,9 +588,9 @@ mod tests {
         };
 
         let merged = team.merge_with_user(&user);
-        let expected_server = PathBuf::from("\\\\server\\packages");
+        let expected_server = PathBuf::from("\\\\server\\bundles");
         assert_eq!(
-            merged.prod_packages_root.as_deref(),
+            merged.prod_bundles_root.as_deref(),
             Some(expected_server.as_path())
         );
     }
@@ -606,14 +602,14 @@ mod tests {
         fs::write(
             &path,
             r#"{
-                "prodPackagesRoot": "\\\\local\\packages",
+                "prodBundlesRoot": "\\\\local\\bundles",
                 "customKey": 42
             }"#,
         )
         .unwrap();
 
         let user = UserHostConfig::load_from_file(&path).unwrap();
-        assert_eq!(user.prod_packages_root, "\\\\local\\packages");
+        assert_eq!(user.prod_bundles_root, "\\\\local\\bundles");
         assert_eq!(user.metadata.len(), 1);
     }
 
@@ -624,8 +620,8 @@ mod tests {
         fs::write(
             &path,
             r#"{
-                "prodPackagesRoot": "\\\\local\\packages", // override packages
-                "prodPipelinesRoot": "\\\\local\\pipelines", /* override pipelines */
+                "prodBundlesRoot": "\\\\local\\bundles", // override bundles
+                "prodStacksRoot": "\\\\local\\stacks", /* override stacks */
                 # retained as metadata
                 "customKey": 42
             }"#,
@@ -633,8 +629,8 @@ mod tests {
         .unwrap();
 
         let user = UserHostConfig::load_from_file(&path).unwrap();
-        assert_eq!(user.prod_packages_root, "\\\\local\\packages");
-        assert_eq!(user.prod_pipelines_root, "\\\\local\\pipelines");
+        assert_eq!(user.prod_bundles_root, "\\\\local\\bundles");
+        assert_eq!(user.prod_stacks_root, "\\\\local\\stacks");
         assert_eq!(
             user.metadata
                 .get("customKey")
@@ -650,11 +646,10 @@ mod tests {
             let user_config_path = temp.path().join("user.json");
             let shared_user_config_path = temp.path().join("envoy_user_config.json");
             let key_file_path = temp.path().join("config.agekey");
-            let plain_pipelines_root = "\\\\local\\pipelines";
-            let decrypted_packages_root = "\\\\secure\\packages";
+            let plain_stacks_root = "\\\\local\\stacks";
+            let decrypted_bundles_root = "\\\\secure\\bundles";
             let (identity, recipient) = generate_keypair();
-            let encrypted_packages_root =
-                encrypt_value(decrypted_packages_root, &recipient).unwrap();
+            let encrypted_bundles_root = encrypt_value(decrypted_bundles_root, &recipient).unwrap();
             let encoded_identity = identity.to_string();
 
             fs::write(
@@ -669,8 +664,8 @@ mod tests {
             fs::write(
                 &user_config_path,
                 json!({
-                    "prodPackagesRoot": encrypted_packages_root,
-                    "prodPipelinesRoot": plain_pipelines_root,
+                    "prodBundlesRoot": encrypted_bundles_root,
+                    "prodStacksRoot": plain_stacks_root,
                     "customKey": 42,
                 })
                 .to_string(),
@@ -684,8 +679,8 @@ mod tests {
 
             let user = UserHostConfig::load_from_file(&user_config_path).unwrap();
 
-            assert_eq!(user.prod_packages_root, decrypted_packages_root);
-            assert_eq!(user.prod_pipelines_root, plain_pipelines_root);
+            assert_eq!(user.prod_bundles_root, decrypted_bundles_root);
+            assert_eq!(user.prod_stacks_root, plain_stacks_root);
             assert_eq!(
                 user.metadata
                     .get("customKey")
@@ -701,16 +696,15 @@ mod tests {
             let temp = TempDir::new().unwrap();
             let user_config_path = temp.path().join("user.json");
             let shared_user_config_path = temp.path().join("envoy_user_config.json");
-            let decrypted_packages_root = "\\\\secure\\packages";
+            let decrypted_bundles_root = "\\\\secure\\bundles";
             let (_, recipient) = generate_keypair();
-            let encrypted_packages_root =
-                encrypt_value(decrypted_packages_root, &recipient).unwrap();
+            let encrypted_bundles_root = encrypt_value(decrypted_bundles_root, &recipient).unwrap();
 
             fs::write(
                 &user_config_path,
                 json!({
-                    "prodPackagesRoot": encrypted_packages_root,
-                    "prodPipelinesRoot": "\\\\local\\pipelines",
+                    "prodBundlesRoot": encrypted_bundles_root,
+                    "prodStacksRoot": "\\\\local\\stacks",
                 })
                 .to_string(),
             )
@@ -730,7 +724,7 @@ mod tests {
 
             match error {
                 TeamConfigError::DecryptUserField { field, source, .. } => {
-                    assert_eq!(field, "prodPackagesRoot");
+                    assert_eq!(field, "prodBundlesRoot");
                     assert!(matches!(
                         source,
                         ConfigCryptoError::MissingKeyFileConfiguration
@@ -748,12 +742,12 @@ mod tests {
             create_test_bundle(
                 &temp,
                 "bfd",
-                "build-pipeline",
+                "build-stack",
                 Some(
                     r#"{
                         "name": "bfd",
-                        "prodPackagesRoot": "\\\\server\\packages",
-                        "prodPipelinesRoot": "\\\\server\\pipelines"
+                        "prodBundlesRoot": "\\\\server\\bundles",
+                        "prodStacksRoot": "\\\\server\\stacks"
                     }"#,
                 ),
             );
@@ -762,8 +756,7 @@ mod tests {
             let shared_user_config_path = temp.path().join("envoy_user_config.json");
             let key_file_path = temp.path().join("config.agekey");
             let (identity, recipient) = generate_keypair();
-            let encrypted_packages_root =
-                encrypt_value("\\\\secure\\packages", &recipient).unwrap();
+            let encrypted_bundles_root = encrypt_value("\\\\secure\\bundles", &recipient).unwrap();
             let encoded_identity = identity.to_string();
 
             fs::write(
@@ -778,8 +771,8 @@ mod tests {
             fs::write(
                 &user_path,
                 json!({
-                    "prodPackagesRoot": encrypted_packages_root,
-                    "prodPipelinesRoot": "\\\\local\\pipelines",
+                    "prodBundlesRoot": encrypted_bundles_root,
+                    "prodStacksRoot": "\\\\local\\stacks",
                 })
                 .to_string(),
             )
@@ -791,20 +784,20 @@ mod tests {
             ]);
 
             let bundles = vec![crate::discovery::BundleInfo::new(
-                temp.path().join("bfd").join("build-pipeline"),
-                "build-pipeline".to_string(),
+                temp.path().join("bfd").join("build-stack"),
+                "build-stack".to_string(),
                 "bfd".to_string(),
             )];
 
             let config = resolve_team_config(&bundles, Some(user_path.as_ref())).unwrap();
 
             assert_eq!(
-                config.prod_packages_root.as_deref(),
-                Some(Path::new("\\\\secure\\packages"))
+                config.prod_bundles_root.as_deref(),
+                Some(Path::new("\\\\secure\\bundles"))
             );
             assert_eq!(
-                config.prod_pipelines_root.as_deref(),
-                Some(Path::new("\\\\local\\pipelines"))
+                config.prod_stacks_root.as_deref(),
+                Some(Path::new("\\\\local\\stacks"))
             );
         });
     }
@@ -813,19 +806,18 @@ mod tests {
     fn resolve_team_config_errors_when_encrypted_user_path_has_no_key() {
         with_env_lock(|| {
             let temp = TempDir::new().unwrap();
-            create_test_bundle(&temp, "bfd", "build-pipeline", Some(r#"{"name": "bfd"}"#));
+            create_test_bundle(&temp, "bfd", "build-stack", Some(r#"{"name": "bfd"}"#));
 
             let user_path = temp.path().join("user.json");
             let shared_user_config_path = temp.path().join("envoy_user_config.json");
             let (_, recipient) = generate_keypair();
-            let encrypted_packages_root =
-                encrypt_value("\\\\secure\\packages", &recipient).unwrap();
+            let encrypted_bundles_root = encrypt_value("\\\\secure\\bundles", &recipient).unwrap();
 
             fs::write(&shared_user_config_path, "{}").unwrap();
             fs::write(
                 &user_path,
                 json!({
-                    "prodPackagesRoot": encrypted_packages_root,
+                    "prodBundlesRoot": encrypted_bundles_root,
                 })
                 .to_string(),
             )
@@ -837,8 +829,8 @@ mod tests {
             ]);
 
             let bundles = vec![crate::discovery::BundleInfo::new(
-                temp.path().join("bfd").join("build-pipeline"),
-                "build-pipeline".to_string(),
+                temp.path().join("bfd").join("build-stack"),
+                "build-stack".to_string(),
                 "bfd".to_string(),
             )];
 
@@ -852,26 +844,26 @@ mod tests {
     #[test]
     fn resolve_team_config_merges_with_user_path() {
         let temp = TempDir::new().unwrap();
-        create_test_bundle(&temp, "bfd", "build-pipeline", Some(r#"{"name": "bfd"}"#));
+        create_test_bundle(&temp, "bfd", "build-stack", Some(r#"{"name": "bfd"}"#));
 
         // Create a user config file.
         let user_path = temp.path().join("user.json");
         fs::write(
             &user_path,
-            r#"{ "prodPackagesRoot": "\\\\override\\packages" }"#,
+            r#"{ "prodBundlesRoot": "\\\\override\\bundles" }"#,
         )
         .unwrap();
 
         let bundles = vec![crate::discovery::BundleInfo::new(
-            temp.path().join("bfd").join("build-pipeline"),
-            "build-pipeline".to_string(),
+            temp.path().join("bfd").join("build-stack"),
+            "build-stack".to_string(),
             "bfd".to_string(),
         )];
 
         let config = resolve_team_config(&bundles, Some(user_path.as_ref())).unwrap();
-        let expected_override = PathBuf::from("\\\\override\\packages");
+        let expected_override = PathBuf::from("\\\\override\\bundles");
         assert_eq!(
-            config.prod_packages_root.as_deref(),
+            config.prod_bundles_root.as_deref(),
             Some(expected_override.as_path())
         );
     }
@@ -880,7 +872,7 @@ mod tests {
     fn empty_team_config_has_no_fields() {
         let config = TeamConfig::empty();
         assert_eq!(config.name, "");
-        assert!(config.prod_packages_root.is_none());
+        assert!(config.prod_bundles_root.is_none());
         assert!(config.metadata.is_empty());
     }
 }

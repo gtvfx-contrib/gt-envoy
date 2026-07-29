@@ -1,6 +1,6 @@
 use clap::{CommandFactory, Parser};
 
-const LEGACY_ALIAS_HELP: &str = "Legacy compatibility aliases: -cf, -bc, -sc, -gc, -lc, -ic";
+const LEGACY_ALIAS_HELP: &str = "Legacy compatibility aliases: -cf, -sc, -gc, -lc, -ic";
 
 #[derive(Debug, Parser)]
 #[command(
@@ -38,11 +38,12 @@ pub(crate) struct Cli {
     pub commands_file: Option<String>,
 
     #[arg(
-        long = "bundles-config",
-        value_name = "PATH",
-        help = "Path to bundles config file (auto-discovers from ENVOY_BNDL_ROOTS if not specified)"
+        long = "stack",
+        short = 's',
+        value_name = "NAME_OR_PATH",
+        help = "Named Stack or strict YAML .estack path"
     )]
-    pub bundles_config: Option<String>,
+    pub stack: Option<String>,
 
     #[arg(
         long = "set-config",
@@ -102,8 +103,8 @@ pub(crate) struct Cli {
         value_name = "COMMAND",
         num_args = 0..=1,
         default_missing_value = "",
-        help = "Show diagnostics: discovered bundles/commands, team/pipeline \
-context, package cache status, VCS detection, and bundle-root reachability. \
+        help = "Show diagnostics: stack, discovered bundles/commands, team \
+context, bundle cache status, VCS detection, and bundle-root reachability. \
 Pass a COMMAND to also include its full environment resolution trace."
     )]
     pub diagnose: Option<String>,
@@ -226,9 +227,8 @@ fn canonicalize_legacy_aliases(argv: &[String]) -> Vec<String> {
 }
 
 fn legacy_alias(token: &str) -> Option<(&'static str, Option<ValueExpectation>, Option<&str>)> {
-    const ALIASES: [(&str, &str, Option<ValueExpectation>); 6] = [
+    const ALIASES: [(&str, &str, Option<ValueExpectation>); 5] = [
         ("-cf", "--commands-file", Some(ValueExpectation::Required)),
-        ("-bc", "--bundles-config", Some(ValueExpectation::Required)),
         ("-sc", "--set-config", Some(ValueExpectation::Required)),
         ("-gc", "--get-config", Some(ValueExpectation::Optional)),
         ("-lc", "--list-configs", None),
@@ -253,8 +253,8 @@ fn legacy_alias(token: &str) -> Option<(&'static str, Option<ValueExpectation>, 
 
 fn option_value_expectation(token: &str) -> Option<ValueExpectation> {
     match token {
-        "--info" | "--which" | "--commands-file" | "--bundles-config" | "--set-config"
-        | "--env" | "-e" | "--trace" => Some(ValueExpectation::Required),
+        "--info" | "--which" | "--commands-file" | "--stack" | "-s" | "--set-config" | "--env"
+        | "-e" | "--trace" => Some(ValueExpectation::Required),
         "--get-config" | "--diagnose" => Some(ValueExpectation::Optional),
         _ => None,
     }
@@ -270,23 +270,23 @@ mod tests {
 
     #[test]
     fn normalize_argv_expands_short_and_long_equals_forms() {
-        let input = strings(&["-e=python", "--bundles-config=studio", "maya"]);
-        let expected = strings(&["-e", "python", "--bundles-config", "studio", "maya"]);
+        let input = strings(&["-e=python", "--stack=studio", "maya"]);
+        let expected = strings(&["-e", "python", "--stack", "studio", "maya"]);
 
         assert_eq!(normalize_argv(&input), expected);
     }
 
     #[test]
     fn normalize_argv_stops_at_first_non_option_token() {
-        let input = strings(&["maya", "--trace=UE_PATH", "-sc=bundles_config=studio"]);
+        let input = strings(&["maya", "--trace=UE_PATH", "-sc=stack=studio"]);
 
         assert_eq!(normalize_argv(&input), input);
     }
 
     #[test]
     fn normalize_argv_preserves_equals_in_option_values() {
-        let input = strings(&["-sc=bundles_config=C:\\path=with=equals.json"]);
-        let expected = strings(&["-sc", "bundles_config=C:\\path=with=equals.json"]);
+        let input = strings(&["-sc=stack=C:\\path=with=equals.estack"]);
+        let expected = strings(&["-sc", "stack=C:\\path=with=equals.estack"]);
 
         assert_eq!(normalize_argv(&input), expected);
     }
@@ -308,8 +308,8 @@ mod tests {
 
     #[test]
     fn canonicalize_legacy_aliases_understands_option_values_before_command() {
-        let input = strings(&["-e", "python", "-bc=studio", "maya", "-gc"]);
-        let expected = strings(&["-e", "python", "--bundles-config", "studio", "maya", "-gc"]);
+        let input = strings(&["-e", "python", "-s", "studio", "maya", "-gc"]);
+        let expected = strings(&["-e", "python", "-s", "studio", "maya", "-gc"]);
 
         assert_eq!(canonicalize_legacy_aliases(&input), expected);
     }

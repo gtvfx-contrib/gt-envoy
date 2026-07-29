@@ -38,14 +38,14 @@ private internals are treated as **not applicable** to the wheel. Equivalent
 behavior for those internals is already covered by `envoy-core`/`envoy-py`'s
 own Rust unit tests (`cargo test`), many of which are named/documented to
 assert parity with the original Python behavior (e.g.
-`config_registry::tests::known_settings_matches_python_shape`,
+`stack_registry::tests::known_settings_matches_python_shape`,
 `exceptions::tests::exception_hierarchy_matches_python_shape`).
 
 | Source file | Status here |
 | --- | --- |
 | `test_wrapper.py` | Copied unmodified — 100% public API (`ApplicationWrapper`, `WrapperConfig`, `ExecutionResult`, `ExecutionError`, `createWrapper`). |
 | `test_proc.py` | Adapted — kept `Environment`/`proc.*` free-function tests (public); dropped `TestLoadRegistry`, `TestCollectEnvFiles` (private `_loadRegistry`/`_collectEnvFiles`) and `test_resolve_envoy_exe_returns_list` (private `_resolveEnvoyExe`). |
-| `test_discovery.py` | Rewritten with self-contained `tmp_path` fixtures using public `loadBundlesFromConfig`/`getBundles`; dropped `test_validation` (private `validateBundle`, no public equivalent). |
+| `test_discovery.py` | Rewritten with self-contained `tmp_path` fixtures using public `loadBundlesFromStack`/`getBundles`; dropped `test_validation` (private `validateBundle`, no public equivalent). |
 | `test_default_operator.py` | Kept only `test_default_operator_via_wrapper` (public `ApplicationWrapper`/`WrapperConfig` end-to-end); dropped 5 tests using private `EnvironmentManager` directly. |
 | `test_commands.py` | N/A — entirely private (`CommandRegistry._commands`, `resolveEnvironment` internals). |
 | `test_cli.py` | N/A — entirely private (`_normalizeArgv`, `runCommand`, `showCommandInfo`, `showWhich`); the public `cli_main()` binding is instead covered by Rust tests in `rust/envoy-py/src/cli.rs`. |

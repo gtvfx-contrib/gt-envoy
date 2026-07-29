@@ -25,7 +25,7 @@ en    [OPTIONS] [command] [args ...]
 | `--info COMMAND` | | Show detailed information about a command |
 | `--which COMMAND` | | Resolve the executable path for a command |
 | `--commands-file PATH` | `-c` | Path to a specific `commands.json` |
-| `--bundles-config PATH` | `-b` | Path to a bundles config file |
+| `--stack NAME_OR_PATH` | `-s` | Named Stack or strict YAML `.estack` path |
 | `--set-config KEY=VALUE` | `-sc` | Set a user config value and save |
 | `--get-config [KEY]` | `-gc` | Print one or all user config values |
 | `--list-configs` | `-lc` | List all known configurable settings |
@@ -34,7 +34,7 @@ en    [OPTIONS] [command] [args ...]
 | `--inherit-env` | `-i` | Inherit the full system environment (overrides closed mode) |
 | `--verbose` | `-v` | Enable verbose logging |
 | `--trace VAR` | | Trace how `VAR` is mutated through env file processing |
-| `--diagnose [COMMAND]` | | Show bundle/team/pipeline/cache/VCS diagnostics; add `COMMAND` for its full resolved environment |
+| `--diagnose [COMMAND]` | | Show bundle/team/stack/cache/VCS diagnostics; add `COMMAND` for its full resolved environment |
 | `--docs` | | Open the envoy documentation in the default browser |
 | `--version` | | Show version and exit |
 | `--help` | `-h` | Show help message |
@@ -105,8 +105,8 @@ en --verbose python script.py
 ### `--diagnose [COMMAND]`
 
 Show a full diagnostic report: discovered bundles and commands, resolved
-team config (`.envoy/team.json`) and pipeline (`.envoy/pipeline.json`),
-package cache location and reachability, detected VCS backend (Git,
+the current Stack and team config (`.envoy/team.json`),
+bundle cache location and reachability, detected VCS backend (Git,
 Perforce, or [Lore](https://github.com/EpicGames/lore)) with its pending
 change count, telemetry status, and bundle-root reachability (flagging
 network/UNC paths). Pass a command name to also see its full resolved
@@ -129,12 +129,13 @@ Bundles discovered: 2
 Commands registered: 3
   python, unreal, vscode
 
+Current stack: studio (R:/stacks/studio.estack)
+  namespace: bfd:build
+
 Team config: bfd
-  prod_packages_root:  \\server\packages
+  prod_bundles_root:  \\server\bundles
 
-Current pipeline: bfd:build
-
-Package cache: C:\Users\you\AppData\Local\envoy\package_cache (reachable)
+Bundle cache: C:\Users\you\AppData\Local\envoy\bundle_cache (reachable)
 
 VCS detected: git at R:/repo/gtvfx-contrib
   0 pending change(s)
@@ -160,13 +161,13 @@ Opens `cmd.exe` with the `python` environment — useful for interactive inspect
 
 ## Discovery Flags
 
-### `--bundles-config` / `-b`
+### `--stack` / `-s`
 
-Override bundle discovery with an explicit config file:
+Select a named Stack or explicit `.estack` file:
 
 ```powershell
-en -b R:/studio/bundles.json --list
-en -b R:/studio/bundles.json python script.py
+en -s R:/studio/studio.estack --list
+en --stack studio python script.py
 ```
 
 ### `--commands-file` / `-c`
@@ -182,12 +183,14 @@ en -c R:/my-project/.envoy/commands.json my_command
 | Variable | Description |
 |---|---|
 | `ENVOY_BNDL_ROOTS` | Semicolon-separated root directories for bundle auto-discovery |
+| `ENVOY_STACK` | Named Stack or `.estack` path used when `--stack` is omitted |
+| `ENVOY_STACK_ROOTS` | Platform-separated roots containing versioned named Stacks |
+| `ENVOY_STACK_CONTEXT` | Colon-separated context used for most-specific namespace matching |
 | `ENVOY_ALLOWLIST` | Semicolon- or comma-separated variable names to pass through in closed mode |
 | `ENVOY_USER_CONFIG` | Override path to the user config file (useful for testing) |
-| `ENVOY_PACKAGE_CACHE` | Override the local package cache directory |
-| `ENVOY_DISABLE_PACKAGE_CACHE` | Set to `1`/`true`/`yes` to disable the package cache entirely |
+| `ENVOY_BUNDLE_CACHE` | Override the local bundle cache directory |
+| `ENVOY_DISABLE_BUNDLE_CACHE` | Set to `1`/`true`/`yes` to disable the bundle cache entirely |
 | `ENVOY_DISABLE_DISCOVERY_CACHE` | Set to `1`/`true`/`yes` to force a fresh bundle-discovery scan, bypassing the on-disk discovery cache |
-| `ENVOY_PIPELINE_CONTEXT` | Colon-separated context path used to resolve the current pipeline (e.g. `team:project:feature`) |
 | `ENVOY_VCS` | Force a specific VCS backend for detection: `git`, `perforce`, or `lore` |
 
 ## User Config Flags
@@ -197,9 +200,9 @@ en -c R:/my-project/.envoy/commands.json my_command
 Save a preference to the user config file:
 
 ```powershell
-en --set-config bundles_config=R:/studio/envoy/bundles.json
+en --set-config stack=R:/studio/envoy/studio.estack
 en --set-config verbosity=verbose
-en --set-config bundles_config=     # clear the setting
+en --set-config stack=     # clear the setting
 ```
 
 ### `--get-config [KEY]` / `-gc`
@@ -208,7 +211,7 @@ Print the current value of one setting, or all settings if no key is given:
 
 ```powershell
 en --get-config                   # show all settings
-en --get-config bundles_config    # show one setting
+en --get-config stack    # show one setting
 ```
 
 ### `--list-configs` / `-lc`

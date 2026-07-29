@@ -561,7 +561,7 @@ mod tests {
     /// Locks the crate-wide `crate::env_test_lock::MUTEX` rather than a
     /// module-local mutex: several modules' tests mutate the same real
     /// process environment variables (e.g. `ENVOY_COMMANDS_FILE` here,
-    /// `ENVOY_CFG_ROOTS` in `discovery`/`config_registry`), so a single
+    /// `ENVOY_STACK_ROOTS` in `discovery`/`stack_registry`), so a single
     /// shared lock is required to prevent cross-module test races under
     /// `cargo test`'s default parallel execution.
     fn with_env_lock<T>(test_fn: impl FnOnce() -> T) -> T {

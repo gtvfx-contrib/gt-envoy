@@ -4,7 +4,10 @@ Environment files are JSON files placed in a bundle's `.envoy/` directory. They 
 
 ## Comments
 
-Env files (and other `.envoy/*.json` config files: `commands.json`, `team.json`, `pipeline.json`, bundle configs) tolerate `//` and `/* */` C-style comments and `#` line comments. This is a superset of plain JSON, so existing files without comments continue to work unchanged:
+Env files and other `.envoy/*.json` files such as `commands.json` and
+`team.json` tolerate `//` and `/* */` C-style comments and `#` line comments.
+Runtime stacks are separate strict YAML `.estack` files; these JSON comment
+rules do not apply to them.
 
 ```json
 {

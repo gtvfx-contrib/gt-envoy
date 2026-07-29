@@ -35,10 +35,10 @@ const VERBOSITY_CHOICES: &[&str] = &["quiet", "normal", "verbose"];
 
 const KNOWN_SETTINGS: [(&str, KnownSetting); 4] = [
     (
-        "bundles_config",
+        "stack",
         KnownSetting {
-            description: "Path to the default bundles config JSON file.  Used when \
---bundles-config is not supplied on the command line.",
+            description: "Path to the default named stack or .estack file.  Used when \
+--stack is not supplied on the command line.",
             choices: None,
         },
     ),
@@ -59,11 +59,11 @@ decryption disabled unless ENVOY_CONFIG_KEY_FILE is set.",
         },
     ),
     (
-        "package_cache_dir",
+        "bundle_cache_dir",
         KnownSetting {
-            description: "Directory used for the local package cache. Set to an empty \
-string to fall back to the platform default location. See also the ENVOY_PACKAGE_CACHE \
-and ENVOY_DISABLE_PACKAGE_CACHE environment variables.",
+            description: "Directory used for the local bundle cache. Set to an empty \
+string to fall back to the platform default location. See also the ENVOY_BUNDLE_CACHE \
+and ENVOY_DISABLE_BUNDLE_CACHE environment variables.",
             choices: None,
         },
     ),
@@ -390,8 +390,8 @@ mod tests {
         let mut config = UserConfig::load(Some(path.clone()));
 
         config
-            .set("bundles_config", "C:\\studio\\envoy\\studio_bundles.json")
-            .expect("bundles_config should be accepted");
+            .set("stack", "C:\\studio\\envoy\\studio.estack")
+            .expect("stack should be accepted");
         config
             .set("verbosity", "verbose")
             .expect("verbosity should be accepted");
@@ -400,8 +400,8 @@ mod tests {
         let reloaded = UserConfig::load(Some(path.clone()));
 
         assert_eq!(
-            reloaded.get("bundles_config"),
-            Some("C:\\studio\\envoy\\studio_bundles.json")
+            reloaded.get("stack"),
+            Some("C:\\studio\\envoy\\studio.estack")
         );
         assert_eq!(reloaded.get("verbosity"), Some("verbose"));
         assert_eq!(reloaded.path, path);
@@ -414,11 +414,11 @@ mod tests {
         fs::write(
             &path,
             r#"{
-                // default bundle config
-                "bundles_config": "C:\\studio\\envoy\\studio_bundles.json",
+                // default Stack
+                "stack": "C:\\studio\\envoy\\studio.estack",
                 "verbosity": "verbose", /* CLI default */
                 # cache override
-                "package_cache_dir": "C:\\cache"
+                "bundle_cache_dir": "C:\\cache"
             }"#,
         )
         .expect("commented config should be written");
@@ -426,11 +426,11 @@ mod tests {
         let config = UserConfig::load(Some(path.clone()));
 
         assert_eq!(
-            config.get("bundles_config"),
-            Some("C:\\studio\\envoy\\studio_bundles.json")
+            config.get("stack"),
+            Some("C:\\studio\\envoy\\studio.estack")
         );
         assert_eq!(config.get("verbosity"), Some("verbose"));
-        assert_eq!(config.get("package_cache_dir"), Some("C:\\cache"));
+        assert_eq!(config.get("bundle_cache_dir"), Some("C:\\cache"));
         assert_eq!(config.path, path);
     }
 
@@ -448,7 +448,7 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "validation error: Unknown config setting \"unknown_setting\". Known settings: \
-bundles_config, config_key_file, verbosity, package_cache_dir"
+stack, config_key_file, verbosity, bundle_cache_dir"
         );
     }
 
@@ -498,11 +498,11 @@ normal, verbose"
         let path = temp_dir.path().join("user_config.json");
         let mut config = UserConfig::load(Some(path));
         config
-            .set("bundles_config", "bundle.json")
-            .expect("bundles_config should be accepted");
+            .set("stack", "studio.estack")
+            .expect("stack should be accepted");
 
-        assert!(config.unset("bundles_config"));
-        assert!(!config.unset("bundles_config"));
+        assert!(config.unset("stack"));
+        assert!(!config.unset("stack"));
     }
 
     #[test]

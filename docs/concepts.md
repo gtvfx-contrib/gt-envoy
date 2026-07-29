@@ -107,36 +107,53 @@ See [Environment Files](env-files.md) for the full reference.
 
 ## Team Configuration
 
-A bundle may define `.envoy/team.json` with team-scoped settings — a production packages/pipelines root, and an optional per-user/host config file path:
+A bundle may define `.envoy/team.json` with team-scoped settings — production
+bundle and stack roots, plus an optional per-user/host config file path:
 
 ```json
 {
     "name": "bfd",
-    "prodPackagesRoot": "\\\\server\\packages",
-    "prodPipelinesRoot": "\\\\server\\pipelines"
+    "prodBundlesRoot": "\\\\server\\bundles",
+    "prodStacksRoot": "\\\\server\\stacks"
 }
 ```
 
 Envoy discovers and resolves the first `team.json` found across discovered bundles automatically — see it with `envoy --diagnose`, or from Python via `envoy.getCurrentTeamConfig()`.
 
-## Pipelines
+## Stacks
 
-A bundle may define `.envoy/pipeline.json` to participate in context-aware pipeline resolution — a colon-separated context (e.g. via the `ENVOY_PIPELINE_CONTEXT` environment variable) resolves to the most specific matching pipeline, falling back to broader contexts and finally a default namespace:
+A Stack is a strict YAML `.estack` file describing one isolated, ordered
+runtime bundle collection. Select one directly with `--stack`, `ENVOY_STACK`,
+or the `stack` user setting.
 
-```json
-{
-    "name": "build",
-    "namespace": "bfd"
-}
+Named, versioned stacks live under `ENVOY_STACK_ROOTS`. When
+`ENVOY_STACK_CONTEXT=team:project:feature` is set, envoy tries stack
+namespaces in this order: `team:project:feature`, `team:project`, `team`, and
+finally `gt`. Multiple stacks at the same matching level are an error.
+
+```yaml
+name: build
+namespace: team:project
+metadata:
+  owner: build-tools
+bundles:
+  - path: R:/bundles/gt/pythoncore
+    metadata:
+      role: core
 ```
 
-See it with `envoy --diagnose`, or from Python via `envoy.getCurrentPipeline()`.
+See the selected stack with `envoy --diagnose`, or from Python via
+`envoy.getCurrentStack()`.
 
-## Package Cache
+## Bundle Cache
 
-Envoy maintains a local, content-addressed cache for **published/production** bundles (never for your own checkout — a bundle with a `.git` directory is never substituted for a cached copy). The cache location defaults to a platform-appropriate directory and can be overridden via the `package_cache_dir` user-config setting or the `ENVOY_PACKAGE_CACHE` environment variable. See `envoy --diagnose` for its current status.
+Envoy maintains a local, content-addressed cache for **published/production** bundles (never for your own checkout — a bundle with a `.git` directory is never substituted for a cached copy). The cache location defaults to a platform-appropriate directory and can be overridden via the `bundle_cache_dir` user-config setting or the `ENVOY_BUNDLE_CACHE` environment variable. See `envoy --diagnose` for its current status.
 
-On a cache miss for a published bundle, envoy tries to fill it automatically from the active team's `prodPackagesRoot` (see [Team Configuration](#team-configuration) above), expected to mirror the `<prod_packages_root>\namespace\name\version\` layout. The fetched package is stored in the cache for subsequent runs. If no team config is resolved, `prodPackagesRoot` isn't set, or the expected package directory is missing/invalid, the fetch is skipped and envoy falls back to the bundle's originally discovered path — a fetch failure is never a hard error.
+On a cache miss for a published bundle, envoy tries to fill it automatically
+from the active team's `prodBundlesRoot`, expected to mirror the
+`<prod_bundles_root>\namespace\name\version\` layout. The fetched bundle is
+stored for subsequent runs. If the source is unavailable or invalid, envoy
+falls back to the originally discovered bundle path.
 
 ## VCS Integration
 

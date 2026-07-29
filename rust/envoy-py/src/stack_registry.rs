@@ -1,41 +1,41 @@
 #![allow(clippy::useless_conversion)]
 
-//! PyO3 bindings for envoy's named-config registry and user-config metadata.
+//! PyO3 bindings for envoy's named-stack registry and user-config metadata.
 //!
 //! This module ports the public top-level surface historically re-exported
-//! from `py/envoy/_config_registry.py` and `py/envoy/_user_config.py`:
-//! `NamedConfigEntry`, `CFG_ROOTS_VAR`, `USER_CONFIG_PATH`,
-//! `KNOWN_SETTINGS`, and the named-config helper functions.
+//! from `py/envoy/_stack_registry.py` and `py/envoy/_user_config.py`:
+//! `NamedStackEntry`, `STACK_ROOTS_VAR`, `USER_CONFIG_PATH`,
+//! `KNOWN_SETTINGS`, and the named-stack helper functions.
 
 use std::path::{Path, PathBuf};
 
 use crate::exceptions::envoy_error_to_pyerr;
-use envoy_core::config_registry::{
-    is_config_name as core_is_config_name, list_config_versions as core_list_config_versions,
-    list_named_configs as core_list_named_configs, publish_config as core_publish_config,
-    resolve_named_config as core_resolve_named_config, NamedConfigEntry as CoreNamedConfigEntry,
-    CFG_ROOTS_VAR,
+use envoy_core::stack_registry::{
+    is_stack_name as core_is_stack_name, list_named_stacks as core_list_named_stacks,
+    list_stack_versions as core_list_stack_versions, publish_stack as core_publish_stack,
+    resolve_named_stack as core_resolve_named_stack, NamedStackEntry as CoreNamedStackEntry,
+    STACK_ROOTS_VAR,
 };
 use envoy_core::user_config::{known_settings, user_config_path};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule};
 
-/// A single named config entry discovered from ``ENVOY_CFG_ROOTS``.
+/// A single named stack entry discovered from ``ENVOY_STACK_ROOTS``.
 ///
 /// Attributes:
-///     name: The config name (for example ``'studio'``).
-///     version: The version timestamp string without the ``.json`` suffix.
-///     path: Absolute path to the resolved config JSON file.
-///     cfg_root: Absolute path to the config root directory that owns the
+///     name: The stack name (for example ``'studio'``).
+///     version: The version timestamp string without the ``.estack`` suffix.
+///     path: Absolute path to the resolved stack YAML file.
+///     stack_root: Absolute path to the stack root directory that owns the
 ///         entry.
 #[pyclass(module = "envoy")]
-struct NamedConfigEntry {
-    inner: CoreNamedConfigEntry,
+struct NamedStackEntry {
+    inner: CoreNamedStackEntry,
 }
 
 #[pymethods]
-impl NamedConfigEntry {
+impl NamedStackEntry {
     #[getter]
     fn name(&self) -> String {
         self.inner.name.clone()
@@ -52,17 +52,17 @@ impl NamedConfigEntry {
     }
 
     #[getter]
-    fn cfg_root(&self, py: Python<'_>) -> PyResult<PyObject> {
-        path_to_py_path(py, &self.inner.cfg_root)
+    fn stack_root(&self, py: Python<'_>) -> PyResult<PyObject> {
+        path_to_py_path(py, &self.inner.stack_root)
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "NamedConfigEntry(name='{}', version='{}', path={}, cfg_root={})",
+            "NamedStackEntry(name='{}', version='{}', path={}, stack_root={})",
             self.inner.name,
             self.inner.version,
             python_path_string(&self.inner.path),
-            python_path_string(&self.inner.cfg_root)
+            python_path_string(&self.inner.stack_root)
         )
     }
 
@@ -71,136 +71,136 @@ impl NamedConfigEntry {
     }
 }
 
-impl NamedConfigEntry {
-    fn from_inner(inner: CoreNamedConfigEntry) -> Self {
+impl NamedStackEntry {
+    fn from_inner(inner: CoreNamedStackEntry) -> Self {
         Self { inner }
     }
 }
 
-/// Return ``True`` if ``value`` looks like a named config rather than a path.
+/// Return ``True`` if ``value`` looks like a named stack rather than a path.
 ///
 /// A value is treated as a name when it contains no path separator characters
-/// (``/``, ``\\``, ``:``) and does not start with a dot. Everything else is
-/// treated as a filesystem path.
+/// (``/``, ``\\``, ``:``), does not start with a dot, and does not end in
+/// ``.estack``. Everything else is treated as a filesystem path.
 ///
 /// Args:
-///     value: The raw string from ``bundles_config`` or ``--bundles-config``.
+///     value: The raw string from ``stack`` or ``--stack``.
 ///
 /// Returns:
-///     ``True`` if ``value`` is a config name; ``False`` if it looks like a
+///     ``True`` if ``value`` is a stack name; ``False`` if it looks like a
 ///     path.
 ///
 /// Examples:
 /// - Basic usage::
 ///     ```python
-///     envoy.isConfigName('studio')          # True
-///     envoy.isConfigName('my-config')       # True
-///     envoy.isConfigName('/path/to/f.json') # False
-///     envoy.isConfigName('R:/configs.json') # False
-///     envoy.isConfigName('./relative.json') # False
+///     envoy.isStackName('studio')          # True
+///     envoy.isStackName('my-stack')        # True
+///     envoy.isStackName('/path/to/f.estack') # False
+///     envoy.isStackName('R:/stacks/studio.estack') # False
+///     envoy.isStackName('./relative.estack') # False
 ///     ```
-#[pyfunction(name = "isConfigName")]
-fn is_config_name(value: &str) -> bool {
-    core_is_config_name(value)
+#[pyfunction(name = "isStackName")]
+fn is_stack_name(value: &str) -> bool {
+    core_is_stack_name(value)
 }
 
-/// Resolve a named config to the path of its latest version.
+/// Resolve a named stack to the path of its latest version.
 ///
-/// Searches each directory in ``ENVOY_CFG_ROOTS`` for a subdirectory named
+/// Searches each directory in ``ENVOY_STACK_ROOTS`` for a subdirectory named
 /// ``name`` that contains a ``latest`` pointer file. Returns the first match.
 ///
 /// Args:
-///     name: Config name to resolve (for example ``'studio'``).
+///     name: Stack name to resolve (for example ``'studio'``).
 ///
 /// Returns:
-///     Absolute path to the latest config JSON file, or ``None`` if not found.
-#[pyfunction(name = "resolveNamedConfig")]
-fn resolve_named_config(py: Python<'_>, name: &str) -> PyResult<Option<PyObject>> {
-    core_resolve_named_config(name)
+///     Absolute path to the latest stack YAML file, or ``None`` if not found.
+#[pyfunction(name = "resolveNamedStack")]
+fn resolve_named_stack(py: Python<'_>, name: &str) -> PyResult<Option<PyObject>> {
+    core_resolve_named_stack(name)
         .map(|path| path_to_py_path(py, &path))
         .transpose()
 }
 
-/// List all available named configs across all ``ENVOY_CFG_ROOTS`` roots.
+/// List all available named stacks across all ``ENVOY_STACK_ROOTS`` roots.
 ///
-/// Scans each config root for named subdirectories that have a ``latest``
+/// Scans each stack root for named subdirectories that have a ``latest``
 /// pointer file. Deduplicates by name — the first root that defines a given
-/// name wins, matching :func:`resolveNamedConfig`.
+/// name wins, matching :func:`resolveNamedStack`.
 ///
 /// Returns:
-///     List of :class:`NamedConfigEntry` objects, sorted by name.
-#[pyfunction(name = "listNamedConfigs")]
-fn list_named_configs(py: Python<'_>) -> PyResult<Vec<Py<NamedConfigEntry>>> {
-    core_list_named_configs()
+///     List of :class:`NamedStackEntry` objects, sorted by name.
+#[pyfunction(name = "listNamedStacks")]
+fn list_named_stacks(py: Python<'_>) -> PyResult<Vec<Py<NamedStackEntry>>> {
+    core_list_named_stacks()
         .into_iter()
-        .map(|entry| Py::new(py, NamedConfigEntry::from_inner(entry)))
+        .map(|entry| Py::new(py, NamedStackEntry::from_inner(entry)))
         .collect()
 }
 
-/// List all published versions of a named config, newest first.
+/// List all published versions of a named stack, newest first.
 ///
 /// Args:
-///     name: Config name (for example ``'studio'``).
+///     name: Stack name (for example ``'studio'``).
 ///
 /// Returns:
 ///     List of ``(version_string, absolute_path)`` tuples, newest first.
 ///     Returns an empty list if the name is not found in any root.
-#[pyfunction(name = "listConfigVersions")]
-fn list_config_versions(py: Python<'_>, name: &str) -> PyResult<Vec<(String, PyObject)>> {
-    core_list_config_versions(name)
+#[pyfunction(name = "listStackVersions")]
+fn list_stack_versions(py: Python<'_>, name: &str) -> PyResult<Vec<(String, PyObject)>> {
+    core_list_stack_versions(name)
         .into_iter()
         .map(|(version, path)| Ok((version, path_to_py_path(py, &path)?)))
         .collect()
 }
 
-/// Publish a new version of a named config.
+/// Publish a new version of a named stack.
 ///
-/// Copies ``source_path`` into ``<cfg_root>/<name>/<timestamp>.json`` and
-/// updates the ``<cfg_root>/<name>/latest`` pointer file.
+/// Copies ``source_path`` into ``<stack_root>/<name>/<timestamp>.estack`` and
+/// updates the ``<stack_root>/<name>/latest`` pointer file.
 ///
 /// Args:
-///     cfg_root: Root directory for config storage.
-///     name: Config name (for example ``'studio'``).
-///     source_path: Path to the source bundles-config JSON file.
+///     stack_root: Root directory for stack storage.
+///     name: Stack name (for example ``'studio'``).
+///     source_path: Path to the source bundles-stack YAML file.
 ///     dry_run: If ``True``, print what would happen and return without
 ///         writing.
 ///
 /// Returns:
-///     The absolute path of the newly written config file.
+///     The absolute path of the newly written stack file.
 ///
 /// Raises:
 ///     ValidationError: If ``source_path`` does not exist or is not a file.
 ///     EnvironmentBuildError: If the destination directory or files cannot be
 ///         written.
-#[pyfunction(name = "publishConfig", signature = (cfg_root, name, source_path, *, dry_run=false))]
-fn publish_config(
+#[pyfunction(name = "publishStack", signature = (stack_root, name, source_path, *, dry_run=false))]
+fn publish_stack(
     py: Python<'_>,
-    cfg_root: &Bound<'_, PyAny>,
+    stack_root: &Bound<'_, PyAny>,
     name: &str,
     source_path: &Bound<'_, PyAny>,
     dry_run: bool,
 ) -> PyResult<PyObject> {
-    let cfg_root = path_like_to_pathbuf(cfg_root)?;
+    let stack_root = path_like_to_pathbuf(stack_root)?;
     let source_path = path_like_to_pathbuf(source_path)?;
-    let published_path = core_publish_config(&cfg_root, name, &source_path, dry_run)
+    let published_path = core_publish_stack(&stack_root, name, &source_path, dry_run)
         .map_err(envoy_error_to_pyerr)?;
 
     path_to_py_path(py, &published_path)
 }
 
-pub fn register_config_registry_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<NamedConfigEntry>()?;
-    m.add("CFG_ROOTS_VAR", CFG_ROOTS_VAR)?;
+pub fn register_stack_registry_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_class::<NamedStackEntry>()?;
+    m.add("STACK_ROOTS_VAR", STACK_ROOTS_VAR)?;
     m.add(
         "USER_CONFIG_PATH",
         path_to_py_path(py, &user_config_path())?,
     )?;
     m.add("KNOWN_SETTINGS", build_known_settings_dict(py)?)?;
-    m.add_function(wrap_pyfunction!(is_config_name, m)?)?;
-    m.add_function(wrap_pyfunction!(resolve_named_config, m)?)?;
-    m.add_function(wrap_pyfunction!(list_named_configs, m)?)?;
-    m.add_function(wrap_pyfunction!(list_config_versions, m)?)?;
-    m.add_function(wrap_pyfunction!(publish_config, m)?)?;
+    m.add_function(wrap_pyfunction!(is_stack_name, m)?)?;
+    m.add_function(wrap_pyfunction!(resolve_named_stack, m)?)?;
+    m.add_function(wrap_pyfunction!(list_named_stacks, m)?)?;
+    m.add_function(wrap_pyfunction!(list_stack_versions, m)?)?;
+    m.add_function(wrap_pyfunction!(publish_stack, m)?)?;
     Ok(())
 }
 
@@ -267,7 +267,7 @@ fn python_path_string(path: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{register_config_registry_bindings, CFG_ROOTS_VAR};
+    use super::{register_stack_registry_bindings, STACK_ROOTS_VAR};
     use pyo3::prelude::*;
     use pyo3::types::PyDict;
     use std::env;
@@ -309,8 +309,8 @@ mod tests {
         with_python(|py| {
             let module = PyModule::new_bound(py, "envoy._envoy_test")
                 .expect("test module should be created");
-            register_config_registry_bindings(py, &module)
-                .expect("config registry bindings should register");
+            register_stack_registry_bindings(py, &module)
+                .expect("stack registry bindings should register");
 
             let settings_obj = module
                 .getattr("KNOWN_SETTINGS")
@@ -319,13 +319,13 @@ mod tests {
                 .downcast::<PyDict>()
                 .expect("KNOWN_SETTINGS should be a dict");
 
-            let bundles_config_obj = settings
-                .get_item("bundles_config")
+            let stack_obj = settings
+                .get_item("stack")
                 .expect("dict lookup should succeed")
-                .expect("bundles_config should exist");
-            let bundles_config = bundles_config_obj
+                .expect("stack should exist");
+            let stack = stack_obj
                 .downcast::<PyDict>()
-                .expect("bundles_config entry should be a dict");
+                .expect("stack entry should be a dict");
             let verbosity_obj = settings
                 .get_item("verbosity")
                 .expect("dict lookup should succeed")
@@ -334,11 +334,11 @@ mod tests {
                 .downcast::<PyDict>()
                 .expect("verbosity entry should be a dict");
 
-            let bundles_choices = bundles_config
+            let stack_choices = stack
                 .get_item("choices")
                 .expect("dict lookup should succeed")
                 .expect("choices should exist");
-            assert!(bundles_choices.is_none());
+            assert!(stack_choices.is_none());
             assert_eq!(
                 verbosity
                     .get_item("choices")
@@ -362,8 +362,8 @@ mod tests {
         with_python(|py| {
             let module = PyModule::new_bound(py, "envoy._envoy_test")
                 .expect("test module should be created");
-            register_config_registry_bindings(py, &module)
-                .expect("config registry bindings should register");
+            register_stack_registry_bindings(py, &module)
+                .expect("stack registry bindings should register");
 
             env::set_var(
                 "ENVOY_USER_CONFIG",
@@ -377,13 +377,13 @@ mod tests {
                 .expect("__fspath__ should exist")
                 .extract()
                 .expect("USER_CONFIG_PATH should be path-like");
-            let cfg_roots_var: String = module
-                .getattr("CFG_ROOTS_VAR")
-                .expect("CFG_ROOTS_VAR should exist")
+            let stack_roots_var: String = module
+                .getattr("STACK_ROOTS_VAR")
+                .expect("STACK_ROOTS_VAR should exist")
                 .extract()
-                .expect("CFG_ROOTS_VAR should be str");
+                .expect("STACK_ROOTS_VAR should be str");
 
-            assert_eq!(cfg_roots_var, CFG_ROOTS_VAR);
+            assert_eq!(stack_roots_var, STACK_ROOTS_VAR);
             assert_eq!(frozen_path, r"C:\envoy-tests\first\user_config.json");
         });
     }

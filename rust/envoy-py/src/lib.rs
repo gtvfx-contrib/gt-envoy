@@ -9,9 +9,8 @@
 //!
 //! Current bindings expose the full `py/envoy/__init__.py` public surface:
 //! the `envoy.proc` subprocess module, top-level `_api.py` convenience
-//! functions, `CommandDefinition`/`CommandRegistry`, the named-config
-//! registry (`_config_registry.py`/`_user_config.py`), `Bundle`/
-//! `BundleInfo`/`BundleConfig` discovery, `ApplicationWrapper`/
+//! functions, `CommandDefinition`/`CommandRegistry`, the named-stack
+//! registry, `Bundle`/`BundleInfo`/`Stack` discovery, `ApplicationWrapper`/
 //! `WrapperConfig`, the PyO3 exception hierarchy, and `cli_main`.
 
 // pyo3's `#[pyfunction]`/`#[pymethods]` macros generate return-value
@@ -28,10 +27,10 @@ use pyo3::prelude::*;
 mod api;
 mod cli;
 mod commands;
-mod config_registry;
 mod environment;
 mod exceptions;
 mod proc;
+mod stack_registry;
 mod telemetry;
 mod wrapper;
 
@@ -59,7 +58,7 @@ fn _envoy(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     api::register_api_bindings(py, m)?;
     cli::register_cli_bindings(py, m)?;
     commands::register_command_bindings(py, m)?;
-    config_registry::register_config_registry_bindings(py, m)?;
+    stack_registry::register_stack_registry_bindings(py, m)?;
     environment::register_environment_module(py, m)?;
     proc::register_proc_module(py, m)?;
     telemetry::register_telemetry_module(py, m)?;
