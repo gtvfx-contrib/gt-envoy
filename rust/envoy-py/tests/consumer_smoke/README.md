@@ -21,9 +21,9 @@ first), then:
 ## Findings
 
 - **`gt/globals` vscode wrapper**: fully testable and exercised for real —
-  `write_local_bundles()` (which calls `envoy.discoverBundlesAuto()`
-  internally) and `envoy.proc.spawn()` both run against real bundle
-  directories/subprocesses in this repo checkout.
+  `writeLocalStack()` calls `envoy.discoverBundlesAuto()`, writes a validated
+  `.estack`, and the launch test verifies that `ENVOY_STACK` is injected into
+  the VS Code child environment without mutating the wrapper process.
 - **`gt/devtools/cleanup_branches.py`**: its `envoy.proc.spawn(cmd,
   pipeline='build', inheritenv=False, ...)` call passes two kwargs
   (`pipeline`, `inheritenv`) that are not real `subprocess.Popen` parameters.
@@ -55,5 +55,5 @@ first), then:
   those consumers unrelated to this migration, not fixed or worked around
   here.
 
-All 4 tests pass against the compiled wheel with no wheel-specific
+All consumer smoke tests pass against the compiled wheel with no wheel-specific
 regressions found.

@@ -49,8 +49,11 @@ From the repository root, use the same canonical driver on every platform:
 python scripts/build_native.py
 ```
 
-Convenience wrappers are available as `scripts/build_native.bat` and
-`scripts/build_native.sh`. Useful options are:
+The Windows-local `scripts/build_native.bat` retains the established workflow:
+it checks the Windows prerequisites, builds both native release executables,
+builds the wheel when `maturin` is available, and installs the local extension
+with `maturin develop`. The POSIX `scripts/build_native.sh` forwards to the
+portable Python driver. Useful Python-driver options are:
 
 ```console
 python scripts/build_native.py --skip-wheel

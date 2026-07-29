@@ -117,5 +117,7 @@ Requirements are Rust, Python 3.10 or newer, and `maturin` for the Python wheel.
     ./bin/envoy --version
     ```
 
-Pass `--skip-wheel` for a native-only build or `--develop` to install the
-compiled Python extension into the active environment.
+When using `scripts/build_native.py`, pass `--skip-wheel` for a native-only
+build or `--develop` to install the compiled Python extension into the active
+environment. The Windows batch workflow builds the native executables and
+wheel, then performs the development install by default.
