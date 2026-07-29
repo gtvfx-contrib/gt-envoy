@@ -600,7 +600,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "engit-cli"
-version = "0.0.0"
+version = "0.5.1"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -610,7 +610,7 @@ dependencies = [
 
 [[package]]
 name = "engit-core"
-version = "0.0.0"
+version = "0.5.1"
 dependencies = [
  "chrono",
  "envoy-core",
@@ -624,7 +624,7 @@ dependencies = [
 
 [[package]]
 name = "envoy-cli"
-version = "0.0.0"
+version = "0.5.1"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -634,7 +634,7 @@ dependencies = [
 
 [[package]]
 name = "envoy-core"
-version = "0.0.0"
+version = "0.5.1"
 dependencies = [
  "age",
  "base64 0.22.1",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "envoy-py"
-version = "0.0.0"
+version = "0.5.1"
 dependencies = [
  "envoy-cli",
  "envoy-core",
