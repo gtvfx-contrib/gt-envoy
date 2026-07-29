@@ -812,9 +812,12 @@ fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{mpsc, Arc, Barrier};
     use std::thread;
     use std::time::Duration;
+
+    static TEMP_CACHE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
     fn temp_cache_dir() -> PathBuf {
         // Use a unique directory per test to avoid conflicts when running in parallel.
@@ -822,13 +825,20 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
+        let sequence = TEMP_CACHE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
-            "envoy_test_cache_{}_{}",
+            "envoy_test_cache_{}_{}_{}",
             std::process::id(),
-            timestamp
+            timestamp,
+            sequence
         ));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    #[test]
+    fn temp_cache_dir_returns_unique_paths() {
+        assert_ne!(temp_cache_dir(), temp_cache_dir());
     }
 
     fn create_sample_bundle(dir: &Path, name: &str, content: &str) {

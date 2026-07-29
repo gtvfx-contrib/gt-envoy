@@ -71,6 +71,18 @@ mod tests {
         test_fn()
     }
 
+    fn set_discovery_cache_root(cache_root: &Path) -> EnvVarGuard {
+        #[cfg(target_os = "windows")]
+        {
+            EnvVarGuard::set("LOCALAPPDATA", Some(cache_root.as_os_str()))
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            EnvVarGuard::set("XDG_CACHE_HOME", Some(cache_root.as_os_str()))
+        }
+    }
+
     fn join_roots(roots: &[&Path]) -> OsString {
         env::join_paths(roots).expect("failed to join bundle roots")
     }
@@ -309,12 +321,10 @@ mod tests {
         // Disable the discovery cache and serialize via `with_env_lock`: this
         // test only cares about bndlid inference, not caching, but
         // `discover_bundles_from_roots` always consults the shared on-disk
-        // discovery cache keyed off `LOCALAPPDATA`. Without this guard, this
-        // test can run concurrently with the cache-focused tests below
-        // while they have `LOCALAPPDATA` temporarily pointed at an isolated
-        // tempdir, racing on that same cache file and corrupting/losing
-        // their entries (a classic concurrent read-modify-write/lost-update
-        // race on the shared manifest file).
+        // discovery cache keyed off the platform cache root. Without this
+        // guard, this test can run concurrently with the cache-focused tests
+        // below while they have that root pointed at an isolated tempdir,
+        // racing on the same cache file and corrupting or losing entries.
         with_env_lock(|| {
             let _disable_guard =
                 EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, Some(OsStr::new("1")));
@@ -357,7 +367,7 @@ mod tests {
             let cache_temp = tempdir().expect("failed to create cache temp dir");
             let cache_root = cache_temp.path().join("cache-root");
             fs::create_dir_all(&cache_root).expect("failed to create cache root");
-            let _cache_root_guard = EnvVarGuard::set("LOCALAPPDATA", Some(cache_root.as_os_str()));
+            let _cache_root_guard = set_discovery_cache_root(&cache_root);
             let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, None);
 
             create_checkout_bundle(temp.path(), "gt", "pythoncore", &["python_env.json"], None);
@@ -390,7 +400,7 @@ mod tests {
             let cache_temp = tempdir().expect("failed to create cache temp dir");
             let cache_root = cache_temp.path().join("cache-root");
             fs::create_dir_all(&cache_root).expect("failed to create cache root");
-            let _cache_root_guard = EnvVarGuard::set("LOCALAPPDATA", Some(cache_root.as_os_str()));
+            let _cache_root_guard = set_discovery_cache_root(&cache_root);
             let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, None);
 
             create_checkout_bundle(temp.path(), "gt", "pythoncore", &["python_env.json"], None);
@@ -410,7 +420,7 @@ mod tests {
             let cache_temp = tempdir().expect("failed to create cache temp dir");
             let cache_root = cache_temp.path().join("cache-root");
             fs::create_dir_all(&cache_root).expect("failed to create cache root");
-            let _cache_root_guard = EnvVarGuard::set("LOCALAPPDATA", Some(cache_root.as_os_str()));
+            let _cache_root_guard = set_discovery_cache_root(&cache_root);
             let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, None);
 
             let first_root = temp.path().join("first-root");
@@ -466,7 +476,7 @@ mod tests {
             let cache_temp = tempdir().expect("failed to create cache temp dir");
             let cache_root = cache_temp.path().join("cache-root");
             fs::create_dir_all(&cache_root).expect("failed to create cache root");
-            let _cache_root_guard = EnvVarGuard::set("LOCALAPPDATA", Some(cache_root.as_os_str()));
+            let _cache_root_guard = set_discovery_cache_root(&cache_root);
             let _disable_guard = EnvVarGuard::set(DISCOVERY_CACHE_DISABLE_VAR, None);
 
             let checkout =
