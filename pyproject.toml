@@ -9,10 +9,17 @@ requires-python = ">=3.10"
 description = "Environment orchestration for managed application execution."
 readme = "README.md"
 license = { file = "LICENSE" }
+classifiers = [
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+]
 
 [project.scripts]
 # Backed by rust/envoy-py's cli_main() PyO3 binding, which delegates to the
-# same envoy-cli library function as the native envoy.exe binary (see
+# same envoy-cli library function as the native envoy binary (see
 # rust/envoy-py/src/cli.rs) -- so `pip install envoy` keeps providing an
 # `envoy` command with no separate implementation to maintain.
 envoy = "envoy:cli_main"

@@ -60,14 +60,14 @@ Set `ENVOY_BNDL_ROOTS` to a semicolon-separated list of root directories. Envoy 
 ### Example structure — mixed checkout and published bundles
 
 ```
-R:\studio\bundles\
-├── gt\
-│   ├── globals\         ← .bundle + .envoy/ ✓ discovered (production v1.0.0)
-│   └── pythoncore\      ← .bundle + .envoy/ ✓ discovered (production v2.1.0)
-R:\repo\
-└── gtvfx-contrib\
-    └── gt\
-        └── my-tool\     ← .git/ + .envoy/ ✓ discovered (checkout)
+/studio/bundles/
+├── gt/
+│   ├── globals/         ← .bundle + .envoy/ ✓ discovered (production v1.0.0)
+│   └── pythoncore/      ← .bundle + .envoy/ ✓ discovered (production v2.1.0)
+/workspace/repos/
+└── gtvfx-contrib/
+    └── gt/
+        └── my-tool/     ← .git/ + .envoy/ ✓ discovered (checkout)
 ```
 
 !!! note
@@ -105,16 +105,16 @@ pinned_version: null
 metadata:
   owner: tools
 bundles:
-  - path: R:/repo/gtvfx-contrib/gt/globals
+  - path: ${REPO_ROOT}/gt/globals
     metadata:
       role: core
-  - path: R:/repo/gtvfx-contrib/gt/pythoncore
-  - path: C:/tools/envoy/v1.0.0
+  - path: ${REPO_ROOT}/gt/pythoncore
+  - path: ${TOOLS_ROOT}/gt/envoy/v1.0.0
 ```
 
-```powershell
-en --stack R:/studio/studio.estack --list
-en -s R:/studio/studio.estack python script.py
+```console
+en --stack /studio/stacks/studio.estack --list
+en -s /studio/stacks/studio.estack python script.py
 ```
 
 Stack files must have the exact `.estack` extension. Unknown fields, duplicate
@@ -193,8 +193,8 @@ Use `--verbose` to surface these warnings and adjust bundle order in your stack 
 flowchart LR
     A[git tag v1.2.3] --> B[engit publish --zip]
     B --> C["globals-v1.2.3.zip\n(.bundle marker included)"]
-    C --> D["Extract to\nR:/studio/bundles/gt/globals/v1.2.3/"]
-    D --> E["ENVOY_BNDL_ROOTS includes\nR:/studio/bundles → auto-discovered"]
+    C --> D["Extract to\n/studio/bundles/gt/globals/v1.2.3/"]
+    D --> E["ENVOY_BNDL_ROOTS includes\n/studio/bundles → auto-discovered"]
 ```
 
 `Bundle.version` returns `'checkout'` for git checkout bundles and the semver string (e.g. `'v1.2.0'`) for published bundles that carry a `.bundle` marker.

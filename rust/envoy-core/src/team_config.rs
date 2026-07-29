@@ -75,8 +75,10 @@ impl TeamConfig {
     /// Expand `~` in a path string to the current user's home directory.
     fn expand_tilde(path_str: &str) -> PathBuf {
         if let Some(stripped) = path_str.strip_prefix('~') {
-            if let Ok(home) = std::env::var("USERPROFILE") {
-                return PathBuf::from(home).join(stripped.trim_start_matches('/'));
+            let home_directory =
+                std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"));
+            if let Some(home_directory) = home_directory {
+                return PathBuf::from(home_directory).join(stripped.trim_start_matches('/'));
             }
         }
         PathBuf::from(path_str)
@@ -440,6 +442,27 @@ mod tests {
             assert_eq!(
                 config.prod_bundles_root.as_deref(),
                 Some(expected_home_bundle.as_path())
+            );
+        });
+    }
+
+    #[test]
+    fn load_team_config_expands_tilde_from_unix_home() {
+        with_env_lock(|| {
+            let temp = TempDir::new().unwrap();
+            let path = temp.path().join("team.json");
+            fs::write(
+                &path,
+                r#"{"name": "myteam", "prodBundlesRoot": "~/bundles"}"#,
+            )
+            .unwrap();
+
+            let _env_guard =
+                EnvVarGuard::set_many(&[("USERPROFILE", None), ("HOME", Some(temp.path()))]);
+            let config = TeamConfig::load_from_file(&path).unwrap();
+            assert_eq!(
+                config.prod_bundles_root.as_deref(),
+                Some(temp.path().join("bundles").as_path())
             );
         });
     }

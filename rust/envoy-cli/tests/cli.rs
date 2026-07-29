@@ -186,6 +186,61 @@ fn unregistered_command_name_returns_not_found() {
     );
 }
 
+#[test]
+fn command_info_reports_target_and_platform_resolution() {
+    let scratch = ScratchDir::new("envoy_platform_info");
+    let envoy_dir = scratch.path().join(".envoy");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    let commands_text = format!(
+        r#"{{
+  "known": {{
+    "environment": [],
+    "alias": ["base-tool"],
+    "platforms": {{
+      "{}": {{
+        "alias": ["os-tool"],
+        "architectures": {{
+          "{}": {{"alias": ["target-tool"]}}
+        }}
+      }}
+    }}
+  }}
+}}"#,
+        env::consts::OS,
+        env::consts::ARCH
+    );
+    fs::write(envoy_dir.join("commands.json"), commands_text)
+        .expect("commands.json should be written");
+
+    let assert = base_command()
+        .args(["--info", "known"])
+        .current_dir(scratch.path())
+        .assert()
+        .success();
+    let stdout = stdout_text(&assert);
+
+    assert!(
+        stdout.contains(&format!(
+            "Target: {}/{}",
+            env::consts::OS,
+            env::consts::ARCH
+        )),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "Configuration: base -> {} -> {}",
+            env::consts::OS,
+            env::consts::ARCH
+        )),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Executable: target-tool"),
+        "stdout was:\n{stdout}"
+    );
+}
+
 /// End-to-end coverage for the Phase 1-3 wiring gaps closed in this pass:
 /// a *published* bundle whose `.envoy/team.json` and `.envoy/commands.json`
 /// come from a warm bundle-cache entry, all selected through a strict stack

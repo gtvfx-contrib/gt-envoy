@@ -405,6 +405,8 @@ fn run_diagnose(
     println!("envoy diagnose");
     println!("{separator}");
     println!();
+    println!("Target: {}/{}", env::consts::OS, env::consts::ARCH);
+    println!();
 
     match stack {
         Some(stack) => {
@@ -538,6 +540,11 @@ resolved environment.)",
         return 1;
     }
 
+    if let Some(command) = registry.get(command_name) {
+        println!("Command configuration: {}", command.platform_resolution());
+        println!();
+    }
+
     let env_files = match collect_env_files(command_name, registry, bundles) {
         Ok(env_files) => env_files,
         Err(error) => {
@@ -619,6 +626,8 @@ fn show_command_info(registry: &CommandRegistry, command_name: &str) -> i32 {
     };
 
     println!("Command: {command_name}");
+    println!("Target: {}/{}", env::consts::OS, env::consts::ARCH);
+    println!("Configuration: {}", command.platform_resolution());
 
     if let Some(bundle) = command.bundle.as_deref() {
         println!("Bundle: {bundle}");
@@ -758,6 +767,7 @@ fn run_command(
                 bundle: None,
                 envoy_env_dir: None,
                 source_file: None,
+                platform_overrides: Vec::new(),
             },
         )
     } else {

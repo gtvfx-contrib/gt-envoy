@@ -1,0 +1,8 @@
+# Cargo configuration for Windows builds.
+#
+# Keep the larger stack setting scoped to MSVC. Applying this through a
+# top-level [build] rustflags entry also passes /STACK to Linux and macOS
+# linkers, which prevents those targets from building.
+
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-args=/STACK:16777216"]

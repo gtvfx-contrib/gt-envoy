@@ -6,6 +6,8 @@ for the pre-existing (non-regression) issues discovered along the way.
 """
 
 import json
+import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -23,14 +25,13 @@ def _clear_envoy_bndl_roots(monkeypatch):
     monkeypatch.delenv("ENVOY_BNDL_ROOTS", raising=False)
 
 
-def test_globals_vscode_wrapper_write_local_bundles(tmp_path, monkeypatch):
-    """``gt/globals/py/gt/vscode/wrapper/_wrapper.py``'s real code path:
-    ``envoy.discoverBundlesAuto()`` (via ``write_local_bundles()``) followed
-    by ``envoy.proc.spawn()``.
+def testGlobalsVscodeWrapperWritesLocalStack(tmp_path, monkeypatch):
+    """Exercise the VS Code wrapper's Stack-generation code path.
 
     Skipped when ``gt/globals`` isn't checked out as a sibling directory
     (e.g. in the standalone ``envoy`` repo's own CI, which only checks out
     ``envoy`` itself, not the full ``gtvfx-contrib/gt`` monorepo layout).
+
     """
     globals_py = Path(__file__).parents[5] / "globals" / "py"
     if not (globals_py / "gt" / "vscode" / "wrapper" / "_wrapper.py").is_file():
@@ -45,21 +46,82 @@ def test_globals_vscode_wrapper_write_local_bundles(tmp_path, monkeypatch):
 
     monkeypatch.setenv("ENVOY_BNDL_ROOTS", str(Path(__file__).parents[5]))
 
-    bundles_path = _wrapper.write_local_bundles(force=True)
+    stack_path = _wrapper.writeLocalStack(force=True)
 
-    assert bundles_path.exists()
-    data = json.loads(bundles_path.read_text())
-    assert len(data["bundles"]) > 0
+    assert stack_path.exists()
+    stack = envoy.Stack(stack_path)
+    assert stack.name == "local"
+    assert stack.namespace == "gt:local"
+    assert len(stack.bundles) > 0
 
-    # launch()'s actual spawn call, minus the real VS Code executable: a raw
-    # absolute path is passed directly (no envoy flags), exactly like
-    # `envoy.proc.spawn([code_exe] + list(extra_args))`.
-    proc = envoy.proc.spawn(
-        [sys.executable, "-c", "pass"],
-        stdout=envoy.proc.PIPE,
+    def failDiscovery():
+        raise AssertionError("bundle discovery should not run for a fresh cache")
+
+    monkeypatch.setattr(envoy, "discoverBundlesAuto", failDiscovery)
+    assert _wrapper.writeLocalStack() == stack_path
+
+    child_environment = os.environ.copy()
+    child_environment["ENVOY_STACK"] = str(stack_path)
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['ENVOY_STACK'])",
+        ],
+        env=child_environment,
+        stdout=subprocess.PIPE,
     )
-    proc.communicate()
+    stdout, _ = proc.communicate()
     assert proc.returncode == 0
+    assert stdout.decode().strip() == str(stack_path)
+
+
+def testGlobalsVscodeWrapperLaunchInjectsStack(tmp_path, monkeypatch):
+    """Verify launch selects the generated Stack only in the child process."""
+    globals_py = Path(__file__).parents[5] / "globals" / "py"
+    if not (globals_py / "gt" / "vscode" / "wrapper" / "_wrapper.py").is_file():
+        pytest.skip("gt/globals is not checked out as a sibling directory")
+
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    sys.path.insert(0, str(globals_py))
+    try:
+        from gt.vscode.wrapper import _wrapper
+    finally:
+        sys.path.remove(str(globals_py))
+
+    stack_path = tmp_path / "local.estack"
+    captured: dict[str, object] = {}
+    expected_process = object()
+
+    def fakeWriteLocalStack():
+        return stack_path
+
+    def fakeResolveCodeExecutable():
+        return sys.executable
+
+    def fakePopen(arguments, **kwargs):
+        captured["arguments"] = arguments
+        captured["kwargs"] = kwargs
+        return expected_process
+
+    monkeypatch.setattr(_wrapper, "writeLocalStack", fakeWriteLocalStack)
+    monkeypatch.setattr(_wrapper, "resolveCodeExecutable", fakeResolveCodeExecutable)
+    monkeypatch.setattr(_wrapper.subprocess, "Popen", fakePopen)
+    monkeypatch.setenv("ENVOY_BUNDLES_CONFIG", "obsolete-bundles-config")
+    monkeypatch.setenv("ENVOY_LOCAL_STACK", "obsolete-local-stack")
+    monkeypatch.delenv("ENVOY_STACK", raising=False)
+
+    process = _wrapper.launch(["--wait"])
+
+    assert process is expected_process
+    assert captured["arguments"] == [sys.executable, "--wait"]
+    captured_kwargs = captured["kwargs"]
+    assert isinstance(captured_kwargs, dict)
+    child_environment = captured_kwargs["env"]
+    assert child_environment["ENVOY_STACK"] == str(stack_path)
+    assert "ENVOY_BUNDLES_CONFIG" not in child_environment
+    assert "ENVOY_LOCAL_STACK" not in child_environment
+    assert "ENVOY_STACK" not in os.environ
 
 
 def test_devtools_cleanup_branches_spawn_kwargs_are_a_pre_existing_bug():

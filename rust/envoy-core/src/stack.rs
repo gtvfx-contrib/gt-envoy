@@ -538,6 +538,7 @@ mod tests {
         Stack, DEFAULT_STACK_MAX_DEPTH, DEFAULT_STACK_NAMESPACE, STACK_CONTEXT_VAR, STACK_VAR,
     };
     use crate::error::EnvoyError;
+    use crate::path_test::assert_same_path;
     use crate::stack_registry::STACK_ROOTS_VAR;
 
     struct EnvVarGuard {
@@ -614,9 +615,9 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("tools")
         );
-        assert_eq!(
+        assert_same_path(
             stack.bundles().expect("bundles should load")[0].path(),
-            bundle
+            &bundle,
         );
         assert_eq!(
             stack.commands().expect("commands should load"),

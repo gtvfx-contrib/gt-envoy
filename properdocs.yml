@@ -1,6 +1,6 @@
 site_name: Envoy
 site_url: https://gtvfx-contrib.github.io/gt-envoy/
-site_description: Environment orchestration for applications.
+site_description: Platform-agnostic environment orchestration for applications.
 repo_name: gtvfx-contrib/gt-envoy
 repo_url: https://github.com/gtvfx-contrib/gt-envoy
 edit_uri: edit/main/docs/

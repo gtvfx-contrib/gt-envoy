@@ -1,41 +1,47 @@
 # Envoy
 
-**Environment orchestration for applications** — A CLI-first tool for managing
-complex application environments with multi-bundle runtime Stacks.
+**Platform-agnostic environment orchestration for applications.** Envoy is a
+CLI-first tool for managing complex application environments and multi-bundle
+runtime Stacks on Windows, Linux, and macOS.
 
 ## Key Features
 
-- **CLI-First** — Simple command-line interface via `en`, `envoy`, and `engit`
+- **Cross-Platform** — Native `envoy` and `engit` CLIs plus the `envoy` Python API
+- **Portable Commands** — Base definitions with optional OS and CPU overrides
 - **Multi-Bundle** — Aggregate commands from multiple Git repositories
-- **JSON Configuration** — Define environments with operators (`=`, `+=`, `^=`, `?=`), with `//`, `/* */`, and `#` comment support
-- **Closed Environment** — Subprocesses receive only what you define, not the full system environment
-- **Auto-Discovery** — Automatic, parallelized bundle detection via `ENVOY_BNDL_ROOTS`, with an on-disk discovery cache for fast repeat invocations
-- **Path Normalization** — Automatic OS-native path handling
-- **Null-Safe** — Undefined variables warn and skip rather than propagate empty values
-- **Bundle Caching** — Local, content-addressed caching for production bundles, resolved automatically alongside bundle discovery; on a miss, envoy fetches from the team's configured production bundle root
-- **Runtime Stacks** — Strict YAML `.estack` runtime containers with direct, named, and context-aware resolution
-- **VCS Integration** — Auto-detects Git, Perforce, or [Lore](https://github.com/EpicGames/lore) working copies for status/change queries
-- **Opt-In Telemetry** — Disabled by default; when enabled, exports usage events via OpenTelemetry/OTLP to any compatible collector
-- **Diagnostics** — `envoy --diagnose [COMMAND]` reports discovered bundles, team/Stack context, cache and VCS status, and full environment resolution in one place
+- **JSON Configuration** — Environment operators (`=`, `+=`, `^=`, `?=`) and comments
+- **Closed Environment** — Subprocesses receive only explicitly selected variables
+- **Auto-Discovery** — Parallel bundle detection with a persistent discovery cache
+- **Native Paths** — Platform-aware separators, executable lookup, and config locations
+- **Runtime Stacks** — Strict YAML `.estack` containers with contextual resolution
+- **VCS Integration** — Git, Perforce, and [Lore](https://github.com/EpicGames/lore)
+- **Diagnostics** — Inspect the target, bundles, Stack, cache, VCS, and resolved environment
+- **Opt-In Telemetry** — Disabled by default; exports through OpenTelemetry/OTLP
 
 ## Quick Start
 
-```powershell
-# 1. Set your bundle roots
-$env:ENVOY_BNDL_ROOTS = "R:/repo/gtvfx-contrib"
+After installing the archive for your platform and adding its `bin` directory
+to `PATH`:
 
-# 2. List available commands
+```console
 envoy --list
-
-# 3. Run a command
-envoy unreal
-
-# 4. Show command details
-envoy --info unreal
-
-# 5. Diagnose your environment (bundles, team/Stack, cache, VCS, and more)
-envoy --diagnose unreal
+envoy --info python
+envoy --diagnose python
+envoy python script.py
 ```
+
+The short `en` alias can be used anywhere `envoy` appears above.
+
+## Supported Targets
+
+| Surface | Targets |
+|---|---|
+| Native CLIs | Windows x64, Linux x64 (musl), macOS x64, macOS arm64 |
+| Python wheel | Windows x64, manylinux2014 x64, macOS x64, macOS arm64 |
+
+Release artifacts are checksummed but currently unsigned. See the
+[installation guide](https://gtvfx-contrib.github.io/gt-envoy/installation/)
+for platform-specific setup and security guidance.
 
 ## Documentation
 
@@ -43,13 +49,13 @@ Full documentation: **[gtvfx-contrib.github.io/gt-envoy](https://gtvfx-contrib.g
 
 | Topic | Description |
 |---|---|
-| [Installation](https://gtvfx-contrib.github.io/gt-envoy/installation/) | Download and setup options |
-| [Core Concepts](https://gtvfx-contrib.github.io/gt-envoy/concepts/) | Bundles, commands, and env files |
-| [Environment Files](https://gtvfx-contrib.github.io/gt-envoy/env-files/) | JSON format reference |
+| [Installation](https://gtvfx-contrib.github.io/gt-envoy/installation/) | Platform archives and source builds |
+| [Core Concepts](https://gtvfx-contrib.github.io/gt-envoy/concepts/) | Bundles, commands, and platform overrides |
+| [Environment Files](https://gtvfx-contrib.github.io/gt-envoy/env-files/) | JSON environment format |
 | [Bundle Discovery](https://gtvfx-contrib.github.io/gt-envoy/bundle-discovery/) | Auto-discovery and Stack files |
 | [CLI Reference](https://gtvfx-contrib.github.io/gt-envoy/cli-reference/envoy/) | `envoy` and `engit` commands |
 | [Python API](https://gtvfx-contrib.github.io/gt-envoy/reference/envoy/) | Scripting and Stack integration |
-| [Troubleshooting](https://gtvfx-contrib.github.io/gt-envoy/troubleshooting/) | Common issues and fixes |
+| [Troubleshooting](https://gtvfx-contrib.github.io/gt-envoy/troubleshooting/) | Diagnostics and common issues |
 
 ## Contributing
 

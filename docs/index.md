@@ -1,11 +1,14 @@
 # Envoy
 
-**Environment orchestration for applications** — A CLI-first tool for managing
-complex application environments with multi-bundle runtime Stacks.
+**Platform-agnostic environment orchestration for applications** — A CLI-first
+tool for managing complex application environments with multi-bundle runtime
+Stacks on Windows, Linux, and macOS.
 
 ## Key Features
 
 - **CLI-First** — Simple command-line interface via `en`, `envoy`, and `engit`
+- **Cross-Platform** — Native CLIs and Python wheels for Windows, Linux, and macOS
+- **Portable Commands** — Optional OS and CPU overrides in one bundle configuration
 - **Multi-Bundle** — Aggregate commands from multiple Git repositories
 - **JSON Configuration** — Define environments with operators (`=`, `+=`, `^=`, `?=`), with `//`, `/* */`, and `#` comment support
 - **Closed Environment** — Subprocesses receive only what you define, not the full system environment
@@ -20,20 +23,17 @@ complex application environments with multi-bundle runtime Stacks.
 
 ## Quick Start
 
-```powershell
-# 1. Set your bundle roots
-$env:ENVOY_BNDL_ROOTS = "R:/repo/gtvfx-contrib"
-
-# 2. List available commands
+```console
+# List available commands
 en --list
 
-# 3. Run a command
+# Run a command
 en python script.py
 
-# 4. Show command details
+# Show command and target details
 en --info python
 
-# 5. Diagnose your environment (bundles, team/Stack, cache, VCS, and more)
+# Diagnose the target, bundles, Stack, cache, VCS, and environment
 en --diagnose python
 ```
 

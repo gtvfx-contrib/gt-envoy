@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 mod tests {
     use std::collections::{HashMap, HashSet};
     use std::env;
@@ -15,22 +16,20 @@ mod tests {
 
     use crate::discovery::bndlid::{expand_bundle_path, is_bndlid, resolve_bndlid};
     use crate::discovery::cache::{
-        discovery_cache_key, discovery_cache_lock_path,
-        discovery_cache_path, load_discovery_cache_manifest, save_discovery_cache_manifest,
-        DISCOVERY_CACHE_DISABLE_VAR,
+        discovery_cache_key, discovery_cache_lock_path, discovery_cache_path,
+        load_discovery_cache_manifest, save_discovery_cache_manifest, DISCOVERY_CACHE_DISABLE_VAR,
     };
     use crate::discovery::discover_bundles_from_roots;
-    use crate::discovery::{
-        BUNDLE_CHECKOUT, BUNDLE_ENV_DIR, BUNDLE_MARKER_FILE, BUNDLE_ROOTS_VAR,
-    };
+    use crate::discovery::files::{get_bundle_commands_files, get_bundle_env_files};
     use crate::discovery::scan::{
         find_bundle_roots, find_git_repos, has_envoy_env, is_git_repo, is_published_bundle,
         validate_bundle,
     };
-    use crate::discovery::files::{get_bundle_commands_files, get_bundle_env_files};
-    use crate::discovery::util::{current_timestamp, infer_namespace};
     use crate::discovery::types::{Bundle, BundleInfo};
+    use crate::discovery::util::{current_timestamp, infer_namespace};
+    use crate::discovery::{BUNDLE_CHECKOUT, BUNDLE_ENV_DIR, BUNDLE_MARKER_FILE, BUNDLE_ROOTS_VAR};
     use crate::error::EnvoyError;
+    use crate::path_test::assert_same_path;
 
     struct EnvVarGuard {
         key: &'static str,
@@ -336,8 +335,18 @@ mod tests {
             let bundles = discover_bundles_from_roots(&[root.display().to_string()]);
             let discovered = namespaced_map(&bundles);
 
-            assert_eq!(discovered.get("gt:pythoncore"), Some(&checkout));
-            assert_eq!(discovered.get("tools:render"), Some(&published));
+            assert_same_path(
+                discovered
+                    .get("gt:pythoncore")
+                    .expect("checkout bundle should be discovered"),
+                &checkout,
+            );
+            assert_same_path(
+                discovered
+                    .get("tools:render")
+                    .expect("published bundle should be discovered"),
+                &published,
+            );
         });
     }
 
@@ -436,8 +445,14 @@ mod tests {
             assert_eq!(second.len(), 1);
 
             let manifest = load_discovery_cache_manifest();
-            let first_key = discovery_cache_key(&[crate::discovery::util::resolve_input_path(&first_root)], 5);
-            let second_key = discovery_cache_key(&[crate::discovery::util::resolve_input_path(&second_root)], 5);
+            let first_key = discovery_cache_key(
+                &[crate::discovery::util::resolve_input_path(&first_root)],
+                5,
+            );
+            let second_key = discovery_cache_key(
+                &[crate::discovery::util::resolve_input_path(&second_root)],
+                5,
+            );
 
             assert!(manifest.entries.contains_key(&first_key));
             assert!(manifest.entries.contains_key(&second_key));
@@ -504,7 +519,7 @@ mod tests {
             let _roots_guard = EnvVarGuard::set(BUNDLE_ROOTS_VAR, Some(roots.as_os_str()));
 
             let resolved = resolve_bndlid("tools:render").expect("published bundle should resolve");
-            assert_eq!(resolved, published);
+            assert_same_path(&resolved, &published);
         });
     }
 
@@ -533,7 +548,7 @@ mod tests {
 
             let by_bndlid =
                 Bundle::new("gt:pythoncore", Some("ignored")).expect("bundle ID should resolve");
-            assert_eq!(by_bndlid.path(), checkout.as_path());
+            assert_same_path(by_bndlid.path(), &checkout);
 
             let overridden = Bundle::new(&checkout, Some("tools"))
                 .expect("bundle path with namespace override should be valid");

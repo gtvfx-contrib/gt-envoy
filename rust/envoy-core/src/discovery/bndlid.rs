@@ -34,8 +34,7 @@ pub fn resolve_bndlid(bndlid: &str) -> Result<PathBuf> {
     let roots = split_root_dirs(&roots_str);
 
     for root in &roots {
-        let candidate =
-            super::util::resolve_input_path(&root.join(&namespace).join(&name));
+        let candidate = super::util::resolve_input_path(&root.join(&namespace).join(&name));
         if candidate.is_dir() && candidate.join(super::BUNDLE_ENV_DIR).is_dir() {
             return Ok(candidate);
         }

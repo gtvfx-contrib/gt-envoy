@@ -22,48 +22,79 @@
 ```
 
 **Usage:**
-```powershell
+```console
 en python script.py
 en python -m pytest tests/
 ```
 
 ---
 
-## Example 2 — Unreal Engine
+## Example 2 — One Command Across Platforms
 
 **`.envoy/commands.json`:**
 ```json
 {
-    "unreal": {
-        "environment": ["unreal_env.json"]
+    "editor": {
+        "environment": ["editor_env.json"],
+        "alias": ["editor"],
+        "platforms": {
+            "windows": {
+                "alias": ["${__BUNDLE__}/bin/windows/editor.exe"]
+            },
+            "linux": {
+                "alias": ["${__BUNDLE__}/bin/linux/editor"]
+            },
+            "macos": {
+                "alias": ["${__BUNDLE__}/bin/macos/editor"],
+                "architectures": {
+                    "aarch64": {
+                        "environment": [
+                            "editor_env.json",
+                            "editor_apple_silicon_env.json"
+                        ]
+                    }
+                }
+            }
+        }
     }
 }
 ```
 
-**`.envoy/unreal_env.json`:**
-```json
-{
-    "+=UE_PYTHONPATH": "${__BUNDLE__}/py",
-    "+=PATH":       "${__BUNDLE__}/bin",
-    "UE_BIN":       "D:/Epic Games/UE_5.7/Engine/Binaries/Win64/UnrealEditor.exe"
-}
-```
+The base definition remains valid for new operating systems. Known targets
+replace only the fields they need, and macOS arm64 adds one environment layer.
 
 **Usage:**
-```powershell
-en unreal
-en unreal MyGame.uproject
+
+```console
+en --info editor
+en editor project.scene
 ```
 
 ---
 
-## Example 3 — Multi-Bundle Setup
+## Example 3 — Application-Specific Environment
 
-With `ENVOY_BNDL_ROOTS=R:/repo/gtvfx-contrib` and two bundles discovered:
+Application environment files remain ordinary, portable JSON:
+
+**`.envoy/render_env.json`:**
+
+```json
+{
+    "+=APP_PLUGIN_PATH": "${__BUNDLE__}/plugins",
+    "+=PATH": "${__BUNDLE__}/bin",
+    "APP_CONFIG": "${__BUNDLE__}/config/render.json"
+}
+```
+
+---
+
+## Example 4 — Multi-Bundle Setup
+
+With `ENVOY_BNDL_ROOTS=/workspace/bundles` and two bundles discovered:
 
 ```mermaid
 flowchart LR
-    ROOT["ENVOY_BNDL_ROOTS\nR:/repo/gtvfx-contrib"]
+    ROOT["ENVOY_BNDL_ROOTS\n/workspace/bundles"]
     A["gt:build-tools\ndefines: build, test"]
     B["gt:deploy-tools\ndefines: deploy, package"]
     REG["Command Registry"]
@@ -72,7 +103,7 @@ flowchart LR
     ROOT --> B --> REG
 ```
 
-```powershell
+```console
 en --list
 ```
 
@@ -85,14 +116,14 @@ Available commands:
   package              [gt:deploy-tools]
 ```
 
-```powershell
+```console
 en build --target Release
 en deploy --env production
 ```
 
 ---
 
-## Example 4 — Shared Baseline via `global_env.json`
+## Example 5 — Shared Baseline via `global_env.json`
 
 **`gt:globals/.envoy/global_env.json`:**
 ```json
@@ -106,13 +137,13 @@ This file is loaded before every command's env files from every bundle. Any bund
 
 ```json
 {
-    "APP_CACHE": "R:/cache/${STUDIO}"
+    "APP_CACHE": "${HOME}/.cache/${STUDIO}"
 }
 ```
 
 ---
 
-## Example 5 — Optional Site Packages
+## Example 6 — Optional Site Packages
 
 A common pattern where an additional Python path is only included when a specific env var is defined (e.g. set in `ENVOY_ALLOWLIST` on some machines):
 
@@ -122,7 +153,7 @@ A common pattern where an additional Python path is only included when a specifi
     "PYTHONPATH": [
         "${__BUNDLE__}/py",
         "${ENVOY_SITE_PACKAGES}",
-        "R:/shared/libs/py"
+        "${STUDIO_ROOT}/shared/libs/py"
     ]
 }
 ```
@@ -138,7 +169,7 @@ The remaining paths are still applied normally.
 
 ---
 
-## Example 6 — Layered Dev / Prod Environments
+## Example 7 — Layered Dev / Prod Environments
 
 **`.envoy/commands.json`:**
 ```json

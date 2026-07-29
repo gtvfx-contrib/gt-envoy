@@ -5,7 +5,7 @@ const LEGACY_ALIAS_HELP: &str = "Legacy compatibility aliases: -cf, -sc, -gc, -l
 #[derive(Debug, Parser)]
 #[command(
     name = "envoy",
-    about = "Envoy: Environment orchestration for applications",
+    about = "Envoy: Cross-platform environment orchestration for applications",
     version = env!("ENVOY_VERSION"),
     after_help = LEGACY_ALIAS_HELP
 )]

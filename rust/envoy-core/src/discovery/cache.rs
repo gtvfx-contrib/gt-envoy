@@ -8,8 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::discovery::types::BundleInfo;
 use crate::discovery::util::{
-    current_timestamp, env_flag_enabled, metadata_modified_timestamp,
-    resolve_input_path,
+    current_timestamp, env_flag_enabled, metadata_modified_timestamp, resolve_input_path,
 };
 
 pub(crate) const DISCOVERY_CACHE_DISABLE_VAR: &str = "ENVOY_DISABLE_DISCOVERY_CACHE";

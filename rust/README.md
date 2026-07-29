@@ -1,123 +1,99 @@
-# envoy / engit — Rust workspace
+# Envoy Rust Workspace
 
-Rust re-implementation of `envoy` and `engit`, migrated module-by-module
-from the retired `py/envoy` and `py/engit` packages (both fully removed —
-see git history for the original Python sources). This file documents the
-workspace layout for contributors.
+The Rust workspace provides platform-agnostic native CLIs and the compiled
+Python API for Windows, Linux, and macOS.
 
 ## Crates
 
-| Crate         | Kind                 | Replaced (Python)       | Notes |
-|---------------|----------------------|--------------------------|-------|
-| `envoy-core`  | lib                  | `py/envoy/_*.py` (core)  | Framework-agnostic: discovery, environment, commands, executor, wrapper, Stack registry, user config. No Python or CLI dependency. |
-| `envoy-py`    | cdylib (PyO3)        | `py/envoy/__init__.py`, `proc.py`, `_api.py`, `_cli.py` | Built with `maturin`. This is now the distributed `envoy` Python package (`pip install envoy`) — preserves `import envoy`, `envoy.proc`, `envoy.testing`, `envoy.cli_main` for existing consumers. |
-| `envoy-cli`   | bin (`envoy`)        | `py/envoy/_cli.py`       | Native binary, no Python runtime dependency. Replaces the PyInstaller-built `dist/envoy.exe`. `envoy-py`'s `cli_main()` binding calls into this crate's library function, so both share the same CLI dispatch logic. |
-| `engit-core`  | lib                  | `py/engit/_*.py`         | Git/GitHub tooling logic. Depends on `envoy-core` for bundle discovery and named-Stack resolution. |
-| `engit-cli`   | bin (`engit`)        | `py/engit/_cli.py`       | Native binary. No Python API — `engit` is CLI-only. |
+| Crate | Kind | Purpose |
+|---|---|---|
+| `envoy-core` | Library | Discovery, environments, commands, execution, Stacks, and config |
+| `envoy-cli` | Binary/library | Native `envoy` CLI and shared Python CLI dispatch |
+| `envoy-py` | PyO3 extension | The installable `envoy` Python package |
+| `engit-core` | Library | Git/GitHub and cross-platform bundle publishing logic |
+| `engit-cli` | Binary | Native `engit` CLI |
+
+The retired Python implementations of the CLIs have been fully replaced.
+`envoy-py` retains the public Python API and delegates CLI behavior to the same
+Rust implementation used by the native `envoy` binary.
 
 ## Versioning
 
-`envoy-cli`/`engit-cli`'s `--version` output and `envoy.__version__` (in
-`envoy-py`) are derived from `git describe --tags --always --dirty` at
-*build time* via each crate's `build.rs`, falling back to the static
-`Cargo.toml` version if `git` is unavailable (e.g. building from a
-source-only tarball with no `.git/`). This mirrors `py/envoy`'s former
-`hatch-vcs`-derived versioning without requiring `Cargo.toml`'s
-`[workspace.package] version` (which must stay a fixed placeholder, since
-Cargo requires a static valid semver there) to be hand-maintained per
-release. The wheel's own static metadata version (in `pyproject.toml`
-/ `rust/envoy-py/pyproject.toml`) stays `0.0.0` for the same reason — it's
-`envoy.__version__` at runtime that carries the real git-derived version.
+CLI `--version` output and `envoy.__version__` come from
+`git describe --tags --always --dirty` at build time. Source archives without
+Git metadata fall back to the workspace's static Cargo version. Wheel metadata
+remains independently valid for Python packaging.
+
+## Prerequisites
+
+- Rust stable
+- Python 3.10 or newer
+- `maturin` for building the Python extension
+- A native C linker: MSVC Build Tools on Windows, Xcode Command Line Tools on
+  macOS, or the normal compiler toolchain on Linux
+
+For a development environment:
+
+```console
+python -m venv .venv
+python -m pip install maturin pytest
+```
+
+Activate the virtual environment using the command appropriate for the current shell.
 
 ## Building
 
-### Prerequisites
+From the repository root, use the same canonical driver on every platform:
 
-- **Rust toolchain** (`rustup` with the `x86_64-pc-windows-msvc` target)
-- **Visual Studio Build Tools** (for `link.exe`)
-- **Python 3.10+** — a virtual environment is recommended:
-  ```powershell
-  python -m venv .venv
-  .venv\Scripts\Activate.ps1
-  pip install maturin
-  ```
-
-### Quick build (development)
-
-```powershell
-# From the repo root:
-cd rust/envoy-py
-maturin develop --release
+```console
+python scripts/build_native.py
 ```
 
-This compiles `envoy-py` and installs the `_envoy.pyd` extension module into
-the active Python environment. Useful for iterating on Rust code without
-building native binaries or publishing a wheel.
+The Windows-local `scripts/build_native.bat` retains the established workflow:
+it checks the Windows prerequisites, builds both native release executables,
+builds the wheel when `maturin` is available, and installs the local extension
+with `maturin develop`. The POSIX `scripts/build_native.sh` forwards to the
+portable Python driver. Useful Python-driver options are:
 
-### Full build (native binaries + wheel)
-
-```powershell
-# Native binaries (envoy, engit) + core/engit libs
-cargo build --workspace --exclude envoy-py --release
-
-# Python extension wheel (the distributed `envoy` package)
-cd rust/envoy-py
-maturin develop --release
-# or for a distributable wheel:
-maturin build --release
+```console
+python scripts/build_native.py --skip-wheel
+python scripts/build_native.py --develop
+python scripts/build_native.py --debug
+python scripts/build_native.py --skip-wheel --target x86_64-unknown-linux-musl
 ```
 
-The full build script `scripts\build_native.bat` runs both steps in sequence.
+The checkout launchers in `bin/` prefer release builds, then debug builds.
+`bin/envoy` and `bin/en` may fall back to `python3 -m envoy`; `engit` is native-only.
 
-## Testing / linting
+## Testing and Linting
 
-```powershell
-cargo test --workspace --exclude envoy-py
-cargo clippy --workspace --exclude envoy-py -- -D warnings
+```console
+cd rust
 cargo fmt --check
-
-# envoy-py itself (requires linking against a Python interpreter):
-cd rust/envoy-py
-cargo test --lib
-cargo clippy --all-targets -- -D warnings
-
-# Python-facing contract/consumer tests against a built wheel -- see
-# rust/envoy-py/tests/python_contract/README.md and
-# rust/envoy-py/tests/consumer_smoke/README.md
-maturin develop --release
-python -m pytest tests
+cargo clippy --workspace --exclude envoy-py --all-targets -- -D warnings
+cargo test --workspace --exclude envoy-py
+cargo test -p envoy-py --lib
+cd ..
+python -m pytest rust/envoy-py/tests -v
 ```
 
-`envoy-py` is excluded from the plain `cargo build`/`test`/`clippy` workspace
-commands above because it requires linking against a Python interpreter
-(via `pyo3-build-config`); build/test it separately as shown above, or
-`cargo check -p envoy-py` if a Python dev environment is available.
+The Python tests must run against a wheel or extension built for the current
+platform. CI installs the wheel before running the contract and consumer smoke suites.
 
-## Migration status: complete
+## Supported Build Targets
 
-All modules have been ported and `envoy-py` now exposes the full
-`py/envoy/__init__.py` public surface: `envoy.proc`, `envoy.testing`,
-`envoy.exceptions`, the top-level `_api.py` functions, `Bundle`/
-`BundleInfo`/`Stack` discovery, `CommandDefinition`/`CommandRegistry`,
-the named-Stack registry, `ApplicationWrapper`/`WrapperConfig` (including
-real Python callback support), and `cli_main()`. `py/envoy` and `py/engit`
-have both been deleted — the root `pyproject.toml` now builds `envoy` via
-the `maturin` backend from this workspace, and `engit` is native-only (no
-Python package).
+| Artifact | Targets |
+|---|---|
+| Native `envoy`/`engit` | Windows x64, Linux x64 musl, macOS x64, macOS arm64 |
+| `envoy` wheel | Windows x64, manylinux2014 x64, macOS x64, macOS arm64 |
 
-- Native binaries (`bin/envoy.bat`, `bin/engit.bat`) prefer the Rust builds
-  (`rust/target/release/*.exe`, falling back to `dist/*.exe` in published
-  bundles). `.github/workflows/build-release.yml` builds these via `cargo
-  build --release` and builds the `envoy` wheel via `maturin`, both as
-  release assets.
-- Full parity was verified via `rust/envoy-py/tests/python_contract` (the
-  subset of `py/envoy`'s original pytest suite that exercises the public
-  API, run against the compiled wheel) and
-  `rust/envoy-py/tests/consumer_smoke` (real `gt/globals`, `gt/devtools`,
-  `gt/krita`, `gt/unreal` call patterns run against the compiled wheel).
-- Cross-platform (Linux/macOS) builds of the native binaries are verified
-  in CI (`build-native-cross-platform` job) but not yet distributed as
-  release assets, since Linux/macOS distribution isn't an established
-  workflow for this project yet (bin/*.bat, the bundle-publish zip layout,
-  etc. are still Windows-oriented).
+The Ubuntu and Windows self-hosted runners provide primary CI. GitHub-hosted
+`macos-15-intel` and `macos-15` runners build and test the two macOS
+architectures. Release archives are checksummed and currently unsigned;
+signing and notarization can be added without changing their layout.
 
+The self-hosted Windows service account needs Visual Studio C++ x64 Build
+Tools and Git for Windows. The self-hosted Ubuntu service account needs access
+to a running Docker daemon because the pinned `cross` tool builds and tests the
+musl target in a container. Both runners need outbound access for toolchain,
+Python package, and GitHub Action downloads.

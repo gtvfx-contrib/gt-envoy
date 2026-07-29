@@ -209,9 +209,7 @@ def test_working_directory():
         result = wrapper.run()
 
         assert result.success, "Should execute successfully"
-        # Normalize paths for comparison
-        actual_cwd = os.path.normpath(result.stdout.strip())  # type: ignore
-        expected_cwd = os.path.normpath(tmpdir)
-        assert actual_cwd == expected_cwd, (
-            f"Working directory should match: {actual_cwd} != {expected_cwd}"
+        actual_cwd = result.stdout.strip()  # type: ignore
+        assert os.path.samefile(actual_cwd, tmpdir), (
+            f"Working directory should match: {actual_cwd} != {tmpdir}"
         )

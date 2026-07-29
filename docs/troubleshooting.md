@@ -4,7 +4,7 @@
 
 Before digging into a specific symptom below, run:
 
-```powershell
+```console
 en --diagnose               # bundles, team/stack, cache, VCS, telemetry status
 en --diagnose python    # also shows the command's full resolved environment
 ```
@@ -26,7 +26,7 @@ Envoy has no commands to load. Fix one of:
 
 ## Commands Not Appearing in `--list`
 
-```powershell
+```console
 en --verbose --list
 ```
 
@@ -53,7 +53,7 @@ In closed mode the subprocess `PATH` comes entirely from bundle env files. If th
 2. Use `en --which <command>` to see what path resolves against the subprocess `PATH`
 3. Use `en -i <command>` temporarily to confirm the executable is present on the system `PATH`
 
-```powershell
+```console
 en --which python          # check resolved path
 en -i python script.py     # run with system PATH inherited
 ```
@@ -65,7 +65,7 @@ en -i python script.py     # run with system PATH inherited
 3. In closed mode, `${VARNAME}` references to system variables expand to empty string unless the variable is in `ENVOY_ALLOWLIST` or is a core OS variable
 4. Use `en --trace VAR <command>` to see how a specific variable is mutated across files
 
-```powershell
+```console
 en --trace PYTHONPATH python
 en --verbose python --help
 ```
@@ -78,7 +78,7 @@ Set the variable explicitly in an env file to ensure normalization is applied:
 
 ```json
 {
-    "SOME_PATH": "R:/repo/my-bundle/data"
+    "SOME_PATH": "${__BUNDLE__}/data"
 }
 ```
 
@@ -100,7 +100,7 @@ These warnings are informational — they indicate a variable or list item was i
 
 ### `engit tag` fails — no existing tags
 
-```powershell
+```console
 engit tag --version 0.1.0     # provide explicit version for first tag
 ```
 
@@ -108,7 +108,7 @@ engit tag --version 0.1.0     # provide explicit version for first tag
 
 `engit release` requires the [GitHub CLI (`gh`)](https://cli.github.com/) to be installed and authenticated:
 
-```powershell
+```console
 gh auth login
 ```
 
@@ -116,6 +116,6 @@ gh auth login
 
 Use `--version dev` for a test build:
 
-```powershell
+```console
 engit publish --version dev --zip
 ```
