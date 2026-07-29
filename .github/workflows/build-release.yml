@@ -72,7 +72,6 @@ jobs:
         shell: pwsh
         run: |
           .\rust\target\release\envoy.exe --version
-          .\rust\target\release\engit.exe --help
 
       - name: Package Windows bundle
         run: >-
@@ -128,9 +127,7 @@ jobs:
       - name: Verify static native CLIs
         run: |
           rust/target/x86_64-unknown-linux-musl/release/envoy --version
-          rust/target/x86_64-unknown-linux-musl/release/engit --help
           file rust/target/x86_64-unknown-linux-musl/release/envoy | grep -Eq 'statically linked|static-pie linked'
-          file rust/target/x86_64-unknown-linux-musl/release/engit | grep -Eq 'statically linked|static-pie linked'
 
       - name: Build manylinux2014 wheel
         uses: PyO3/maturin-action@v1
@@ -215,7 +212,6 @@ jobs:
       - name: Verify native CLIs
         run: |
           rust/target/release/envoy --version
-          rust/target/release/engit --help
 
       # Signing and notarization will be inserted here when repository
       # credentials and an ENABLE_ARTIFACT_SIGNING variable are available.

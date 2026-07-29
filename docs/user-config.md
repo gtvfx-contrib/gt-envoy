@@ -184,7 +184,9 @@ file contains just the filename of the most recently published version.
 
 ### Publishing a named Stack
 
-Use `engit publish-stack` to publish a new version and update `latest`:
+Use
+[`engit publish-stack`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/v0.1.0/docs/cli-reference/engit.md#engit-publish-stack)
+from Envoy Utils to publish a new version and update `latest`:
 
 ```powershell
 engit publish-stack studio R:/my/studio.estack

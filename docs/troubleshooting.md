@@ -96,26 +96,7 @@ These warnings are informational — they indicate a variable or list item was i
 - Set the variable before it is referenced (earlier env file, `global_env.json`, or `ENVOY_ALLOWLIST`)
 - Use `?=` to make the value conditional instead of referencing an undefined variable
 
-## `engit` Issues
+## Envoy Utils Issues
 
-### `engit tag` fails — no existing tags
-
-```console
-engit tag --version 0.1.0     # provide explicit version for first tag
-```
-
-### `engit release` fails — no `gh` CLI
-
-`engit release` requires the [GitHub CLI (`gh`)](https://cli.github.com/) to be installed and authenticated:
-
-```console
-gh auth login
-```
-
-### `engit publish --version` — no git tags found
-
-Use `--version dev` for a test build:
-
-```console
-engit publish --version dev --zip
-```
+Troubleshooting for `engit` is maintained with
+[Envoy Utils](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/v0.1.0/docs/troubleshooting.md).

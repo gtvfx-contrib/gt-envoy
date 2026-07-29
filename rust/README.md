@@ -10,8 +10,6 @@ Python API for Windows, Linux, and macOS.
 | `envoy-core` | Library | Discovery, environments, commands, execution, Stacks, and config |
 | `envoy-cli` | Binary/library | Native `envoy` CLI and shared Python CLI dispatch |
 | `envoy-py` | PyO3 extension | The installable `envoy` Python package |
-| `engit-core` | Library | Git/GitHub and cross-platform bundle publishing logic |
-| `engit-cli` | Binary | Native `engit` CLI |
 
 The retired Python implementations of the CLIs have been fully replaced.
 `envoy-py` retains the public Python API and delegates CLI behavior to the same
@@ -50,7 +48,7 @@ python scripts/build_native.py
 ```
 
 The Windows-local `scripts/build_native.bat` retains the established workflow:
-it checks the Windows prerequisites, builds both native release executables,
+it checks the Windows prerequisites, builds the native release executable,
 builds the wheel when `maturin` is available, and installs the local extension
 with `maturin develop`. The POSIX `scripts/build_native.sh` forwards to the
 portable Python driver. Useful Python-driver options are:
@@ -62,8 +60,8 @@ python scripts/build_native.py --debug
 python scripts/build_native.py --skip-wheel --target x86_64-unknown-linux-musl
 ```
 
-The checkout launchers in `bin/` prefer release builds, then debug builds.
-`bin/envoy` and `bin/en` may fall back to `python3 -m envoy`; `engit` is native-only.
+The checkout launchers in `bin/` prefer release builds, then debug builds, and
+may fall back to `python3 -m envoy`.
 
 ## Testing and Linting
 
@@ -84,7 +82,7 @@ platform. CI installs the wheel before running the contract and consumer smoke s
 
 | Artifact | Targets |
 |---|---|
-| Native `envoy`/`engit` | Windows x64, Linux x64 musl, macOS x64, macOS arm64 |
+| Native `envoy` | Windows x64, Linux x64 musl, macOS x64, macOS arm64 |
 | `envoy` wheel | Windows x64, manylinux2014 x64, macOS x64, macOS arm64 |
 
 The Ubuntu and Windows self-hosted runners provide primary CI. GitHub-hosted
