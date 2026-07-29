@@ -7,6 +7,7 @@ for the pre-existing (non-regression) issues discovered along the way.
 
 import json
 import os
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -53,16 +54,22 @@ def testGlobalsVscodeWrapperWritesLocalStack(tmp_path, monkeypatch):
     assert stack.namespace == "gt:local"
     assert len(stack.bundles) > 0
 
+    def failDiscovery():
+        raise AssertionError("bundle discovery should not run for a fresh cache")
+
+    monkeypatch.setattr(envoy, "discoverBundlesAuto", failDiscovery)
+    assert _wrapper.writeLocalStack() == stack_path
+
     child_environment = os.environ.copy()
     child_environment["ENVOY_STACK"] = str(stack_path)
-    proc = envoy.proc.spawn(
+    proc = subprocess.Popen(
         [
             sys.executable,
             "-c",
             "import os; print(os.environ['ENVOY_STACK'])",
         ],
         env=child_environment,
-        stdout=envoy.proc.PIPE,
+        stdout=subprocess.PIPE,
     )
     stdout, _ = proc.communicate()
     assert proc.returncode == 0
@@ -92,14 +99,14 @@ def testGlobalsVscodeWrapperLaunchInjectsStack(tmp_path, monkeypatch):
     def fakeResolveCodeExecutable():
         return sys.executable
 
-    def fakeSpawn(arguments, **kwargs):
+    def fakePopen(arguments, **kwargs):
         captured["arguments"] = arguments
         captured["kwargs"] = kwargs
         return expected_process
 
     monkeypatch.setattr(_wrapper, "writeLocalStack", fakeWriteLocalStack)
     monkeypatch.setattr(_wrapper, "resolveCodeExecutable", fakeResolveCodeExecutable)
-    monkeypatch.setattr(envoy.proc, "spawn", fakeSpawn)
+    monkeypatch.setattr(_wrapper.subprocess, "Popen", fakePopen)
     monkeypatch.setenv("ENVOY_BUNDLES_CONFIG", "obsolete-bundles-config")
     monkeypatch.setenv("ENVOY_LOCAL_STACK", "obsolete-local-stack")
     monkeypatch.delenv("ENVOY_STACK", raising=False)
