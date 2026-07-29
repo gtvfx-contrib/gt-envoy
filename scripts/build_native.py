@@ -43,7 +43,7 @@ def parseArguments() -> argparse.Namespace:
     parser.add_argument(
         "--skip-wheel",
         action="store_true",
-        help="Build only the native envoy and engit binaries.",
+        help="Build only the native envoy binary.",
     )
     parser.add_argument(
         "--develop",

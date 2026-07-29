@@ -1,9 +1,9 @@
 @echo off
-REM Build native envoy and engit executables (Rust), plus the envoy Python
+REM Build the native envoy executable (Rust), plus the envoy Python
 REM wheel (PyO3 extension via maturin).
 REM
-REM Replaces the old PyInstaller-based scripts\build_exe.bat -- envoy/engit
-REM are native Rust binaries now, with no bundled Python interpreter and no
+REM Replaces the old PyInstaller-based scripts\build_exe.bat -- envoy is a
+REM native Rust binary now, with no bundled Python interpreter and no
 REM PyInstaller step required. See rust\README.md for the full workspace
 REM layout.
 REM
@@ -12,7 +12,6 @@ REM   scripts\build_native.bat
 REM
 REM Output:
 REM   rust\target\release\envoy.exe
-REM   rust\target\release\engit.exe
 REM   rust\target\wheels\envoy-*.whl   (PyO3 extension wheel, envoy.proc/
 REM                                     envoy._api/envoy.exceptions/envoy.testing)
 REM
@@ -32,7 +31,7 @@ if errorlevel 1 (
 )
 
 cd /d "%REPO_ROOT%\rust"
-echo Building envoy and engit native binaries (cargo build --release)...
+echo Building the envoy native binary (cargo build --release)...
 cargo build --workspace --exclude envoy-py --release
 if %errorlevel% neq 0 (
     echo ERROR: cargo build failed.
@@ -67,9 +66,8 @@ if %errorlevel% neq 0 (
 echo.
 echo Build complete. Native binaries written to:
 echo   %REPO_ROOT%\rust\target\release\envoy.exe
-echo   %REPO_ROOT%\rust\target\release\engit.exe
 echo.
-echo bin\envoy.bat / bin\engit.bat automatically pick these up (falling back
-echo to dist\*.exe if present, then to `python -m envoy`/`python -m engit`).
+echo bin\envoy.bat automatically picks this up, falling back to dist\envoy.exe
+echo and then to `python -m envoy`.
 
 endlocal

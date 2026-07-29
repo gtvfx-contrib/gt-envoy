@@ -75,7 +75,9 @@ Set `ENVOY_BNDL_ROOTS` to a semicolon-separated list of root directories. Envoy 
 
 ## The `.bundle` Marker File
 
-Every bundle published via `engit publish` or `bundle-publish.yml` contains a `.bundle` file at its root. This file serves two purposes:
+Every bundle published through
+[Envoy Utils](https://github.com/gtvfx-contrib/gt-envoy_utils) contains a
+`.bundle` file at its root. This file serves two purposes:
 
 1. **Discovery marker** — `ENVOY_BNDL_ROOTS` scanning accepts it alongside `.git/` so deployed bundles are auto-discovered without a Stack.
 2. **Version metadata** — `Bundle.version` and `Bundle.is_production` read from it.

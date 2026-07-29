@@ -6,7 +6,7 @@ runtime Stacks on Windows, Linux, and macOS.
 
 ## Key Features
 
-- **Cross-Platform** — Native `envoy` and `engit` CLIs plus the `envoy` Python API
+- **Cross-Platform** — Native `envoy` CLI plus the `envoy` Python API
 - **Portable Commands** — Base definitions with optional OS and CPU overrides
 - **Multi-Bundle** — Aggregate commands from multiple Git repositories
 - **JSON Configuration** — Environment operators (`=`, `+=`, `^=`, `?=`) and comments
@@ -53,9 +53,12 @@ Full documentation: **[gtvfx-contrib.github.io/gt-envoy](https://gtvfx-contrib.g
 | [Core Concepts](https://gtvfx-contrib.github.io/gt-envoy/concepts/) | Bundles, commands, and platform overrides |
 | [Environment Files](https://gtvfx-contrib.github.io/gt-envoy/env-files/) | JSON environment format |
 | [Bundle Discovery](https://gtvfx-contrib.github.io/gt-envoy/bundle-discovery/) | Auto-discovery and Stack files |
-| [CLI Reference](https://gtvfx-contrib.github.io/gt-envoy/cli-reference/envoy/) | `envoy` and `engit` commands |
+| [CLI Reference](https://gtvfx-contrib.github.io/gt-envoy/cli-reference/envoy/) | `envoy` commands |
 | [Python API](https://gtvfx-contrib.github.io/gt-envoy/reference/envoy/) | Scripting and Stack integration |
 | [Troubleshooting](https://gtvfx-contrib.github.io/gt-envoy/troubleshooting/) | Diagnostics and common issues |
+
+Repository, release, and bundle-publishing commands are provided separately by
+[Envoy Utils](https://github.com/gtvfx-contrib/gt-envoy_utils).
 
 ## Contributing
 

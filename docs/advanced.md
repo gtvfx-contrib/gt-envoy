@@ -105,11 +105,14 @@ flowchart LR
     PUB -- "--zip" --> ZIP
 ```
 
-The default exclusions strip git artifacts, build outputs, and caches automatically. See [`engit publish`](cli-reference/engit.md#engit-publish) for full details.
+The default exclusions strip git artifacts, build outputs, and caches automatically. See
+[`engit publish`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/v0.1.0/docs/cli-reference/engit.md#engit-publish)
+for full details.
 
 ## GitHub Actions — Reusable Bundle Publish Workflow
 
-Simple bundles can adopt a one-file release workflow by calling the shared `bundle-publish.yml` from the envoy repository:
+Simple bundles can adopt a one-file release workflow by calling the versioned
+workflow from the Envoy Utils repository:
 
 **`.github/workflows/build-release.yml`** in any bundle repo:
 ```yaml
@@ -122,7 +125,7 @@ on:
 
 jobs:
   publish:
-    uses: gtvfx-contrib/gt-envoy/.github/workflows/bundle-publish.yml@main
+    uses: gtvfx-contrib/gt-envoy_utils/.github/workflows/bundle-publish.yml@v0.1.0
     with:
       extra_excludes: 'scripts pyproject.toml'  # optional
     secrets: inherit

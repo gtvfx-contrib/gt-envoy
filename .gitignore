@@ -35,7 +35,7 @@ MANIFEST
 # PyInstaller
 #  Usually these files are written by a python script from a template
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
-#  envoy/engit no longer use PyInstaller -- native cargo/maturin builds
+#  envoy no longer uses PyInstaller -- native cargo/maturin builds
 #  replace it (see rust/README.md) -- so no *.spec exception is needed.
 *.manifest
 *.spec

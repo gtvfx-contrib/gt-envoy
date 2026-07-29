@@ -64,7 +64,7 @@ def copyReleaseFiles(
     bin_directory = bundle_root / "bin"
     bin_directory.mkdir()
     suffix = ".exe" if windows else ""
-    for executable_name in ("envoy", "engit"):
+    for executable_name in ("envoy",):
         source = binary_directory / f"{executable_name}{suffix}"
         if not source.is_file():
             raise FileNotFoundError(f"Native executable not found: {source}")
@@ -132,7 +132,7 @@ def normalizeTarMetadata(member: tarfile.TarInfo) -> tarfile.TarInfo:
 
     """
     archive_path = PurePosixPath(member.name)
-    executable_names = {"en", "engit", "envoy"}
+    executable_names = {"en", "envoy"}
     is_executable = archive_path.parent.name == "bin" and archive_path.name in executable_names
 
     member.uid = 0
