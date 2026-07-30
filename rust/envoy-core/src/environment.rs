@@ -82,9 +82,11 @@ static CORE_ENV_VARS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
 
 static ENVOY_ENV_VARS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     HashSet::from([
+        "DESPATCH_CONFIG_ROOT",
         "ENVOY_ALLOWLIST",
         "ENVOY_BNDL_PROD",
         "ENVOY_BNDL_ROOTS",
+        "ENVOY_CONFIG_ROOT",
         "ENVOY_CONFIG_PROD",
         "ENVOY_STACK",
         "ENVOY_STACK_CONTEXT",
@@ -1313,6 +1315,8 @@ mod tests {
         assert!(!core_env_vars().contains("PATH"));
         assert!(envoy_env_vars().contains("ENVOY_ALLOWLIST"));
         assert!(envoy_env_vars().contains("ENVOY_BNDL_ROOTS"));
+        assert!(envoy_env_vars().contains("ENVOY_CONFIG_ROOT"));
+        assert!(envoy_env_vars().contains("DESPATCH_CONFIG_ROOT"));
     }
 
     #[test]

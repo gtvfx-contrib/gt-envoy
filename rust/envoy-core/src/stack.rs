@@ -755,8 +755,8 @@ mod tests {
 
         let roots = env::join_paths([root]).expect("failed to join stack roots");
         let _roots_guard = EnvVarGuard::set(STACK_ROOTS_VAR, Some(roots.as_os_str()));
-        let _user_config_guard =
-            EnvVarGuard::set("ENVOY_USER_CONFIG", Some(user_config.as_os_str()));
+        let _config_root_guard =
+            EnvVarGuard::set("ENVOY_CONFIG_ROOT", Some(temp.path().as_os_str()));
         let _context_guard = EnvVarGuard::set(STACK_CONTEXT_VAR, Some(OsStr::new("team:project")));
         let _stack_guard = EnvVarGuard::set(STACK_VAR, None);
 

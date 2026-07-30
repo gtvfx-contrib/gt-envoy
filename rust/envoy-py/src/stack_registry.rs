@@ -5,7 +5,7 @@
 //! This module ports the public top-level surface historically re-exported
 //! from `py/envoy/_stack_registry.py` and `py/envoy/_user_config.py`:
 //! `NamedStackEntry`, `STACK_ROOTS_VAR`, `USER_CONFIG_PATH`,
-//! `KNOWN_SETTINGS`, and the named-stack helper functions.
+//! `KNOWN_SETTINGS`, `getConfigRoot`, and the named-stack helper functions.
 
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,7 @@ use envoy_core::stack_registry::{
     resolve_named_stack as core_resolve_named_stack, NamedStackEntry as CoreNamedStackEntry,
     STACK_ROOTS_VAR,
 };
-use envoy_core::user_config::{known_settings, user_config_path};
+use envoy_core::user_config::{config_root as core_config_root, known_settings, user_config_path};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList, PyModule};
@@ -188,6 +188,19 @@ fn publish_stack(
     path_to_py_path(py, &published_path)
 }
 
+/// Return Envoy's effective shared config root.
+///
+/// The result is ``$ENVOY_CONFIG_ROOT`` when that environment variable is
+/// non-empty, otherwise ``~/.envoy``. The environment is checked on every
+/// call, unlike the import-time ``USER_CONFIG_PATH`` compatibility constant.
+///
+/// Returns:
+///     A :class:`pathlib.Path` for Envoy's effective config root.
+#[pyfunction(name = "getConfigRoot")]
+fn get_config_root(py: Python<'_>) -> PyResult<PyObject> {
+    path_to_py_path(py, &core_config_root())
+}
+
 pub fn register_stack_registry_bindings(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NamedStackEntry>()?;
     m.add("STACK_ROOTS_VAR", STACK_ROOTS_VAR)?;
@@ -196,6 +209,7 @@ pub fn register_stack_registry_bindings(py: Python<'_>, m: &Bound<'_, PyModule>)
         path_to_py_path(py, &user_config_path())?,
     )?;
     m.add("KNOWN_SETTINGS", build_known_settings_dict(py)?)?;
+    m.add_function(wrap_pyfunction!(get_config_root, m)?)?;
     m.add_function(wrap_pyfunction!(is_stack_name, m)?)?;
     m.add_function(wrap_pyfunction!(resolve_named_stack, m)?)?;
     m.add_function(wrap_pyfunction!(list_named_stacks, m)?)?;
@@ -272,6 +286,7 @@ mod tests {
     use pyo3::types::PyDict;
     use std::env;
     use std::ffi::OsString;
+    use std::path::Path;
     use std::sync::{LazyLock, Mutex};
 
     static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -352,12 +367,9 @@ mod tests {
     }
 
     #[test]
-    fn user_config_path_is_frozen_when_bindings_register() {
+    fn config_root_function_is_dynamic_but_user_config_path_is_frozen() {
         let _lock = ENV_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
-        let _guard = EnvVarGuard::set(
-            "ENVOY_USER_CONFIG",
-            r"C:\envoy-tests\first\user_config.json",
-        );
+        let _guard = EnvVarGuard::set("ENVOY_CONFIG_ROOT", r"C:\envoy-tests\first");
 
         with_python(|py| {
             let module = PyModule::new_bound(py, "envoy._envoy_test")
@@ -365,10 +377,7 @@ mod tests {
             register_stack_registry_bindings(py, &module)
                 .expect("stack registry bindings should register");
 
-            env::set_var(
-                "ENVOY_USER_CONFIG",
-                r"C:\envoy-tests\second\user_config.json",
-            );
+            env::set_var("ENVOY_CONFIG_ROOT", r"C:\envoy-tests\second");
 
             let frozen_path: String = module
                 .getattr("USER_CONFIG_PATH")
@@ -382,9 +391,24 @@ mod tests {
                 .expect("STACK_ROOTS_VAR should exist")
                 .extract()
                 .expect("STACK_ROOTS_VAR should be str");
+            let dynamic_root: String = module
+                .getattr("getConfigRoot")
+                .expect("getConfigRoot should exist")
+                .call0()
+                .expect("getConfigRoot should succeed")
+                .call_method0("__fspath__")
+                .expect("getConfigRoot result should be path-like")
+                .extract()
+                .expect("getConfigRoot result should be a string path");
 
             assert_eq!(stack_roots_var, STACK_ROOTS_VAR);
-            assert_eq!(frozen_path, r"C:\envoy-tests\first\user_config.json");
+            assert_eq!(
+                frozen_path,
+                Path::new(r"C:\envoy-tests\first")
+                    .join("user_config.json")
+                    .to_string_lossy()
+            );
+            assert_eq!(dynamic_root, r"C:\envoy-tests\second");
         });
     }
 }

@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use assert_cmd::Command;
 use envoy_core::bundle_cache::BundleCache;
+use envoy_core::user_config::UserConfig;
 
 fn stdout_text(assert: &assert_cmd::assert::Assert) -> String {
     String::from_utf8_lossy(&assert.get_output().stdout).into_owned()
@@ -47,6 +48,7 @@ fn base_command() -> Command {
         .env_remove("ENVOY_STACK")
         .env_remove("ENVOY_STACK_CONTEXT")
         .env_remove("ENVOY_STACK_ROOTS")
+        .env_remove("ENVOY_CONFIG_ROOT")
         .env_remove("ENVOY_COMMANDS_FILE")
         .env_remove("ENVOY_ALLOWLIST");
     command
@@ -113,11 +115,10 @@ fn version_prints_a_version_string() {
 #[test]
 fn list_configs_runs_without_error() {
     let scratch = ScratchDir::new("envoy_list_configs");
-    let config_path = scratch.path().join("user_config.json");
 
     base_command()
         .arg("--list-configs")
-        .env("ENVOY_USER_CONFIG", &config_path)
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
         .assert()
         .success();
 }
@@ -129,7 +130,7 @@ fn set_config_and_get_config_round_trip() {
 
     let set_assert = base_command()
         .args(["--set-config", "verbosity=verbose"])
-        .env("ENVOY_USER_CONFIG", &config_path)
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
         .assert()
         .success();
     let set_stdout = stdout_text(&set_assert);
@@ -137,11 +138,47 @@ fn set_config_and_get_config_round_trip() {
 
     let get_assert = base_command()
         .args(["--get-config", "verbosity"])
-        .env("ENVOY_USER_CONFIG", &config_path)
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
         .assert()
         .success();
     let get_stdout = stdout_text(&get_assert);
     assert!(get_stdout.contains("verbosity = \"verbose\""));
+    assert!(config_path.is_file());
+}
+
+#[test]
+fn stack_config_can_be_set_read_and_cleared_through_cli() {
+    let scratch = ScratchDir::new("envoy_stack_config");
+    let stack_path = scratch.path().join("studio.estack");
+    let stack_value = stack_path.to_string_lossy();
+
+    base_command()
+        .args(["--set-config", &format!("stack={stack_value}")])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+
+    let get_assert = base_command()
+        .args(["--get-config", "stack"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+    assert!(stdout_text(&get_assert).contains("stack ="));
+    let persisted_config = UserConfig::load(Some(scratch.path().join("user_config.json")));
+    assert_eq!(persisted_config.get("stack"), Some(stack_value.as_ref()));
+
+    base_command()
+        .args(["--set-config", "stack="])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+
+    let cleared_assert = base_command()
+        .args(["--get-config", "stack"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+    assert!(stdout_text(&cleared_assert).contains("stack: <not set>"));
 }
 
 #[test]

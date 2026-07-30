@@ -352,7 +352,7 @@ ENVOY_CONFIG_KEY_FILE/config_key_file is configured"
             .expect("user config should be written");
 
             let _env_guard = EnvVarGuard::remove(CONFIG_KEY_FILE_ENV_VAR);
-            let _user_config_guard = EnvVarGuard::set("ENVOY_USER_CONFIG", &user_config_path);
+            let _config_root_guard = EnvVarGuard::set("ENVOY_CONFIG_ROOT", temp_dir.path());
 
             assert_eq!(configured_key_file_path(), Some(expected_key_path));
         });

@@ -7,12 +7,17 @@ to repeat flags or paths on every invocation.
 
 | OS | Path |
 |----|------|
-| Windows | `%APPDATA%\envoy\user_config.json` |
-| macOS / Linux | `~/.config/envoy/user_config.json` |
+| Windows | `%USERPROFILE%\.envoy\user_config.json` |
+| macOS / Linux | `~/.envoy/user_config.json` |
 
 The directory is created automatically the first time a setting is saved.
-You can override the path for testing by setting the `ENVOY_USER_CONFIG`
-environment variable.
+Set `ENVOY_CONFIG_ROOT` to an absolute directory to replace the shared
+`~/.envoy` root. Envoy then reads and writes
+`$ENVOY_CONFIG_ROOT/user_config.json`. Empty values are ignored.
+
+This path is intentionally consistent across supported platforms. Envoy does
+not read or migrate files from the previous `%APPDATA%\envoy` or
+`~/.config/envoy` locations.
 
 ## Managing settings
 
@@ -254,8 +259,17 @@ cfg.unset('verbosity')
 cfg.save()
 ```
 
-The config file path is exposed as `envoy.USER_CONFIG_PATH` and the registry
-of valid settings as `envoy.KNOWN_SETTINGS`.
+Use `envoy.getConfigRoot()` to resolve the effective root at call time. The
+config file path is also exposed as the import-time compatibility constant
+`envoy.USER_CONFIG_PATH`, and the registry of valid settings as
+`envoy.KNOWN_SETTINGS`.
+
+```python
+import envoy
+
+print(envoy.getConfigRoot())   # <home>/.envoy
+print(envoy.USER_CONFIG_PATH)  # <config root>/user_config.json
+```
 
 ### `Stack`
 
