@@ -7,12 +7,17 @@ to repeat flags or paths on every invocation.
 
 | OS | Path |
 |----|------|
-| Windows | `%APPDATA%\envoy\user_config.json` |
-| macOS / Linux | `~/.config/envoy/user_config.json` |
+| Windows | `%USERPROFILE%\.envoy\user_config.json` |
+| macOS / Linux | `~/.envoy/user_config.json` |
 
 The directory is created automatically the first time a setting is saved.
-You can override the path for testing by setting the `ENVOY_USER_CONFIG`
-environment variable.
+Set `ENVOY_CONFIG_ROOT` to an absolute directory to replace the shared
+`~/.envoy` root. Envoy then reads and writes
+`$ENVOY_CONFIG_ROOT/user_config.json`. Empty values are ignored.
+
+This path is intentionally consistent across supported platforms. Envoy does
+not read or migrate files from the previous `%APPDATA%\envoy` or
+`~/.config/envoy` locations.
 
 ## Managing settings
 
@@ -185,23 +190,23 @@ file contains just the filename of the most recently published version.
 ### Publishing a named Stack
 
 Use
-[`engit publish-stack`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/v0.1.0/docs/cli-reference/engit.md#engit-publish-stack)
+[`engit publish stack`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/main/docs/cli-reference/engit.md#engit-publish-stack)
 from Envoy Utils to publish a new version and update `latest`:
 
 ```powershell
-engit publish-stack studio R:/my/studio.estack
+engit publish stack studio R:/my/studio.estack
 ```
 
-With an explicit stack root (instead of using `ENVOY_STACK_ROOTS`):
+With an explicit stack root (instead of using `ENVOY_STACK_PUBLISH_ROOT`):
 
 ```powershell
-engit publish-stack studio R:/my/studio.estack --stack-root R:/studio/envoy/stacks
+engit publish stack studio R:/my/studio.estack --output R:/studio/envoy/stacks
 ```
 
 Dry-run to preview without writing:
 
 ```powershell
-engit publish-stack studio R:/my/studio.estack --dry-run
+engit publish stack studio R:/my/studio.estack --dry-run
 ```
 
 ### Listing available named stacks
@@ -254,8 +259,17 @@ cfg.unset('verbosity')
 cfg.save()
 ```
 
-The config file path is exposed as `envoy.USER_CONFIG_PATH` and the registry
-of valid settings as `envoy.KNOWN_SETTINGS`.
+Use `envoy.getConfigRoot()` to resolve the effective root at call time. The
+config file path is also exposed as the import-time compatibility constant
+`envoy.USER_CONFIG_PATH`, and the registry of valid settings as
+`envoy.KNOWN_SETTINGS`.
+
+```python
+import envoy
+
+print(envoy.getConfigRoot())   # <home>/.envoy
+print(envoy.USER_CONFIG_PATH)  # <config root>/user_config.json
+```
 
 ### `Stack`
 

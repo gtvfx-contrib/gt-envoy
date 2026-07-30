@@ -191,7 +191,7 @@ en -c R:/my-project/.envoy/commands.json my_command
 | `ENVOY_STACK_ROOTS` | Platform-separated roots containing versioned named Stacks |
 | `ENVOY_STACK_CONTEXT` | Colon-separated context used for most-specific namespace matching |
 | `ENVOY_ALLOWLIST` | Semicolon- or comma-separated variable names to pass through in closed mode |
-| `ENVOY_USER_CONFIG` | Override path to the user config file (useful for testing) |
+| `ENVOY_CONFIG_ROOT` | Absolute directory replacing the shared `~/.envoy` config root; the user config is stored at `<root>/user_config.json` |
 | `ENVOY_BUNDLE_CACHE` | Override the local bundle cache directory |
 | `ENVOY_DISABLE_BUNDLE_CACHE` | Set to `1`/`true`/`yes` to disable the bundle cache entirely |
 | `ENVOY_DISABLE_DISCOVERY_CACHE` | Set to `1`/`true`/`yes` to force a fresh bundle-discovery scan, bypassing the on-disk discovery cache |

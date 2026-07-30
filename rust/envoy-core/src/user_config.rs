@@ -1,12 +1,12 @@
 //! Persistent user configuration for envoy.
 //!
 //! This module ports `py/envoy/_user_config.py` into `envoy-core`.
-//! It stores per-user preferences in a platform-appropriate JSON file so
-//! flags and paths do not need to be repeated on every invocation.
+//! It stores per-user preferences in a JSON file beneath Envoy's shared
+//! cross-platform config root so flags and paths do not need to be repeated
+//! on every invocation.
 //!
-//! Config file locations:
-//! - Windows: `%APPDATA%\envoy\user_config.json`
-//! - macOS/Linux: `~/.config/envoy/user_config.json`
+//! The default config file is `~/.envoy/user_config.json` on Windows, macOS,
+//! and Linux. Set `ENVOY_CONFIG_ROOT` to replace the `~/.envoy` directory.
 //!
 //! Settings are stored as a flat JSON object. Use [`UserConfig::load`] to read
 //! the config and [`UserConfig::save`] to persist changes.
@@ -21,6 +21,9 @@ use serde_json::Value;
 
 use crate::error::{EnvoyError, Result};
 use crate::json_util::parse_json_with_comments;
+
+/// Environment variable that overrides Envoy's shared config root.
+pub const CONFIG_ROOT_VAR: &str = "ENVOY_CONFIG_ROOT";
 
 /// Metadata describing one supported user-config setting.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -77,33 +80,42 @@ pub fn known_settings() -> &'static [(&'static str, KnownSetting)] {
     &KNOWN_SETTINGS
 }
 
-/// Return the platform-appropriate default user config file path.
+/// Return Envoy's default cross-platform config root.
 ///
-/// This mirrors the Python implementation:
-/// - Windows reads `%APPDATA%`, falling back to `%USERPROFILE%`
-/// - non-Windows reads `$XDG_CONFIG_HOME`, falling back to `$HOME/.config`
+/// The root is `~/.envoy` on Windows, macOS, and Linux. On Windows, the home
+/// directory is resolved from `%USERPROFILE%`, then `%HOMEDRIVE%%HOMEPATH%`,
+/// then `%HOME%`. On other platforms, `$HOME` is used.
 ///
-/// Unlike Python's `Path.home()`, this implementation reads environment
-/// variables directly to avoid adding another dependency just for home
-/// directory discovery. If the expected home-related environment variables are
-/// unavailable, a relative fallback is returned instead of panicking.
-pub fn default_config_path() -> PathBuf {
+/// If no home-related environment variable is available, a relative `.envoy`
+/// path is returned instead of panicking.
+pub fn default_config_root() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        windows_default_config_path()
+        windows_home_directory().join(".envoy")
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        non_windows_default_config_path()
+        non_windows_home_directory().join(".envoy")
     }
 }
 
-/// Return the effective user config path, honoring `ENVOY_USER_CONFIG`.
+/// Return Envoy's effective shared config root.
+///
+/// A non-empty `ENVOY_CONFIG_ROOT` value replaces the default `~/.envoy`
+/// directory. The value is read each time this function is called.
+pub fn config_root() -> PathBuf {
+    non_empty_env_path(CONFIG_ROOT_VAR).unwrap_or_else(default_config_root)
+}
+
+/// Return the default user config file path.
+pub fn default_config_path() -> PathBuf {
+    default_config_root().join("user_config.json")
+}
+
+/// Return the effective user config file path.
 pub fn user_config_path() -> PathBuf {
-    env::var_os("ENVOY_USER_CONFIG")
-        .map(PathBuf::from)
-        .unwrap_or_else(default_config_path)
+    config_root().join("user_config.json")
 }
 
 /// Persistent user configuration for envoy.
@@ -124,9 +136,9 @@ impl UserConfig {
     /// or cannot be parsed as a JSON object. This mirrors the Python contract:
     /// missing or corrupt config files never raise at load time.
     ///
-    /// When `path` is `None`, the current `ENVOY_USER_CONFIG` environment
-    /// variable is checked at call time before falling back to the default
-    /// platform-specific location.
+    /// When `path` is `None`, the current `ENVOY_CONFIG_ROOT` environment
+    /// variable is checked at call time before falling back to
+    /// `~/.envoy/user_config.json`.
     ///
     /// JSON object values are coerced into strings to match the Python port's
     /// permissive `str(value)` behavior. String values are preserved verbatim;
@@ -267,30 +279,26 @@ impl fmt::Display for UserConfig {
 }
 
 #[cfg(target_os = "windows")]
-fn windows_default_config_path() -> PathBuf {
-    env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
+fn windows_home_directory() -> PathBuf {
+    non_empty_env_path("USERPROFILE")
+        .or_else(windows_home_drive_path)
+        .or_else(|| non_empty_env_path("HOME"))
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("envoy")
-        .join("user_config.json")
+}
+
+#[cfg(target_os = "windows")]
+fn windows_home_drive_path() -> Option<PathBuf> {
+    let mut home = env::var_os("HOMEDRIVE").filter(|value| !value.is_empty())?;
+    let home_path = env::var_os("HOMEPATH").filter(|value| !value.is_empty())?;
+    home.push(home_path);
+    Some(PathBuf::from(home))
 }
 
 #[cfg(not(target_os = "windows"))]
-fn non_windows_default_config_path() -> PathBuf {
-    if let Some(config_home) = non_empty_env_path("XDG_CONFIG_HOME") {
-        return config_home.join("envoy").join("user_config.json");
-    }
-
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".config")
-        .join("envoy")
-        .join("user_config.json")
+fn non_windows_home_directory() -> PathBuf {
+    non_empty_env_path("HOME").unwrap_or_else(|| PathBuf::from("."))
 }
 
-#[cfg(not(target_os = "windows"))]
 fn non_empty_env_path(name: &str) -> Option<PathBuf> {
     env::var_os(name).and_then(|value| {
         if value.is_empty() {
@@ -352,13 +360,40 @@ fn escape_repr_string(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::ffi::{OsStr, OsString};
     use std::fs;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     use tempfile::tempdir;
 
-    use super::{default_config_path, UserConfig};
+    use super::{
+        config_root, default_config_path, default_config_root, user_config_path, UserConfig,
+    };
     use crate::error::EnvoyError;
+
+    struct EnvVarGuard {
+        name: &'static str,
+        original: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(name: &'static str, value: impl AsRef<OsStr>) -> Self {
+            let original = env::var_os(name);
+            env::set_var(name, value);
+            Self { name, original }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(value) = &self.original {
+                env::set_var(self.name, value);
+            } else {
+                env::remove_var(self.name);
+            }
+        }
+    }
 
     #[test]
     fn load_nonexistent_file_returns_empty_config() {
@@ -509,6 +544,43 @@ normal, verbose"
     fn default_config_path_ends_with_expected_filename() {
         let path = default_config_path();
 
-        assert!(path.ends_with(Path::new("envoy").join("user_config.json")));
+        assert!(path.ends_with(Path::new(".envoy").join("user_config.json")));
+    }
+
+    #[test]
+    fn config_root_honors_non_empty_override() {
+        let _lock = crate::env_test_lock::MUTEX
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = EnvVarGuard::set("ENVOY_CONFIG_ROOT", "custom-config-root");
+
+        assert_eq!(config_root(), Path::new("custom-config-root"));
+        assert_eq!(
+            user_config_path(),
+            Path::new("custom-config-root").join("user_config.json")
+        );
+    }
+
+    #[test]
+    fn config_root_ignores_empty_override() {
+        let _lock = crate::env_test_lock::MUTEX
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = EnvVarGuard::set("ENVOY_CONFIG_ROOT", "");
+
+        assert_eq!(config_root(), default_config_root());
+    }
+
+    #[test]
+    fn explicit_load_path_takes_precedence_over_config_root() {
+        let _lock = crate::env_test_lock::MUTEX
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let _guard = EnvVarGuard::set("ENVOY_CONFIG_ROOT", "ignored-config-root");
+        let explicit_path = PathBuf::from("explicit").join("settings.json");
+
+        let config = UserConfig::load(Some(explicit_path.clone()));
+
+        assert_eq!(config.path, explicit_path);
     }
 }

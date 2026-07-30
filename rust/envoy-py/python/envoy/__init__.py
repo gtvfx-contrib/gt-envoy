@@ -67,6 +67,7 @@ NamedStackEntry = _native.NamedStackEntry
 STACK_ROOTS_VAR = _native.STACK_ROOTS_VAR
 USER_CONFIG_PATH = _native.USER_CONFIG_PATH
 KNOWN_SETTINGS = _native.KNOWN_SETTINGS
+getConfigRoot = _native.getConfigRoot
 isStackName = _native.isStackName
 resolveNamedStack = _native.resolveNamedStack
 listNamedStacks = _native.listNamedStacks
@@ -163,6 +164,7 @@ __all__ = [
     "STACK_ROOTS_VAR",
     "USER_CONFIG_PATH",
     "KNOWN_SETTINGS",
+    "getConfigRoot",
     "isStackName",
     "resolveNamedStack",
     "listNamedStacks",

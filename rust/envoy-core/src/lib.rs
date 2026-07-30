@@ -44,7 +44,7 @@ pub mod wrapper;
 pub use error::{EnvoyError, Result};
 
 /// Shared test-only synchronization for tests that mutate real process
-/// environment variables (`ENVOY_STACK_ROOTS`, `ENVOY_USER_CONFIG`,
+/// environment variables (`ENVOY_STACK_ROOTS`, `ENVOY_CONFIG_ROOT`,
 /// `ENVOY_COMMANDS_FILE`, `ENVOY_BNDL_ROOTS`, etc.).
 ///
 /// `commands`, `stack_registry`, `discovery`, and `environment` each have

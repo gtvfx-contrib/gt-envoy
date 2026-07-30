@@ -667,7 +667,7 @@ mod tests {
         with_env_lock(|| {
             let temp = TempDir::new().unwrap();
             let user_config_path = temp.path().join("user.json");
-            let shared_user_config_path = temp.path().join("envoy_user_config.json");
+            let shared_user_config_path = temp.path().join("user_config.json");
             let key_file_path = temp.path().join("config.agekey");
             let plain_stacks_root = "\\\\local\\stacks";
             let decrypted_bundles_root = "\\\\secure\\bundles";
@@ -697,7 +697,7 @@ mod tests {
 
             let _env_guard = EnvVarGuard::set_many(&[
                 (CONFIG_KEY_FILE_ENV_VAR, Some(key_file_path.as_path())),
-                ("ENVOY_USER_CONFIG", Some(shared_user_config_path.as_path())),
+                ("ENVOY_CONFIG_ROOT", Some(temp.path())),
             ]);
 
             let user = UserHostConfig::load_from_file(&user_config_path).unwrap();
@@ -718,7 +718,7 @@ mod tests {
         with_env_lock(|| {
             let temp = TempDir::new().unwrap();
             let user_config_path = temp.path().join("user.json");
-            let shared_user_config_path = temp.path().join("envoy_user_config.json");
+            let shared_user_config_path = temp.path().join("user_config.json");
             let decrypted_bundles_root = "\\\\secure\\bundles";
             let (_, recipient) = generate_keypair();
             let encrypted_bundles_root = encrypt_value(decrypted_bundles_root, &recipient).unwrap();
@@ -739,7 +739,7 @@ mod tests {
 
             let _env_guard = EnvVarGuard::set_many(&[
                 (CONFIG_KEY_FILE_ENV_VAR, None),
-                ("ENVOY_USER_CONFIG", Some(shared_user_config_path.as_path())),
+                ("ENVOY_CONFIG_ROOT", Some(temp.path())),
             ]);
 
             let error = UserHostConfig::load_from_file(&user_config_path)
@@ -776,7 +776,7 @@ mod tests {
             );
 
             let user_path = temp.path().join("user.json");
-            let shared_user_config_path = temp.path().join("envoy_user_config.json");
+            let shared_user_config_path = temp.path().join("user_config.json");
             let key_file_path = temp.path().join("config.agekey");
             let (identity, recipient) = generate_keypair();
             let encrypted_bundles_root = encrypt_value("\\\\secure\\bundles", &recipient).unwrap();
@@ -803,7 +803,7 @@ mod tests {
 
             let _env_guard = EnvVarGuard::set_many(&[
                 (CONFIG_KEY_FILE_ENV_VAR, Some(key_file_path.as_path())),
-                ("ENVOY_USER_CONFIG", Some(shared_user_config_path.as_path())),
+                ("ENVOY_CONFIG_ROOT", Some(temp.path())),
             ]);
 
             let bundles = vec![crate::discovery::BundleInfo::new(
@@ -832,7 +832,7 @@ mod tests {
             create_test_bundle(&temp, "bfd", "build-stack", Some(r#"{"name": "bfd"}"#));
 
             let user_path = temp.path().join("user.json");
-            let shared_user_config_path = temp.path().join("envoy_user_config.json");
+            let shared_user_config_path = temp.path().join("user_config.json");
             let (_, recipient) = generate_keypair();
             let encrypted_bundles_root = encrypt_value("\\\\secure\\bundles", &recipient).unwrap();
 
@@ -848,7 +848,7 @@ mod tests {
 
             let _env_guard = EnvVarGuard::set_many(&[
                 (CONFIG_KEY_FILE_ENV_VAR, None),
-                ("ENVOY_USER_CONFIG", Some(shared_user_config_path.as_path())),
+                ("ENVOY_CONFIG_ROOT", Some(temp.path())),
             ]);
 
             let bundles = vec![crate::discovery::BundleInfo::new(
