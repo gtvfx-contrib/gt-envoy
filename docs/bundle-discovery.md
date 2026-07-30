@@ -193,7 +193,7 @@ Use `--verbose` to surface these warnings and adjust bundle order in your stack 
 
 ```mermaid
 flowchart LR
-    A[git tag v1.2.3] --> B[engit publish --zip]
+    A[git tag v1.2.3] --> B[engit publish bundle --zip]
     B --> C["globals-v1.2.3.zip\n(.bundle marker included)"]
     C --> D["Extract to\n/studio/bundles/gt/globals/v1.2.3/"]
     D --> E["ENVOY_BNDL_ROOTS includes\n/studio/bundles → auto-discovered"]

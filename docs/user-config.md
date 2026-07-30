@@ -185,23 +185,23 @@ file contains just the filename of the most recently published version.
 ### Publishing a named Stack
 
 Use
-[`engit publish-stack`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/v0.1.0/docs/cli-reference/engit.md#engit-publish-stack)
+[`engit publish stack`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/main/docs/cli-reference/engit.md#engit-publish-stack)
 from Envoy Utils to publish a new version and update `latest`:
 
 ```powershell
-engit publish-stack studio R:/my/studio.estack
+engit publish stack studio R:/my/studio.estack
 ```
 
-With an explicit stack root (instead of using `ENVOY_STACK_ROOTS`):
+With an explicit stack root (instead of using `ENVOY_STACK_PUBLISH_ROOT`):
 
 ```powershell
-engit publish-stack studio R:/my/studio.estack --stack-root R:/studio/envoy/stacks
+engit publish stack studio R:/my/studio.estack --output R:/studio/envoy/stacks
 ```
 
 Dry-run to preview without writing:
 
 ```powershell
-engit publish-stack studio R:/my/studio.estack --dry-run
+engit publish stack studio R:/my/studio.estack --dry-run
 ```
 
 ### Listing available named stacks

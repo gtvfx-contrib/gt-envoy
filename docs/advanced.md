@@ -91,12 +91,12 @@ The subprocess will see `R:\repo\my-bundle\py` on Windows.
 
 ## Bundle Publishing
 
-The `engit publish` command produces a clean, deployment-ready copy of any bundle:
+The `engit publish bundle` command produces a clean, deployment-ready copy of any bundle:
 
 ```mermaid
 flowchart LR
     SRC["Bundle root\n(live checkout)"]
-    PUB["engit publish"]
+    PUB["engit publish bundle"]
     FOLD["output/\nbundle/v1.2.3/\n  .envoy/\n  py/\n  LICENSE"]
     ZIP["bundle-v1.2.3.zip\n(internal: bundle/v1.2.3/...)"]
 
@@ -106,7 +106,7 @@ flowchart LR
 ```
 
 The default exclusions strip git artifacts, build outputs, and caches automatically. See
-[`engit publish`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/v0.1.0/docs/cli-reference/engit.md#engit-publish)
+[`engit publish bundle`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/main/docs/cli-reference/engit.md#engit-publish-bundle)
 for full details.
 
 ## GitHub Actions — Reusable Bundle Publish Workflow
@@ -133,4 +133,5 @@ jobs:
       contents: write
 ```
 
-When a `v*` tag is pushed, GitHub runs `engit publish --zip --output dist` and uploads the resulting zip to the release assets automatically.
+When a `v*` tag is pushed, GitHub runs `engit publish bundle --zip --output dist`
+and uploads the resulting zip to the release assets automatically.
