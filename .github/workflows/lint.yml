@@ -120,7 +120,7 @@ jobs:
       - name: Install built wheel + pytest
         run: |
           pip install pytest
-          pip install --no-index --find-links rust/target/wheels envoy
+          pip install --force-reinstall --no-index --find-links rust/target/wheels envoy
 
       - name: Run Python contract + consumer smoke tests against the wheel
         # These prove envoy-py's Python-facing behavior (not just that the
