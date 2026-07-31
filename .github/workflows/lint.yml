@@ -180,6 +180,88 @@ jobs:
           python -m pip install --force-reinstall --no-index --find-links rust/target/wheels envoy
           python -m pytest rust/envoy-py/tests -v
 
+  envoy-utils-compatibility:
+    name: Envoy Utils compatibility (${{ matrix.os_name }})
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            os_name: Linux
+          - runner: windows-2025
+            os_name: Windows
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout Envoy
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Classify Envoy Core impact
+        id: impact
+        shell: bash
+        run: >-
+          python scripts/release_automation.py impact
+          --base "${{ github.event.pull_request.base.sha }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+          --output impact.json
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Checkout Envoy Utils
+        if: steps.impact.outputs.relevant == 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: gtvfx-contrib/gt-envoy_utils
+          ref: main
+          path: downstream/envoy_utils
+
+      - name: Test Envoy Utils against candidate
+        if: steps.impact.outputs.relevant == 'true'
+        id: compatibility
+        continue-on-error: true
+        shell: bash
+        run: >-
+          python scripts/release_automation.py compatibility
+          --utils-root downstream/envoy_utils
+          --output compatibility.json
+
+      - name: Report advisory result
+        if: always()
+        shell: bash
+        run: |
+          if [[ "${{ steps.impact.outputs.relevant }}" != true ]]; then
+            echo "### Envoy Utils: no release impact" >> "$GITHUB_STEP_SUMMARY"
+            echo "No relevant Envoy Core source or dependency changed." >> "$GITHUB_STEP_SUMMARY"
+          elif [[ "${{ steps.compatibility.outcome }}" == success ]]; then
+            echo "### Envoy Utils: maintainer review" >> "$GITHUB_STEP_SUMMARY"
+            echo "Envoy Utils passes against this candidate on ${{ matrix.os_name }}." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Review whether Envoy Utils should be repinned and released."
+          else
+            echo "### Envoy Utils: release required" >> "$GITHUB_STEP_SUMMARY"
+            echo "Envoy Utils fails against this candidate on ${{ matrix.os_name }}." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::Envoy Utils requires changes for this Envoy candidate."
+          fi
+
+      - name: Upload compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: envoy-utils-compatibility-${{ matrix.os_name }}
+          path: |
+            impact.json
+            compatibility.json
+          if-no-files-found: ignore
+
   changes:
     name: Detect macOS-relevant changes
     runs-on: ["self-hosted", "Linux", "X64", "synology"]

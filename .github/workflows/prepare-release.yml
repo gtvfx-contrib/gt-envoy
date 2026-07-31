@@ -1,0 +1,89 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Unprefixed Envoy semantic version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release pull request
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Create release automation token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Prepare version files
+        run: python scripts/release_automation.py prepare --version "${{ inputs.version }}"
+
+      - name: Validate Python automation
+        run: |
+          python -m pip install ruff pytest
+          python -m ruff check scripts tests/test_release_automation.py
+          python -m ruff format --check scripts tests/test_release_automation.py
+          python -m pytest tests/test_release_automation.py
+
+      - name: Validate Rust workspace
+        working-directory: rust
+        run: |
+          cargo fmt --check
+          cargo clippy --workspace --exclude envoy-py --all-targets -- -D warnings
+          cargo test --workspace --exclude envoy-py
+
+      - name: Ensure release preparation label exists
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: >-
+          gh label create release-prep --color 5319E7 --force
+          --description "Automated release preparation pull request"
+
+      - name: Create or update draft pull request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: automation/release-v${{ inputs.version }}
+          base: main
+          commit-message: Prepare v${{ inputs.version }} release
+          title: Prepare v${{ inputs.version }} release
+          body: |
+            Automated Envoy release preparation.
+
+            - Updates the Cargo workspace version and lockfile.
+            - Runs the repository release-readiness checks.
+
+            Merge only after the normal pull request checks pass.
+          labels: release-prep
+          draft: always-true
+          delete-branch: false

@@ -69,4 +69,6 @@ nav:
   - Reference: reference/
   - Examples: examples.md
   - Advanced Topics: advanced.md
+  - Maintainers:
+    - Releasing: maintainers/releasing.md
   - Troubleshooting: troubleshooting.md

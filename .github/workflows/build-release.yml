@@ -280,3 +280,45 @@ jobs:
             Envoy supports Windows, Linux, and macOS. These artifacts are
             checksummed but currently unsigned. See the installation guide
             for Windows SmartScreen and macOS Gatekeeper guidance.
+
+  notify-downstream:
+    name: Notify downstream repositories
+    if: vars.RELEASE_AUTOMATION_ENABLED == 'true'
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create cross-repository token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: gt-envoy_utils,gt-despatch
+
+      - name: Dispatch Envoy release event
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ENVOY_TAG: ${{ github.ref_name }}
+        run: |
+          envoy_version="${ENVOY_TAG#v}"
+          envoy_commit="$(git rev-list -n 1 "$ENVOY_TAG")"
+          release_url="https://github.com/$GITHUB_REPOSITORY/releases/tag/$ENVOY_TAG"
+          for downstream in gt-envoy_utils gt-despatch; do
+            gh api --method POST \
+              "repos/$GITHUB_REPOSITORY_OWNER/$downstream/dispatches" \
+              -f event_type=envoy-released \
+              -F 'client_payload[schema_version]=1' \
+              -f "client_payload[envoy_tag]=$ENVOY_TAG" \
+              -f "client_payload[envoy_version]=$envoy_version" \
+              -f "client_payload[envoy_commit]=$envoy_commit" \
+              -f "client_payload[release_url]=$release_url"
+          done
