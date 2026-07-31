@@ -2,7 +2,7 @@
 
 Envoy releases support Windows, Linux, and macOS. Download the archive or
 wheel matching the operating system and CPU from the latest
-[GitHub Release](https://github.com/gtvfx-contrib/gt-envoy/releases).
+[GitHub Release](https://github.com/gtvfx-envoy/envoy/releases).
 
 ## Full Bundle (Recommended)
 
@@ -100,7 +100,7 @@ Requirements are Rust, Python 3.10 or newer, and `maturin` for the Python wheel.
 === "Windows"
 
     ```powershell
-    git clone https://github.com/gtvfx-contrib/gt-envoy.git envoy
+    git clone https://github.com/gtvfx-envoy/envoy.git envoy
     cd envoy
     python -m pip install maturin
     .\scripts\build_native.bat
@@ -110,7 +110,7 @@ Requirements are Rust, Python 3.10 or newer, and `maturin` for the Python wheel.
 === "Linux/macOS"
 
     ```bash
-    git clone https://github.com/gtvfx-contrib/gt-envoy.git envoy
+    git clone https://github.com/gtvfx-envoy/envoy.git envoy
     cd envoy
     python3 -m pip install maturin
     ./scripts/build_native.sh

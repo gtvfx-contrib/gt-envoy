@@ -221,7 +221,7 @@ jobs:
         if: steps.impact.outputs.relevant == 'true'
         uses: actions/checkout@v7
         with:
-          repository: gtvfx-contrib/gt-envoy_utils
+          repository: gtvfx-envoy/envoy_utils
           ref: main
           path: downstream/envoy_utils
 

@@ -42,13 +42,13 @@ Set `ENVOY_BNDL_ROOTS` to a semicolon-separated list of root directories. Envoy 
 === "PowerShell"
 
     ```powershell
-    $env:ENVOY_BNDL_ROOTS = "R:/repo/gtvfx-contrib;R:/studio/bundles"
+    $env:ENVOY_BNDL_ROOTS = "R:/repo/gtvfx-envoy;R:/studio/bundles"
     ```
 
 === "cmd"
 
     ```batch
-    set ENVOY_BNDL_ROOTS=R:/repo/gtvfx-contrib;R:/studio/bundles
+    set ENVOY_BNDL_ROOTS=R:/repo/gtvfx-envoy;R:/studio/bundles
     ```
 
 === "Unix/macOS"
@@ -65,18 +65,18 @@ Set `ENVOY_BNDL_ROOTS` to a semicolon-separated list of root directories. Envoy 
 │   ├── globals/         ← .bundle + .envoy/ ✓ discovered (production v1.0.0)
 │   └── pythoncore/      ← .bundle + .envoy/ ✓ discovered (production v2.1.0)
 /workspace/repos/
-└── gtvfx-contrib/
+└── gtvfx-envoy/
     └── gt/
         └── my-tool/     ← .git/ + .envoy/ ✓ discovered (checkout)
 ```
 
 !!! note
-    The scan walks up to 5 directory levels deep per root. Point roots at the parent of the namespace directory (e.g. `R:/repo/gtvfx-contrib`, not `R:/repo/gtvfx-contrib/gt`).
+    The scan walks up to 5 directory levels deep per root. Point roots at the repository workspace (e.g. `R:/repo/gtvfx-envoy`).
 
 ## The `.bundle` Marker File
 
 Every bundle published through
-[Envoy Utils](https://github.com/gtvfx-contrib/gt-envoy_utils) contains a
+[Envoy Utils](https://github.com/gtvfx-envoy/envoy_utils) contains a
 `.bundle` file at its root. This file serves two purposes:
 
 1. **Discovery marker** — `ENVOY_BNDL_ROOTS` scanning accepts it alongside `.git/` so deployed bundles are auto-discovered without a Stack.

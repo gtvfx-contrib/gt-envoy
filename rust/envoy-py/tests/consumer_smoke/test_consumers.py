@@ -30,7 +30,7 @@ def testGlobalsVscodeWrapperWritesLocalStack(tmp_path, monkeypatch):
 
     Skipped when ``gt/globals`` isn't checked out as a sibling directory
     (e.g. in the standalone ``envoy`` repo's own CI, which only checks out
-    ``envoy`` itself, not the full ``gtvfx-contrib/gt`` monorepo layout).
+    ``envoy`` itself, not the full ``gtvfx-envoy`` workspace layout).
 
     """
     globals_py = Path(__file__).parents[5] / "globals" / "py"

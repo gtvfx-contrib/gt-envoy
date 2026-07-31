@@ -39,17 +39,17 @@ en --diagnose python
 
 ## Documentation
 
-Full documentation is available at **[gtvfx-contrib.github.io/gt-envoy](https://gtvfx-contrib.github.io/gt-envoy/)**.
+Full documentation is available at **[gtvfx-envoy.github.io/envoy](https://gtvfx-envoy.github.io/envoy/)**.
 
 | Topic | Description |
 |---|---|
-| [Installation](https://gtvfx-contrib.github.io/gt-envoy/installation/) | Download and setup options |
-| [Core Concepts](https://gtvfx-contrib.github.io/gt-envoy/concepts/) | Bundles, commands, and env files |
-| [Environment Files](https://gtvfx-contrib.github.io/gt-envoy/env-files/) | JSON format reference |
-| [Bundle Discovery](https://gtvfx-contrib.github.io/gt-envoy/bundle-discovery/) | Auto-discovery and Stack files |
-| [CLI Reference](https://gtvfx-contrib.github.io/gt-envoy/cli-reference/envoy/) | `envoy` commands |
-| [Python API](https://gtvfx-contrib.github.io/gt-envoy/reference/envoy/) | Scripting and Stack integration |
-| [Troubleshooting](https://gtvfx-contrib.github.io/gt-envoy/troubleshooting/) | Common issues and fixes |
+| [Installation](https://gtvfx-envoy.github.io/envoy/installation/) | Download and setup options |
+| [Core Concepts](https://gtvfx-envoy.github.io/envoy/concepts/) | Bundles, commands, and env files |
+| [Environment Files](https://gtvfx-envoy.github.io/envoy/env-files/) | JSON format reference |
+| [Bundle Discovery](https://gtvfx-envoy.github.io/envoy/bundle-discovery/) | Auto-discovery and Stack files |
+| [CLI Reference](https://gtvfx-envoy.github.io/envoy/cli-reference/envoy/) | `envoy` commands |
+| [Python API](https://gtvfx-envoy.github.io/envoy/reference/envoy/) | Scripting and Stack integration |
+| [Troubleshooting](https://gtvfx-envoy.github.io/envoy/troubleshooting/) | Common issues and fixes |
 
 ## Contributing
 

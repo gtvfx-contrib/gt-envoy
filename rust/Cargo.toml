@@ -14,7 +14,7 @@ edition = "2021"
 # workspace root, and the canonical LICENSE lives one level up at the repo
 # root (shared with the py/ tree).
 license = "GPL-3.0-or-later"
-repository = "https://github.com/gtvfx-contrib/gt-envoy"
+repository = "https://github.com/gtvfx-envoy/envoy"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

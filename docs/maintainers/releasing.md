@@ -19,7 +19,7 @@ flowchart LR
 ## One-time organization setup
 
 Create and install an organization GitHub App named
-`gt-release-automation` on `gt-envoy`, `gt-envoy_utils`, and `gt-despatch`.
+`gt-release-automation` on `envoy`, `envoy_utils`, and `despatch`.
 Grant these repository permissions:
 
 - Metadata: read
@@ -71,7 +71,7 @@ accepted.
 
 ### 1. Prepare Envoy
 
-Run **Prepare Release** in `gt-envoy` with the new version. It opens or updates
+Run **Prepare Release** in `envoy` with the new version. It opens or updates
 a draft pull request on `automation/release-v<version>` that:
 
 - updates `[workspace.package].version` in `rust/Cargo.toml`;
@@ -88,7 +88,7 @@ Review and merge the preparation pull request through the normal process.
 
 ### 2. Tag and publish Envoy
 
-Run **Tag Release** in `gt-envoy` with the same version. It verifies that:
+Run **Tag Release** in `envoy` with the same version. It verifies that:
 
 - `main` contains the expected Cargo and lockfile version;
 - the checkout matches `origin/main`;
@@ -120,7 +120,7 @@ parallel.
 
 ### 4. Prepare and publish Envoy Utils when needed
 
-Run **Prepare Release** in `gt-envoy_utils` with:
+Run **Prepare Release** in `envoy_utils` with:
 
 - its new version; and
 - the already-published Envoy tag.
@@ -139,7 +139,7 @@ Publishing the release automatically closes its matching Envoy-impact issue.
 
 ### 5. Prepare and publish Despatch when needed
 
-Run **Prepare Release** in `gt-despatch` with its new version and the Envoy tag
+Run **Prepare Release** in `despatch` with its new version and the Envoy tag
 to embed. The pull request synchronizes `pyproject.toml`,
 `py/despatch/__init__.py`, and both Envoy defaults in the executable release
 workflow.

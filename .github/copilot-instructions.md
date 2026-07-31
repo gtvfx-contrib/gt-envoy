@@ -1,4 +1,4 @@
-# GitHub Copilot Instructions for gtvfx-contrib repos.
+# GitHub Copilot Instructions for gtvfx-envoy repos.
 
 This file contains coding standards and guidelines that GitHub Copilot should follow when providing code suggestions for this repository.
 

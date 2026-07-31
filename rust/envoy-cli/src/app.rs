@@ -23,7 +23,7 @@ use envoy_core::wrapper::ApplicationWrapper;
 
 use crate::args::{self, Cli};
 
-const DOCS_URL: &str = "https://gtvfx-contrib.github.io/gt-envoy/";
+const DOCS_URL: &str = "https://gtvfx-envoy.github.io/envoy/";
 
 struct ExecutionOptions<'a> {
     bundles: Option<&'a [BundleInfo]>,

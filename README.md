@@ -40,25 +40,25 @@ The short `en` alias can be used anywhere `envoy` appears above.
 | Python wheel | Windows x64, manylinux2014 x64, macOS x64, macOS arm64 |
 
 Release artifacts are checksummed but currently unsigned. See the
-[installation guide](https://gtvfx-contrib.github.io/gt-envoy/installation/)
+[installation guide](https://gtvfx-envoy.github.io/envoy/installation/)
 for platform-specific setup and security guidance.
 
 ## Documentation
 
-Full documentation: **[gtvfx-contrib.github.io/gt-envoy](https://gtvfx-contrib.github.io/gt-envoy/)**
+Full documentation: **[gtvfx-envoy.github.io/envoy](https://gtvfx-envoy.github.io/envoy/)**
 
 | Topic | Description |
 |---|---|
-| [Installation](https://gtvfx-contrib.github.io/gt-envoy/installation/) | Platform archives and source builds |
-| [Core Concepts](https://gtvfx-contrib.github.io/gt-envoy/concepts/) | Bundles, commands, and platform overrides |
-| [Environment Files](https://gtvfx-contrib.github.io/gt-envoy/env-files/) | JSON environment format |
-| [Bundle Discovery](https://gtvfx-contrib.github.io/gt-envoy/bundle-discovery/) | Auto-discovery and Stack files |
-| [CLI Reference](https://gtvfx-contrib.github.io/gt-envoy/cli-reference/envoy/) | `envoy` commands |
-| [Python API](https://gtvfx-contrib.github.io/gt-envoy/reference/envoy/) | Scripting and Stack integration |
-| [Troubleshooting](https://gtvfx-contrib.github.io/gt-envoy/troubleshooting/) | Diagnostics and common issues |
+| [Installation](https://gtvfx-envoy.github.io/envoy/installation/) | Platform archives and source builds |
+| [Core Concepts](https://gtvfx-envoy.github.io/envoy/concepts/) | Bundles, commands, and platform overrides |
+| [Environment Files](https://gtvfx-envoy.github.io/envoy/env-files/) | JSON environment format |
+| [Bundle Discovery](https://gtvfx-envoy.github.io/envoy/bundle-discovery/) | Auto-discovery and Stack files |
+| [CLI Reference](https://gtvfx-envoy.github.io/envoy/cli-reference/envoy/) | `envoy` commands |
+| [Python API](https://gtvfx-envoy.github.io/envoy/reference/envoy/) | Scripting and Stack integration |
+| [Troubleshooting](https://gtvfx-envoy.github.io/envoy/troubleshooting/) | Diagnostics and common issues |
 
 Repository, release, and bundle-publishing commands are provided separately by
-[Envoy Utils](https://github.com/gtvfx-contrib/gt-envoy_utils).
+[Envoy Utils](https://github.com/gtvfx-envoy/envoy_utils).
 
 ## Contributing
 

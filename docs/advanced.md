@@ -106,7 +106,7 @@ flowchart LR
 ```
 
 The default exclusions strip git artifacts, build outputs, and caches automatically. See
-[`engit publish bundle`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/main/docs/cli-reference/engit.md#engit-publish-bundle)
+[`engit publish bundle`](https://github.com/gtvfx-envoy/envoy_utils/blob/main/docs/cli-reference/engit.md#engit-publish-bundle)
 for full details.
 
 ## GitHub Actions — Reusable Bundle Publish Workflow
@@ -125,7 +125,7 @@ on:
 
 jobs:
   publish:
-    uses: gtvfx-contrib/gt-envoy_utils/.github/workflows/bundle-publish.yml@v0.1.0
+    uses: gtvfx-envoy/envoy_utils/.github/workflows/bundle-publish.yml@v0.1.0
     with:
       extra_excludes: 'scripts pyproject.toml'  # optional
     secrets: inherit

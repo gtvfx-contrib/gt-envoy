@@ -99,4 +99,4 @@ These warnings are informational — they indicate a variable or list item was i
 ## Envoy Utils Issues
 
 Troubleshooting for `engit` is maintained with
-[Envoy Utils](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/v0.1.0/docs/troubleshooting.md).
+[Envoy Utils](https://github.com/gtvfx-envoy/envoy_utils/blob/v0.1.0/docs/troubleshooting.md).

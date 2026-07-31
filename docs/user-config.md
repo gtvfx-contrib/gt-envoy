@@ -190,7 +190,7 @@ file contains just the filename of the most recently published version.
 ### Publishing a named Stack
 
 Use
-[`engit publish stack`](https://github.com/gtvfx-contrib/gt-envoy_utils/blob/main/docs/cli-reference/engit.md#engit-publish-stack)
+[`engit publish stack`](https://github.com/gtvfx-envoy/envoy_utils/blob/main/docs/cli-reference/engit.md#engit-publish-stack)
 from Envoy Utils to publish a new version and update `latest`:
 
 ```powershell

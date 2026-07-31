@@ -302,7 +302,7 @@ jobs:
           app-id: ${{ secrets.RELEASE_AUTOMATION_APP_ID }}
           private-key: ${{ secrets.RELEASE_AUTOMATION_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: gt-envoy_utils,gt-despatch
+          repositories: envoy_utils,despatch
 
       - name: Dispatch Envoy release event
         env:
@@ -312,7 +312,7 @@ jobs:
           envoy_version="${ENVOY_TAG#v}"
           envoy_commit="$(git rev-list -n 1 "$ENVOY_TAG")"
           release_url="https://github.com/$GITHUB_REPOSITORY/releases/tag/$ENVOY_TAG"
-          for downstream in gt-envoy_utils gt-despatch; do
+          for downstream in envoy_utils despatch; do
             gh api --method POST \
               "repos/$GITHUB_REPOSITORY_OWNER/$downstream/dispatches" \
               -f event_type=envoy-released \

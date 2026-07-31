@@ -23,7 +23,7 @@ Each bundle has a **bundle ID** (`bndlid`) of the form `<namespace>:<name>`. The
 ```mermaid
 graph TD
     ROOT["/workspace/repos/"]
-    NS["gtvfx-contrib/ ← namespace: gt"]
+    NS["gtvfx-envoy/ ← namespace: gt"]
     GT["gt/"]
     G["globals/ → gt:globals"]
     E["envoy/  → gt:envoy"]

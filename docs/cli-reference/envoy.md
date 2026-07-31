@@ -127,8 +127,8 @@ envoy diagnose
 Target: linux/x86_64
 
 Bundles discovered: 2
-  - gt:pythoncore            R:/repo/gtvfx-contrib/gt/pythoncore
-  - gt:unreal                R:/repo/gtvfx-contrib/gt/unreal
+  - gt:pythoncore            R:/repo/gtvfx-envoy/pythoncore
+  - gt:unreal                R:/repo/gtvfx-envoy/unreal
 
 Commands registered: 3
   python, unreal, vscode
@@ -141,14 +141,14 @@ Team config: bfd
 
 Bundle cache: C:\Users\you\AppData\Local\envoy\bundle_cache (reachable)
 
-VCS detected: git at R:/repo/gtvfx-contrib
+VCS detected: git at R:/repo/gtvfx-envoy
   0 pending change(s)
 
 Telemetry: disabled (default; call envoy.enable_telemetry(...) to opt in)
 
 Bundle root reachability:
-  - gt:pythoncore            [local        ] reachable: R:/repo/gtvfx-contrib/gt/pythoncore
-  - gt:unreal                [local        ] reachable: R:/repo/gtvfx-contrib/gt/unreal
+  - gt:pythoncore            [local        ] reachable: R:/repo/gtvfx-envoy/pythoncore
+  - gt:unreal                [local        ] reachable: R:/repo/gtvfx-envoy/unreal
 ```
 
 For a single-variable, step-by-step operator trace instead, use `--trace VAR COMMAND`.

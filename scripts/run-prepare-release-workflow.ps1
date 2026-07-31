@@ -5,6 +5,6 @@ param(
 
 
 gh workflow run prepare-release.yml `
-    --repo gtvfx-contrib/gt-envoy `
+    --repo gtvfx-envoy/envoy `
     --ref main `
     -f version=$Version
