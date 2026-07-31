@@ -419,11 +419,6 @@
     "ast_hash": "202345fba2720e40fe9b8c9942fc30cd",
     "semantic_hash": ""
   },
-  ".codebase-memory/artifact.json": {
-    "mtime": 1785520987.9104521,
-    "ast_hash": "75085f592e7f4509eb9ddf8bcca83736",
-    "semantic_hash": "75085f592e7f4509eb9ddf8bcca83736"
-  },
   "rust/envoy-py/tests/python_contract/test_user_config.py": {
     "mtime": 1785448209.9598029,
     "ast_hash": "c218e1aa2742f570c31d8279771123e8",
