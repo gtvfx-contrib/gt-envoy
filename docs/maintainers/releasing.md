@@ -65,9 +65,9 @@ still be needed to deliver new statically linked or embedded behavior.
 
 ## Standard release sequence
 
-All version inputs are unprefixed SemVer values such as `0.6.0`. Dependency
-inputs are tags such as `v0.6.0`. Stable and prerelease SemVer values are
-accepted.
+All operator-provided version inputs are unprefixed SemVer values such as
+`0.6.0`. Automation adds the `v` prefix when it addresses Git tags. Stable and
+prerelease SemVer values are accepted.
 
 ### Local validation before tagging
 
@@ -81,7 +81,7 @@ version, regenerates `Cargo.lock`, and runs a workspace build check:
 ```powershell
 python scripts/release_automation.py prepare `
     --version 0.2.0 `
-    --envoy-tag v0.6.0
+    --envoy-version 0.6.0
 ```
 
 Then run the validator explicitly:
@@ -89,7 +89,7 @@ Then run the validator explicitly:
 ```powershell
 python scripts/release_automation.py check `
     --expect-version 0.2.0 `
-    --expect-envoy-tag v0.6.0
+    --expect-envoy-version 0.6.0
 ```
 
 `Cargo.toml` is the source declaration. It should name the Envoy repository,
@@ -107,7 +107,7 @@ independent. For example, Envoy Utils `0.2.0` can be paired with Envoy Core
 `v0.6.0`.
 
 For Despatch, run its repository-local preparation workflow with the new
-Despatch version and Envoy tag, then run the repository's lint, test, and
+Despatch version and Envoy version, then run the repository's lint, test, and
 executable-build checks before tagging. The release workflow performs the same
 checks on Windows and uploads the executable only after a successful build.
 ### 1. Prepare Envoy
@@ -164,7 +164,7 @@ parallel.
 Run **Prepare Release** in `envoy_utils` with:
 
 - its new version; and
-- the already-published Envoy tag.
+- the already-published Envoy version.
 
 The generated pull request updates the Envoy Utils workspace version, changes
 the Envoy Core Git tag and exact crate version together, runs
@@ -180,7 +180,7 @@ Publishing the release automatically closes its matching Envoy-impact issue.
 
 ### 5. Prepare and publish Despatch when needed
 
-Run **Prepare Release** in `despatch` with its new version and the Envoy tag
+Run **Prepare Release** in `despatch` with its new version and the Envoy version
 to embed. The pull request synchronizes `pyproject.toml`,
 `py/despatch/__init__.py`, and both Envoy defaults in the executable release
 workflow.
@@ -214,7 +214,7 @@ The `compatibility.json` schema is:
 }
 ```
 
-Run **Backfill Release Compatibility** once in Envoy Utils for `v0.1.0`. It
+Run **Backfill Release Compatibility** once in Envoy Utils for `0.1.0`. It
 derives the existing `v0.1.0` to Envoy `v0.5.1` pairing from that tag's Cargo
 manifest and lockfile, preserves the existing assets, adds
 `compatibility.json`, updates the release body, and regenerates `SHA256SUMS`
@@ -223,8 +223,8 @@ old README and docs tables.
 
 ## Manual replay and failures
 
-Both downstream **Envoy Release Impact** workflows accept a manual Envoy tag
-for replay after a runner or external service failure.
+Both downstream **Envoy Release Impact** workflows accept an unprefixed Envoy
+version for replay after a runner or external service failure.
 
 - A failed preparation workflow changes no release state; fix the cause and
   rerun it. The existing automation branch and draft pull request are updated.
