@@ -1,3 +1,4 @@
+![Repository Banner](./resources/envoy_repository_banner.png)
 # Envoy
 
 **Platform-agnostic environment orchestration for applications.** Envoy is a
