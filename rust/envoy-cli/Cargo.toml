@@ -18,5 +18,8 @@ envoy-core = { path = "../envoy-core" }
 clap.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1.12"
+
 [dev-dependencies]
 assert_cmd = "2"
