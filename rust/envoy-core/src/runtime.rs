@@ -18,6 +18,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use crate::bundle_cache::BundleCache;
@@ -52,14 +53,22 @@ pub fn is_raw_path(spec: &str) -> bool {
 ///
 /// 1. Look for a sibling `envoy.exe` (Windows) or `envoy` (Unix) next to the
 ///    currently running executable returned by [`std::env::current_exe`].
-/// 2. Search `PATH` for the same executable names.
-/// 3. Fall back to `python -m envoy` on Windows or `python3 -m envoy` on Unix,
+/// 2. When the current executable is Python, invoke that same interpreter as
+///    `python -m envoy` so an unrelated `envoy` launcher on `PATH` cannot win.
+/// 3. Search `PATH` for the same executable names.
+/// 4. Fall back to `python -m envoy` on Windows or `python3 -m envoy` on Unix,
 ///    preferring the first matching interpreter found on `PATH`.
 ///
 /// The returned vector is the executable prefix that callers can prepend to
 /// envoy CLI arguments.
 pub fn resolve_envoy_exe() -> Vec<String> {
-    if let Ok(current_exe) = env::current_exe() {
+    let current_exe = env::current_exe().ok();
+    let path_var = env::var_os("PATH");
+    resolve_envoy_exe_from(current_exe.as_deref(), path_var.as_deref())
+}
+
+fn resolve_envoy_exe_from(current_exe: Option<&Path>, path_var: Option<&OsStr>) -> Vec<String> {
+    if let Some(current_exe) = current_exe {
         if let Some(current_dir) = current_exe.parent() {
             for candidate_name in envoy_program_names() {
                 let candidate = current_dir.join(candidate_name);
@@ -68,13 +77,21 @@ pub fn resolve_envoy_exe() -> Vec<String> {
                 }
             }
         }
+
+        if is_python_executable(current_exe) {
+            return vec![
+                path_to_string(current_exe),
+                String::from("-m"),
+                String::from("envoy"),
+            ];
+        }
     }
 
-    if let Some(candidate) = find_on_path(envoy_program_names()) {
+    if let Some(candidate) = find_on_path(envoy_program_names(), path_var) {
         return vec![path_to_string(&candidate)];
     }
 
-    let python_fallback = find_on_path(python_program_names())
+    let python_fallback = find_on_path(python_program_names(), path_var)
         .map(|candidate| path_to_string(&candidate))
         .unwrap_or_else(default_python_program);
 
@@ -512,10 +529,27 @@ fn default_python_program() -> String {
     String::from("python3")
 }
 
-fn find_on_path(candidate_names: &[&str]) -> Option<PathBuf> {
-    let path_var = env::var_os("PATH")?;
+fn is_python_executable(path: &Path) -> bool {
+    let Some(stem) = path.file_stem().and_then(OsStr::to_str) else {
+        return false;
+    };
+    let stem = stem.to_ascii_lowercase();
+    if stem == "python" || stem == "pythonw" {
+        return true;
+    }
 
-    for path_dir in env::split_paths(&path_var) {
+    stem.strip_prefix("python").is_some_and(|suffix| {
+        !suffix.is_empty()
+            && suffix
+                .chars()
+                .all(|character| character.is_ascii_digit() || character == '.')
+    })
+}
+
+fn find_on_path(candidate_names: &[&str], path_var: Option<&OsStr>) -> Option<PathBuf> {
+    let path_var = path_var?;
+
+    for path_dir in env::split_paths(path_var) {
         for candidate_name in candidate_names {
             let candidate = path_dir.join(candidate_name);
             if candidate.is_file() {
@@ -543,7 +577,8 @@ mod tests {
 
     use super::{
         collect_env_files, envoy_program_names, is_raw_path, load_registry, prepare_env,
-        python_program_names, resolve_cached_bundles, resolve_team_config_for_bundles,
+        python_program_names, resolve_cached_bundles, resolve_envoy_exe_from,
+        resolve_team_config_for_bundles,
     };
     use crate::bundle_cache::BundleCache;
     use crate::commands::CommandRegistry;
@@ -604,6 +639,36 @@ mod tests {
             assert_eq!(envoy_program_names(), &["envoy"]);
             assert_eq!(python_program_names(), &["python3"]);
         }
+    }
+
+    #[test]
+    fn current_python_interpreter_wins_over_stale_envoy_on_path() {
+        let temp = tempdir().expect("failed to create temp dir");
+        let python_dir = temp.path().join("active-python");
+        let stale_dir = temp.path().join("stale-install");
+        fs::create_dir_all(&python_dir).expect("failed to create active Python directory");
+        fs::create_dir_all(&stale_dir).expect("failed to create stale install directory");
+
+        #[cfg(windows)]
+        let (python_name, envoy_name) = ("python.exe", "envoy.exe");
+        #[cfg(not(windows))]
+        let (python_name, envoy_name) = ("python3.11", "envoy");
+
+        let current_python = python_dir.join(python_name);
+        fs::write(&current_python, "python fixture")
+            .expect("failed to write active Python fixture");
+        fs::write(stale_dir.join(envoy_name), "stale envoy fixture")
+            .expect("failed to write stale Envoy fixture");
+        let path_var = env::join_paths([stale_dir]).expect("failed to build test PATH");
+
+        assert_eq!(
+            resolve_envoy_exe_from(Some(&current_python), Some(path_var.as_os_str())),
+            vec![
+                current_python.to_string_lossy().into_owned(),
+                String::from("-m"),
+                String::from("envoy"),
+            ]
+        );
     }
 
     fn write_json(path: &Path, value: &Value) {
