@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1800" height="620"
+     viewBox="0 0 1800 620">
+  <title>Envoy Primary Horizontal Logo</title>
+  <desc>Primary Envoy logo lockup with approved circuit glyph, custom vector wordmark, and tagline.</desc>
+
+  <defs>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="9"
+                    flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <linearGradient id="bg-gradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1C1F23"/>
+      <stop offset="1" stop-color="#111315"/>
+    </linearGradient>
+    <pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M 48 0 L 0 0 0 48"
+            fill="none" stroke="#4A525C" stroke-width="1" opacity="0.12"/>
+    </pattern>
+  </defs>
+<rect width="1800" height="620" fill="none"/>
+  <g id="envoy-circuit-glyph" transform="translate(25 32) scale(0.82)">
+    <path id="circuit-frame"
+          d="M 825 90
+                L 427 90
+                L 131 412
+                L 205 501
+                L 690 501"
+          fill="none"
+          stroke="#4A525C"
+          stroke-width="30"
+          stroke-linejoin="bevel"
+          stroke-linecap="butt"/>
+    <path id="circuit-frame-highlight"
+          d="M 825 90
+                L 427 90
+                L 131 412
+                L 205 501
+                L 690 501"
+          fill="none"
+          stroke="#68717B"
+          stroke-width="3"
+          stroke-linejoin="bevel"
+          stroke-linecap="butt"
+          opacity="0.72"/>
+    <path d="M 825 90 L 920 90"
+          fill="none" stroke="#FF8A00" stroke-width="12"/>
+    <circle cx="941" cy="90" r="17"
+            fill="none" stroke="#FF8A00" stroke-width="10"/>
+    <path d="M 690 501 L 784 501"
+          fill="none" stroke="#FF8A00" stroke-width="12"/>
+    <circle cx="805" cy="501" r="17"
+            fill="none" stroke="#FF8A00" stroke-width="10"/>
+
+    <g id="envoy-e-master" transform="translate(140 95) scale(0.68)">
+      <polygon id="detached-top-bar"
+               points="962,35 441,37 351,134 876,134"
+               fill="#4A525C"/>
+      <polygon id="continuous-lower-glyph"
+               points="43,467 115,554 790,554 700,449 212,450 309,346 700,346 790,237 255,237"
+               fill="#FF8A00"/>
+    </g>
+  </g>
+
+  <g id="envoy-wordmark" transform="translate(880 180) scale(1.25)">
+    
+      <g transform="translate(0.0 0)">
+        <path d="M0 0 H100 L88 22 H22 V58 H82 L72 80 H22 V118 H100 L88 140 H0 Z"
+              fill="#D0D4D9"/>
+      </g>
+      <g transform="translate(130.0 0)" fill="#D0D4D9">
+        <path d="M0 0 H22 V140 H0 Z"/>
+        <path d="M83 0 H105 V140 H83 Z"/>
+        <path d="M17 0 H41 L105 105 V140 H83 L17 34 Z"/>
+      </g>
+      <g transform="translate(265.0 0)">
+        <path d="M0 0 H25 L50 104 L75 0 H100 L62 140 H38 Z"
+              fill="#D0D4D9"/>
+      </g>
+      <g transform="translate(395.0 0)">
+        <path d="M12 0 H88 L100 12 V128 L88 140 H12 L0 128 V12 Z M28 22 H72 L78 28 V112 L72 118 H28 L22 112 V28 Z" fill="#D0D4D9" fill-rule="evenodd"/>
+      </g>
+      <g transform="translate(525.0 0)">
+        <path d="M0 0 H26 L50 48 L74 0 H100 L62 78 V140 H38 V78 Z"
+              fill="#D0D4D9"/>
+      </g>
+  </g>
+
+  <text x="885" y="445"
+        fill="#68717B"
+        font-family="Bank Gothic, BankGothic, Eurostile, DejaVu Sans, sans-serif"
+        font-size="31"
+        font-weight="600"
+        letter-spacing="7"
+        text-anchor="start">COMPOSABLE PIPELINE ENVIRONMENTS</text>
+</svg>

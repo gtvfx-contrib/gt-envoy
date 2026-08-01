@@ -1,5 +1,12 @@
 # Envoy
 
+<p class="envoy-hero">
+  <img
+    src="assets/images/envoy_primary_horizontal.svg"
+    alt="Envoy — Composable Pipeline Environments"
+  >
+</p>
+
 **Platform-agnostic environment orchestration for applications** — A CLI-first
 tool for managing complex application environments with multi-bundle runtime
 Stacks on Windows, Linux, and macOS.

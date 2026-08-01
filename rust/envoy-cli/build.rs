@@ -17,9 +17,13 @@
 //!    when git is unavailable or this isn't a git checkout (e.g. a
 //!    source-only tarball) -- never fails the build.
 
+#[cfg(windows)]
+use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    embed_windows_icon();
+
     let version = git_describe().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
     println!("cargo:rustc-env=ENVOY_VERSION={version}");
 
@@ -28,6 +32,23 @@ fn main() {
     println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../.git/refs");
 }
+
+#[cfg(windows)]
+fn embed_windows_icon() {
+    let icon_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/icons/envoy.ico");
+    println!("cargo:rerun-if-changed={}", icon_path.display());
+
+    let icon_path = icon_path.to_string_lossy();
+    let mut windows_resource = winres::WindowsResource::new();
+    windows_resource.set_icon(&icon_path);
+    windows_resource
+        .compile()
+        .expect("failed to embed the Envoy Windows executable icon");
+}
+
+#[cfg(not(windows))]
+fn embed_windows_icon() {}
 
 /// Run `git describe --tags --always --dirty` from the repo root and return
 /// its trimmed stdout, or `None` if `git` isn't available or the command
