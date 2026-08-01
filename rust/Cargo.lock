@@ -529,7 +529,7 @@ checksum = "91622ff5e7162018101f2fea40d6ebf4a78bbe5a49736a2020649edf9693679e"
 
 [[package]]
 name = "envoy-cli"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -540,7 +540,7 @@ dependencies = [
 
 [[package]]
 name = "envoy-core"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "age",
  "base64 0.22.1",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "envoy-py"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "envoy-cli",
  "envoy-core",
