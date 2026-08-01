@@ -1,0 +1,4 @@
+include:
+  - rust/envoy-py
+exclude:
+  - bin/**

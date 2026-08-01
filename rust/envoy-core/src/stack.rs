@@ -1,8 +1,9 @@
 //! Runtime stack loading and context-aware resolution.
 //!
-//! A stack is a strict YAML document with an `.estack` extension. It names an
-//! ordered collection of envoy bundles that together form an isolated runtime
-//! environment. Named stacks may be published to versioned directories under
+//! A stack is a strict YAML document with an `.estack` extension. Its filename
+//! supplies its name, and its document defines an ordered collection of envoy
+//! bundles that together form an isolated runtime environment. Named stacks
+//! may be published to versioned directories under
 //! [`ENVOY_STACK_ROOTS`](crate::stack_registry::STACK_ROOTS_VAR).
 
 use std::cell::RefCell;
@@ -58,7 +59,6 @@ pub struct StackBundleEntry {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StackDocument {
-    name: String,
     #[serde(default = "default_namespace")]
     namespace: String,
     #[serde(default, rename = "source")]
@@ -116,7 +116,8 @@ impl Stack {
             ))
         })?;
         let version = path
-            .file_stem()
+            .parent()
+            .and_then(Path::file_name)
             .map(|value| value.to_string_lossy().into_owned())
             .unwrap_or_default();
 
@@ -220,12 +221,20 @@ impl Stack {
             ))
         })?;
 
-        validate_document(&path, &document, expected_name)?;
+        let name = stack_name_from_path(&path)?;
+        validate_document(&path, &document)?;
+        if let Some(expected_name) = expected_name {
+            if name != expected_name {
+                return Err(EnvoyError::Validation(format!(
+                    "Stack filename {name:?} does not match registry slot {expected_name:?}"
+                )));
+            }
+        }
         validate_bundle_documents(&path, &document.bundles)?;
 
         Ok(Self {
             path: path.clone(),
-            name: document.name,
+            name,
             namespace: document.namespace,
             source: StackSource::Local { path },
             pinned_version: document.pinned_version,
@@ -427,17 +436,20 @@ fn validate_stack_extension(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn validate_document(
-    path: &Path,
-    document: &StackDocument,
-    expected_name: Option<&str>,
-) -> Result<()> {
-    if document.name.trim().is_empty() {
-        return Err(EnvoyError::Validation(format!(
-            "Stack name must not be empty: {}",
-            path.display()
-        )));
-    }
+fn stack_name_from_path(path: &Path) -> Result<String> {
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            EnvoyError::Validation(format!(
+                "Stack filename must contain a non-empty UTF-8 name: {}",
+                path.display()
+            ))
+        })
+}
+
+fn validate_document(path: &Path, document: &StackDocument) -> Result<()> {
     if document.namespace.trim().is_empty() || document.namespace.split(':').any(str::is_empty) {
         return Err(EnvoyError::Validation(format!(
             "Stack namespace must be a non-empty colon-separated context: {}",
@@ -449,14 +461,6 @@ fn validate_document(
             "Stack must contain at least one bundle: {}",
             path.display()
         )));
-    }
-    if let Some(expected_name) = expected_name {
-        if document.name != expected_name {
-            return Err(EnvoyError::Validation(format!(
-                "Stack name {:?} does not match registry slot {:?}",
-                document.name, expected_name
-            )));
-        }
     }
     Ok(())
 }
@@ -577,23 +581,43 @@ mod tests {
         bundle
     }
 
-    fn stack_yaml(name: &str, namespace: &str, bundle_path: &str) -> String {
+    fn stack_yaml(namespace: &str, bundle_path: &str) -> String {
         let bundle_path = bundle_path.replace('\'', "''");
         format!(
-            "name: {name}\nnamespace: {namespace}\nmetadata:\n  owner: tools\nbundles:\n  - path: '{bundle_path}'\n    metadata:\n      role: core\n"
+            "namespace: {namespace}\nmetadata:\n  owner: tools\nbundles:\n  - path: '{bundle_path}'\n    metadata:\n      role: core\n"
         )
     }
 
-    fn write_named_stack(root: &Path, name: &str, namespace: &str, bundle: &Path, version: &str) {
+    #[cfg(unix)]
+    fn create_file_symlink(target: &Path, link: &Path) -> bool {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+
+    #[cfg(windows)]
+    fn create_file_symlink(target: &Path, link: &Path) -> bool {
+        std::os::windows::fs::symlink_file(target, link).is_ok()
+    }
+
+    fn write_named_stack(
+        root: &Path,
+        name: &str,
+        namespace: &str,
+        bundle: &Path,
+        version: &str,
+    ) -> bool {
         let name_dir = root.join(name);
-        fs::create_dir_all(&name_dir).expect("failed to create named stack directory");
-        let filename = format!("{version}.estack");
+        let version_dir = name_dir.join(version);
+        fs::create_dir_all(&version_dir).expect("failed to create stack version directory");
+        let filename = format!("{name}.estack");
         fs::write(
-            name_dir.join(&filename),
-            stack_yaml(name, namespace, &bundle.to_string_lossy()),
+            version_dir.join(&filename),
+            stack_yaml(namespace, &bundle.to_string_lossy()),
         )
         .expect("failed to write named stack");
-        fs::write(name_dir.join("latest"), filename).expect("failed to write latest pointer");
+        create_file_symlink(
+            &Path::new(version).join(filename),
+            &name_dir.join("latest.estack"),
+        )
     }
 
     #[test]
@@ -601,7 +625,7 @@ mod tests {
         let temp = tempdir().expect("tempdir should be created");
         let bundle = create_bundle(temp.path(), "bundle");
         let stack_path = temp.path().join("studio.estack");
-        fs::write(&stack_path, stack_yaml("studio", "team:project", "bundle"))
+        fs::write(&stack_path, stack_yaml("team:project", "bundle"))
             .expect("failed to write stack");
 
         let stack = Stack::new(&stack_path).expect("stack should load");
@@ -636,7 +660,7 @@ mod tests {
     fn stack_rejects_wrong_extensions_unknown_fields_and_duplicate_bundles() {
         let temp = tempdir().expect("tempdir should be created");
         let bundle = create_bundle(temp.path(), "bundle");
-        let yaml = stack_yaml("studio", "gt", &bundle.to_string_lossy());
+        let yaml = stack_yaml("gt", &bundle.to_string_lossy());
 
         let wrong_extension = temp.path().join("studio.yaml");
         fs::write(&wrong_extension, &yaml).expect("failed to write wrong-extension fixture");
@@ -653,11 +677,19 @@ mod tests {
             Err(EnvoyError::Validation(_))
         ));
 
+        let obsolete_name = temp.path().join("obsolete.estack");
+        fs::write(&obsolete_name, format!("name: obsolete\n{yaml}"))
+            .expect("failed to write obsolete-name fixture");
+        assert!(matches!(
+            Stack::new(&obsolete_name),
+            Err(EnvoyError::Validation(_))
+        ));
+
         let duplicate = temp.path().join("duplicate.estack");
         let escaped = bundle.to_string_lossy().replace('\'', "''");
         fs::write(
             &duplicate,
-            format!("name: duplicate\nbundles:\n  - path: '{escaped}'\n  - path: '{escaped}'\n"),
+            format!("bundles:\n  - path: '{escaped}'\n  - path: '{escaped}'\n"),
         )
         .expect("failed to write duplicate fixture");
         assert!(matches!(
@@ -675,14 +707,18 @@ mod tests {
         let root = temp.path().join("stacks");
         let broad_bundle = create_bundle(temp.path(), "broad-bundle");
         let specific_bundle = create_bundle(temp.path(), "specific-bundle");
-        write_named_stack(&root, "broad", "team", &broad_bundle, "2026-01-01T00-00-00");
-        write_named_stack(
+        if !write_named_stack(&root, "broad", "team", &broad_bundle, "2026-01-01T00-00-00") {
+            return;
+        }
+        if !write_named_stack(
             &root,
             "specific",
             "team:project",
             &specific_bundle,
             "2026-01-02T00-00-00",
-        );
+        ) {
+            return;
+        }
         let roots = env::join_paths([root]).expect("failed to join stack roots");
         let _guard = EnvVarGuard::set(STACK_ROOTS_VAR, Some(roots.as_os_str()));
 
@@ -705,8 +741,12 @@ mod tests {
         let root = temp.path().join("stacks");
         let bundle_a = create_bundle(temp.path(), "bundle-a");
         let bundle_b = create_bundle(temp.path(), "bundle-b");
-        write_named_stack(&root, "alpha", "team", &bundle_a, "2026-01-01T00-00-00");
-        write_named_stack(&root, "beta", "team", &bundle_b, "2026-01-01T00-00-00");
+        if !write_named_stack(&root, "alpha", "team", &bundle_a, "2026-01-01T00-00-00") {
+            return;
+        }
+        if !write_named_stack(&root, "beta", "team", &bundle_b, "2026-01-01T00-00-00") {
+            return;
+        }
         let roots = env::join_paths([root]).expect("failed to join stack roots");
         let _guard = EnvVarGuard::set(STACK_ROOTS_VAR, Some(roots.as_os_str()));
 
@@ -732,12 +772,12 @@ mod tests {
 
         fs::write(
             &environment_stack,
-            stack_yaml("environment", "gt", &environment_bundle.to_string_lossy()),
+            stack_yaml("gt", &environment_bundle.to_string_lossy()),
         )
         .expect("failed to write environment stack");
         fs::write(
             &user_stack,
-            stack_yaml("user", "gt", &user_bundle.to_string_lossy()),
+            stack_yaml("gt", &user_bundle.to_string_lossy()),
         )
         .expect("failed to write user stack");
         fs::write(
@@ -745,13 +785,15 @@ mod tests {
             serde_json::json!({"stack": user_stack}).to_string(),
         )
         .expect("failed to write user config");
-        write_named_stack(
+        if !write_named_stack(
             &root,
             "context",
             "team:project",
             &context_bundle,
             "2026-01-03T00-00-00",
-        );
+        ) {
+            return;
+        }
 
         let roots = env::join_paths([root]).expect("failed to join stack roots");
         let _roots_guard = EnvVarGuard::set(STACK_ROOTS_VAR, Some(roots.as_os_str()));

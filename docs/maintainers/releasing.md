@@ -69,6 +69,47 @@ All version inputs are unprefixed SemVer values such as `0.6.0`. Dependency
 inputs are tags such as `v0.6.0`. Stable and prerelease SemVer values are
 accepted.
 
+### Local validation before tagging
+
+The release workflows repeat these checks in CI, but running them locally makes
+failures easier to diagnose before creating a tag.
+
+For Envoy Utils, run the preparation command from the `envoy_utils` checkout.
+It updates the workspace version, sets the Envoy Core tag and exact crate
+version, regenerates `Cargo.lock`, and runs a workspace build check:
+
+```powershell
+python scripts/release_automation.py prepare `
+    --version 0.2.0 `
+    --envoy-tag v0.6.0
+```
+
+Then run the validator explicitly:
+
+```powershell
+python scripts/release_automation.py check `
+    --expect-version 0.2.0 `
+    --expect-envoy-tag v0.6.0
+```
+
+`Cargo.toml` is the source declaration. It should name the Envoy repository,
+its `v<version>` tag, and the matching exact crate version. `Cargo.lock` is the
+Cargo-generated resolution and records the exact commit behind that tag. Do
+not replace the tag URL with a GitHub `/commit/<hash>` URL or hand-edit the
+lockfile. A valid lockfile source looks like:
+
+```text
+git+https://github.com/gtvfx-envoy/envoy?tag=v0.6.0#<commit>
+```
+
+The Envoy Utils release version and Envoy Core dependency version are
+independent. For example, Envoy Utils `0.2.0` can be paired with Envoy Core
+`v0.6.0`.
+
+For Despatch, run its repository-local preparation workflow with the new
+Despatch version and Envoy tag, then run the repository's lint, test, and
+executable-build checks before tagging. The release workflow performs the same
+checks on Windows and uploads the executable only after a successful build.
 ### 1. Prepare Envoy
 
 Run **Prepare Release** in `envoy` with the new version. It opens or updates
@@ -187,8 +228,9 @@ for replay after a runner or external service failure.
 
 - A failed preparation workflow changes no release state; fix the cause and
   rerun it. The existing automation branch and draft pull request are updated.
-- A failed tag build does not publish a release because publication depends on
-  every platform build.
+- A failed tag build normally does not publish a release because publication depends on
+  every platform build. A later bookkeeping or issue-closing step can still fail
+  after publication, so check the GitHub Release and its assets before rerunning.
 - Do not move or reuse a published tag. Fix forward with a new patch release.
 - If an Envoy release is bad, do not repin downstream projects to it. Publish a
   corrected Envoy patch first.

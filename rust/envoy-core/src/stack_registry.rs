@@ -1,8 +1,8 @@
 //! Named stack registry for `envoy`.
 //!
-//! Manages versioned bundle-stack files stored in one or more *stack root*
+//! Discovers versioned bundle-stack files stored in one or more *stack root*
 //! directories. Each named stack lives in its own subdirectory and is
-//! versioned by timestamp, with a `latest` text file that always points to the
+//! versioned by timestamp, with a `latest.estack` symlink that points to the
 //! most recently published version.
 //!
 //! Directory layout under a stack root:
@@ -10,33 +10,31 @@
 //! ```text
 //! <stack-root>/
 //! └── studio/
-//!     ├── 2026-06-21T10-13-00.estack    ← versioned stack file
-//!     ├── 2026-06-22T09-00-00.estack    ← newer version
-//!     └── latest                      ← plain text: "2026-06-22T09-00-00.estack"
+//!     ├── 2026-06-21T10-13-00/
+//!     │   └── studio.estack
+//!     ├── 2026-06-22T09-00-00/
+//!     │   └── studio.estack
+//!     └── latest.estack -> 2026-06-22T09-00-00/studio.estack
 //! ```
 
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-use crate::error::{EnvoyError, Result};
 
 /// Environment variable containing the stack root directories.
 ///
 /// The value is semicolon-separated on Windows and colon-separated on Unix.
 pub const STACK_ROOTS_VAR: &str = "ENVOY_STACK_ROOTS";
 
-const LATEST_FILE: &str = "latest";
-const TIMESTAMP_FMT: &str = "%Y-%m-%dT%H-%M-%S";
+const LATEST_FILE: &str = "latest.estack";
 
 /// A single named stack entry discovered from `ENVOY_STACK_ROOTS`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NamedStackEntry {
     /// Named stack identifier.
     pub name: String,
-    /// Version string derived from the published filename stem.
+    /// Version string derived from the published directory name.
     pub version: String,
     /// Resolved path to the latest published stack file.
     pub path: PathBuf,
@@ -101,28 +99,6 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     normalized
 }
 
-fn read_latest(name_dir: &Path) -> Option<String> {
-    let latest_file = name_dir.join(LATEST_FILE);
-
-    if !latest_file.is_file() {
-        return None;
-    }
-
-    fs::read_to_string(&latest_file)
-        .ok()
-        .map(|contents| contents.trim().to_string())
-        .filter(|contents| !contents.is_empty())
-}
-
-fn write_latest(name_dir: &Path, filename: &str) -> Result<()> {
-    let latest_path = name_dir.join(LATEST_FILE);
-
-    fs::write(&latest_path, filename).map_err(|source| EnvoyError::Io {
-        path: latest_path,
-        source,
-    })
-}
-
 fn sorted_dir_paths(dir: &Path) -> Vec<PathBuf> {
     let Ok(read_dir) = fs::read_dir(dir) else {
         return Vec::new();
@@ -141,39 +117,27 @@ fn path_name(path: &Path) -> OsString {
         .map_or_else(OsString::new, OsStr::to_os_string)
 }
 
-fn current_timestamp() -> String {
-    format_system_time(SystemTime::now(), TIMESTAMP_FMT)
+fn published_stack(name_dir: &Path, name: &str, version_dir: &Path) -> Option<PathBuf> {
+    if !version_dir.is_dir() || version_dir.parent() != Some(name_dir) {
+        return None;
+    }
+
+    let stack_path = version_dir.join(format!("{name}.estack"));
+    stack_path.is_file().then_some(stack_path)
 }
 
-fn format_system_time(time: SystemTime, format: &str) -> String {
-    debug_assert_eq!(format, TIMESTAMP_FMT);
+fn latest_stack(name_dir: &Path, name: &str) -> Option<(String, PathBuf)> {
+    let name_dir = fs::canonicalize(name_dir).ok()?;
+    let stack_path = fs::canonicalize(name_dir.join(LATEST_FILE)).ok()?;
+    let version_dir = stack_path.parent()?;
+    if version_dir.parent() != Some(name_dir.as_path())
+        || stack_path.file_name() != Some(OsStr::new(&format!("{name}.estack")))
+    {
+        return None;
+    }
 
-    let duration = time.duration_since(UNIX_EPOCH).unwrap_or_default();
-    let total_seconds = duration.as_secs();
-    let days = i64::try_from(total_seconds / 86_400).unwrap_or(i64::MAX);
-    let seconds_of_day = total_seconds % 86_400;
-    let hour = seconds_of_day / 3_600;
-    let minute = (seconds_of_day % 3_600) / 60;
-    let second = seconds_of_day % 60;
-    let (year, month, day) = civil_from_days(days);
-
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}-{minute:02}-{second:02}")
-}
-
-fn civil_from_days(days_since_epoch: i64) -> (i32, u32, u32) {
-    let z = days_since_epoch + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let day_of_era = z - (era * 146_097);
-    let year_of_era =
-        (day_of_era - (day_of_era / 1_460) + (day_of_era / 36_524) - (day_of_era / 146_096)) / 365;
-    let year = year_of_era + (era * 400);
-    let day_of_year = day_of_era - ((365 * year_of_era) + (year_of_era / 4) - (year_of_era / 100));
-    let month_prime = ((5 * day_of_year) + 2) / 153;
-    let day = day_of_year - (((153 * month_prime) + 2) / 5) + 1;
-    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
-    let year = year + if month <= 2 { 1 } else { 0 };
-
-    (year as i32, month as u32, day as u32)
+    let version = version_dir.file_name()?.to_str()?.to_string();
+    Some((version, stack_path))
 }
 
 /// Return `true` if `value` looks like a named stack rather than a path.
@@ -204,7 +168,8 @@ pub fn is_stack_name(value: &str) -> bool {
 /// Resolve a named stack to the path of its latest version.
 ///
 /// Searches each directory in `ENVOY_STACK_ROOTS` for a subdirectory named
-/// `name` that contains a `latest` pointer file. Returns the first match.
+/// `name` that contains a valid `latest.estack` symlink. Returns the first
+/// match.
 pub fn resolve_named_stack(name: &str) -> Option<PathBuf> {
     for root in stack_roots() {
         let name_dir = root.join(name);
@@ -212,12 +177,7 @@ pub fn resolve_named_stack(name: &str) -> Option<PathBuf> {
             continue;
         }
 
-        let Some(latest_filename) = read_latest(&name_dir) else {
-            continue;
-        };
-
-        let stack_path = name_dir.join(latest_filename);
-        if stack_path.is_file() && stack_path.extension() == Some(OsStr::new("estack")) {
+        if let Some((_, stack_path)) = latest_stack(&name_dir, name) {
             return Some(stack_path);
         }
     }
@@ -252,19 +212,9 @@ pub fn list_named_stacks() -> Vec<NamedStackEntry> {
                 continue;
             }
 
-            let Some(latest_filename) = read_latest(&name_dir) else {
+            let Some((version, stack_path)) = latest_stack(&name_dir, &name) else {
                 continue;
             };
-
-            let stack_path = name_dir.join(&latest_filename);
-            if !stack_path.is_file() || stack_path.extension() != Some(OsStr::new("estack")) {
-                continue;
-            }
-
-            let version = latest_filename
-                .strip_suffix(".estack")
-                .unwrap_or(&latest_filename)
-                .to_string();
 
             entries.push(NamedStackEntry {
                 name: name.clone(),
@@ -291,20 +241,15 @@ pub fn list_stack_versions(name: &str) -> Vec<(String, PathBuf)> {
         }
 
         let mut versions = Vec::new();
-        for path in sorted_dir_paths(&name_dir) {
-            if !path.is_file() {
+        for version_dir in sorted_dir_paths(&name_dir) {
+            let Some(stack_path) = published_stack(&name_dir, name, &version_dir) else {
                 continue;
-            }
-
-            if path.extension() != Some(OsStr::new("estack")) {
-                continue;
-            }
-
-            let Some(stem) = path.file_stem() else {
+            };
+            let Some(version) = version_dir.file_name().and_then(OsStr::to_str) else {
                 continue;
             };
 
-            versions.push((stem.to_string_lossy().into_owned(), path));
+            versions.push((version.to_string(), stack_path));
         }
 
         versions.sort_by(|left, right| right.0.cmp(&left.0));
@@ -314,82 +259,17 @@ pub fn list_stack_versions(name: &str) -> Vec<(String, PathBuf)> {
     Vec::new()
 }
 
-/// Publish a new version of a named stack.
-///
-/// Copies `source_path` into `<stack_root>/<name>/<timestamp>.estack` and updates
-/// the `<stack_root>/<name>/latest` pointer file.
-///
-/// Returns a validation error if `source_path` does not exist or is not a file.
-pub fn publish_stack(
-    stack_root: &Path,
-    name: &str,
-    source_path: &Path,
-    dry_run: bool,
-) -> Result<PathBuf> {
-    if !source_path.is_file() {
-        return Err(EnvoyError::Validation(format!(
-            "Source stack file does not exist: {}",
-            source_path.display()
-        )));
-    }
-
-    let stack = crate::stack::Stack::new(source_path)?;
-    if stack.name() != name {
-        return Err(EnvoyError::Validation(format!(
-            "Stack name {:?} does not match registry slot {name:?}",
-            stack.name()
-        )));
-    }
-
-    let timestamp = current_timestamp();
-    let filename = format!("{timestamp}.estack");
-    let name_dir = stack_root.join(name);
-    let dest_path = name_dir.join(&filename);
-
-    if dry_run {
-        println!("Would publish: {}", source_path.display());
-        println!("          to: {}", dest_path.display());
-        println!(
-            "     (latest: {} → {filename})",
-            name_dir.join(LATEST_FILE).display()
-        );
-
-        return Ok(dest_path);
-    }
-
-    fs::create_dir_all(&name_dir).map_err(|source| EnvoyError::Io {
-        path: name_dir.clone(),
-        source,
-    })?;
-
-    let source_contents = fs::read_to_string(source_path).map_err(|source| EnvoyError::Io {
-        path: source_path.to_path_buf(),
-        source,
-    })?;
-
-    fs::write(&dest_path, source_contents).map_err(|source| EnvoyError::Io {
-        path: dest_path.clone(),
-        source,
-    })?;
-
-    write_latest(&name_dir, &filename)?;
-
-    Ok(dest_path)
-}
-
 #[cfg(test)]
 mod tests {
     use std::ffi::{OsStr, OsString};
     use std::fs;
     use std::path::Path;
-    use std::time::{Duration, UNIX_EPOCH};
 
     use tempfile::tempdir;
 
     use super::{
-        format_system_time, is_stack_name, list_named_stacks, list_stack_versions, publish_stack,
-        read_latest, resolve_named_stack, roots_from_str, EnvoyError, NamedStackEntry, LATEST_FILE,
-        STACK_ROOTS_VAR, TIMESTAMP_FMT,
+        is_stack_name, list_named_stacks, list_stack_versions, resolve_named_stack, roots_from_str,
+        NamedStackEntry, LATEST_FILE, STACK_ROOTS_VAR,
     };
 
     struct EnvVarGuard {
@@ -432,32 +312,35 @@ mod tests {
         test_fn()
     }
 
-    fn write_named_stack(root: &Path, name: &str, versions: &[(&str, &str)], latest: &str) {
+    #[cfg(unix)]
+    fn create_file_symlink(target: &Path, link: &Path) -> bool {
+        std::os::unix::fs::symlink(target, link).is_ok()
+    }
+
+    #[cfg(windows)]
+    fn create_file_symlink(target: &Path, link: &Path) -> bool {
+        std::os::windows::fs::symlink_file(target, link).is_ok()
+    }
+
+    fn write_named_stack(root: &Path, name: &str, versions: &[(&str, &str)], latest: &str) -> bool {
         let name_dir = root.join(name);
         fs::create_dir_all(&name_dir).expect("failed to create named stack directory");
 
         for (version, contents) in versions {
-            fs::write(name_dir.join(format!("{version}.estack")), contents)
-                .expect("failed to write versioned stack file");
+            let version_dir = name_dir.join(version);
+            fs::create_dir_all(&version_dir).expect("failed to create stack version directory");
+            fs::write(version_dir.join(format!("{name}.estack")), contents)
+                .expect("failed to write versioned stack");
         }
 
-        fs::write(name_dir.join(LATEST_FILE), latest).expect("failed to write latest file");
+        create_file_symlink(
+            &Path::new(latest).join(format!("{name}.estack")),
+            &name_dir.join(LATEST_FILE),
+        )
     }
 
     fn join_roots(roots: &[&Path]) -> OsString {
         std::env::join_paths(roots).expect("failed to join stack roots")
-    }
-
-    fn write_valid_stack(path: &Path, name: &str) -> String {
-        let bundle_path = path
-            .parent()
-            .expect("stack path should have a parent")
-            .join("bundle");
-        fs::create_dir_all(bundle_path.join(".envoy")).expect("failed to create bundle fixture");
-        let escaped_path = bundle_path.to_string_lossy().replace('\'', "''");
-        let contents = format!("name: {name}\nbundles:\n  - path: '{escaped_path}'\n");
-        fs::write(path, &contents).expect("failed to write source stack");
-        contents
     }
 
     #[test]
@@ -498,63 +381,25 @@ mod tests {
     }
 
     #[test]
-    fn format_system_time_matches_expected_utc_layout() {
-        assert_eq!(
-            format_system_time(UNIX_EPOCH, TIMESTAMP_FMT),
-            "1970-01-01T00-00-00"
-        );
-        assert_eq!(
-            format_system_time(UNIX_EPOCH + Duration::from_secs(86_401), TIMESTAMP_FMT),
-            "1970-01-02T00-00-01"
-        );
-    }
-
-    #[test]
-    fn publish_stack_writes_file_and_updates_latest() {
+    fn resolve_named_stack_follows_latest_symlink() {
         let temp = tempdir().expect("failed to create temp dir");
         let stack_root = temp.path().join("stack-root");
-        let source_path = temp.path().join("source.estack");
-        let source_contents = write_valid_stack(&source_path, "studio");
-
-        let published_path =
-            publish_stack(&stack_root, "studio", &source_path, false).expect("publish failed");
-
-        assert!(published_path.is_file());
-        assert_eq!(
-            fs::read_to_string(&published_path).expect("failed to read published Stack"),
-            source_contents
-        );
-
-        let latest_path = stack_root.join("studio").join(LATEST_FILE);
-        let latest_filename = fs::read_to_string(&latest_path)
-            .expect("failed to read latest pointer")
-            .trim()
-            .to_string();
-        let expected_filename = published_path
-            .file_name()
-            .expect("published path missing file name")
-            .to_string_lossy()
-            .into_owned();
-
-        assert_eq!(latest_filename, expected_filename);
-        assert_eq!(
-            read_latest(&stack_root.join("studio")),
-            Some(expected_filename)
-        );
-    }
-
-    #[test]
-    fn resolve_named_stack_finds_the_latest_published_version() {
-        let temp = tempdir().expect("failed to create temp dir");
-        let stack_root = temp.path().join("stack-root");
-        let source_path = temp.path().join("source.estack");
-        write_valid_stack(&source_path, "studio");
-
-        let published_path =
-            publish_stack(&stack_root, "studio", &source_path, false).expect("publish failed");
+        if !write_named_stack(
+            &stack_root,
+            "studio",
+            &[("2026-06-22T09-00-00", "{}")],
+            "2026-06-22T09-00-00",
+        ) {
+            return;
+        }
         let roots = join_roots(&[stack_root.as_path()]);
-        let expected_path =
-            fs::canonicalize(&published_path).expect("failed to canonicalize published path");
+        let expected_path = fs::canonicalize(
+            stack_root
+                .join("studio")
+                .join("2026-06-22T09-00-00")
+                .join("studio.estack"),
+        )
+        .expect("failed to canonicalize published path");
 
         with_stack_roots_env(Some(roots.as_os_str()), || {
             assert_eq!(resolve_named_stack("studio"), Some(expected_path));
@@ -569,24 +414,30 @@ mod tests {
         fs::create_dir_all(&root_a).expect("failed to create root-a");
         fs::create_dir_all(&root_b).expect("failed to create root-b");
 
-        write_named_stack(
+        if !write_named_stack(
             &root_a,
             "beta",
             &[("2026-06-21T10-13-00", "{\"root\":\"a\"}")],
-            "2026-06-21T10-13-00.estack",
-        );
-        write_named_stack(
+            "2026-06-21T10-13-00",
+        ) {
+            return;
+        }
+        if !write_named_stack(
             &root_b,
             "alpha",
             &[("2026-06-22T09-00-00", "{\"root\":\"b\"}")],
-            "2026-06-22T09-00-00.estack",
-        );
-        write_named_stack(
+            "2026-06-22T09-00-00",
+        ) {
+            return;
+        }
+        if !write_named_stack(
             &root_b,
             "beta",
             &[("2026-06-23T11-00-00", "{\"root\":\"b\"}")],
-            "2026-06-23T11-00-00.estack",
-        );
+            "2026-06-23T11-00-00",
+        ) {
+            return;
+        }
 
         let roots = join_roots(&[root_a.as_path(), root_b.as_path()]);
 
@@ -603,7 +454,8 @@ mod tests {
                         version: String::from("2026-06-22T09-00-00"),
                         path: expected_root_b
                             .join("alpha")
-                            .join("2026-06-22T09-00-00.estack"),
+                            .join("2026-06-22T09-00-00")
+                            .join("alpha.estack"),
                         stack_root: expected_root_b,
                     },
                     NamedStackEntry {
@@ -611,7 +463,8 @@ mod tests {
                         version: String::from("2026-06-21T10-13-00"),
                         path: expected_root_a
                             .join("beta")
-                            .join("2026-06-21T10-13-00.estack"),
+                            .join("2026-06-21T10-13-00")
+                            .join("beta.estack"),
                         stack_root: expected_root_a,
                     },
                 ]
@@ -624,19 +477,27 @@ mod tests {
         let temp = tempdir().expect("failed to create temp dir");
         let root_a = temp.path().join("root-a");
         let root_b = temp.path().join("root-b");
-        let studio_a = root_a.join("studio");
-        let studio_b = root_b.join("studio");
-        fs::create_dir_all(&studio_a).expect("failed to create studio dir in root-a");
-        fs::create_dir_all(&studio_b).expect("failed to create studio dir in root-b");
-
-        fs::write(studio_a.join("2026-06-21T10-13-00.estack"), "{}")
-            .expect("failed to write older Stack");
-        fs::write(studio_a.join("2026-06-22T09-00-00.estack"), "{}")
-            .expect("failed to write newer Stack");
-        fs::write(studio_a.join(LATEST_FILE), "2026-06-22T09-00-00.estack")
-            .expect("failed to write latest file");
-        fs::write(studio_b.join("2026-06-30T08-00-00.estack"), "{}")
-            .expect("failed to write ignored Stack");
+        if !write_named_stack(
+            &root_a,
+            "studio",
+            &[("2026-06-21T10-13-00", "{}"), ("2026-06-22T09-00-00", "{}")],
+            "2026-06-22T09-00-00",
+        ) {
+            return;
+        }
+        if !write_named_stack(
+            &root_b,
+            "studio",
+            &[("2026-06-30T08-00-00", "{}")],
+            "2026-06-30T08-00-00",
+        ) {
+            return;
+        }
+        fs::write(
+            root_a.join("studio").join("2026-07-01T00-00-00.estack"),
+            "{}",
+        )
+        .expect("failed to write ignored legacy stack");
 
         let roots = join_roots(&[root_a.as_path(), root_b.as_path()]);
 
@@ -651,49 +512,18 @@ mod tests {
                         String::from("2026-06-22T09-00-00"),
                         expected_root_a
                             .join("studio")
-                            .join("2026-06-22T09-00-00.estack"),
+                            .join("2026-06-22T09-00-00")
+                            .join("studio.estack"),
                     ),
                     (
                         String::from("2026-06-21T10-13-00"),
                         expected_root_a
                             .join("studio")
-                            .join("2026-06-21T10-13-00.estack"),
+                            .join("2026-06-21T10-13-00")
+                            .join("studio.estack"),
                     ),
                 ]
             );
         });
-    }
-
-    #[test]
-    fn publish_stack_dry_run_returns_destination_without_writing() {
-        let temp = tempdir().expect("failed to create temp dir");
-        let stack_root = temp.path().join("stack-root");
-        let source_path = temp.path().join("source.estack");
-        write_valid_stack(&source_path, "studio");
-
-        let dest_path =
-            publish_stack(&stack_root, "studio", &source_path, true).expect("dry run failed");
-        let name_dir = stack_root.join("studio");
-
-        assert_eq!(dest_path.parent(), Some(name_dir.as_path()));
-        assert_eq!(dest_path.extension(), Some(OsStr::new("estack")));
-        assert!(!name_dir.exists());
-    }
-
-    #[test]
-    fn publish_stack_returns_validation_error_for_missing_source_file() {
-        let temp = tempdir().expect("failed to create temp dir");
-        let missing_path = temp.path().join("missing.estack");
-
-        let error = publish_stack(temp.path(), "studio", &missing_path, false)
-            .expect_err("missing source file should fail");
-
-        match error {
-            EnvoyError::Validation(message) => {
-                assert!(message.contains("Source stack file does not exist"));
-                assert!(message.contains("missing.estack"));
-            }
-            other => panic!("expected validation error, got {other:?}"),
-        }
     }
 }

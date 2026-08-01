@@ -54,11 +54,11 @@ fn base_command() -> Command {
     command
 }
 
-fn write_stack(path: &Path, name: &str, namespace: &str, bundle: &Path) {
+fn write_stack(path: &Path, namespace: &str, bundle: &Path) {
     let bundle_path = bundle.to_string_lossy().replace('\'', "''");
     fs::write(
         path,
-        format!("name: {name}\nnamespace: {namespace}\nbundles:\n  - path: '{bundle_path}'\n"),
+        format!("namespace: {namespace}\nbundles:\n  - path: '{bundle_path}'\n"),
     )
     .expect("stack should be written");
 }
@@ -315,7 +315,7 @@ fn verbose_run_resolves_stack_team_config_and_warm_bundle_cache_together() {
     fs::write(cached_envoy_dir.join("team.json"), r#"{"name": "bfd"}"#)
         .expect("cached team.json should be written");
     let stack_path = scratch.path().join("studio.estack");
-    write_stack(&stack_path, "studio", "bfd", &bundle_root);
+    write_stack(&stack_path, "bfd", &bundle_root);
 
     let cache_root = scratch.path().join("bundle_cache");
     let mut cache = BundleCache::new(&cache_root).expect("bundle cache should open");
@@ -422,7 +422,7 @@ fn diagnose_without_command_summarizes_stack_bundles_and_team() {
     fs::write(envoy_dir.join("team.json"), r#"{"name": "bfd"}"#)
         .expect("team.json should be written");
     let stack_path = scratch.path().join("studio.estack");
-    write_stack(&stack_path, "studio", "bfd", &bundle_root);
+    write_stack(&stack_path, "bfd", &bundle_root);
 
     let cache_root = scratch.path().join("bundle_cache");
 

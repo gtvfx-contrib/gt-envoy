@@ -26,6 +26,7 @@ def testLegacyStackAndCacheNamesAreNotExported():
         "getCurrentBundleConfig",
         "getCurrentPipeline",
         "loadBundlesFromConfig",
+        "publishStack",
     )
 
     assert all(not hasattr(envoy, name) for name in legacy_names)
@@ -49,7 +50,6 @@ def test_stack_loading(tmp_path):
     stack_file.write_text(
         "\n".join(
             [
-                "name: studio",
                 "namespace: gt:tools",
                 "metadata:",
                 "  owner: runtime",

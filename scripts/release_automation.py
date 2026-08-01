@@ -19,7 +19,8 @@ SEMVER_PATTERN = re.compile(
 WORKSPACE_PACKAGE_NAMES = {"envoy-cli", "envoy-core", "envoy-py"}
 DIRECT_UTILS_APIS = (
     "envoy_core::discovery::{discover_bundles_auto, Bundle}",
-    "envoy_core::stack_registry::{publish_stack, STACK_ROOTS_VAR}",
+    "envoy_core::stack::Stack",
+    "envoy_core::stack_registry::STACK_ROOTS_VAR",
 )
 
 

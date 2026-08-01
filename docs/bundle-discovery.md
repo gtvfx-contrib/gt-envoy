@@ -98,8 +98,10 @@ After extracting a published zip under a bundle root, envoy discovers it automat
 
 Create a strict YAML `studio.estack` and pass it with `--stack` / `-s`:
 
+The `.estack` filename stem is the Stack name; the YAML document does not
+declare a separate name.
+
 ```yaml
-name: studio
 namespace: gt
 source:
   type: local
@@ -130,7 +132,6 @@ Each token is resolved against the current process environment at load time,
 making Stacks portable across machines or deployment roots:
 
 ```yaml
-name: production
 namespace: studio:production
 bundles:
   - path: ${STUDIO_ROOT}/envoy/0.2.1

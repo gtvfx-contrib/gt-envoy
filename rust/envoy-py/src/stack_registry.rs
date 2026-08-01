@@ -7,25 +7,23 @@
 //! `NamedStackEntry`, `STACK_ROOTS_VAR`, `USER_CONFIG_PATH`,
 //! `KNOWN_SETTINGS`, `getConfigRoot`, and the named-stack helper functions.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::exceptions::envoy_error_to_pyerr;
 use envoy_core::stack_registry::{
     is_stack_name as core_is_stack_name, list_named_stacks as core_list_named_stacks,
-    list_stack_versions as core_list_stack_versions, publish_stack as core_publish_stack,
+    list_stack_versions as core_list_stack_versions,
     resolve_named_stack as core_resolve_named_stack, NamedStackEntry as CoreNamedStackEntry,
     STACK_ROOTS_VAR,
 };
 use envoy_core::user_config::{config_root as core_config_root, known_settings, user_config_path};
-use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList, PyModule};
+use pyo3::types::{PyDict, PyList, PyModule};
 
 /// A single named stack entry discovered from ``ENVOY_STACK_ROOTS``.
 ///
 /// Attributes:
 ///     name: The stack name (for example ``'studio'``).
-///     version: The version timestamp string without the ``.estack`` suffix.
+///     version: The version timestamp directory name.
 ///     path: Absolute path to the resolved stack YAML file.
 ///     stack_root: Absolute path to the stack root directory that owns the
 ///         entry.
@@ -107,7 +105,7 @@ fn is_stack_name(value: &str) -> bool {
 /// Resolve a named stack to the path of its latest version.
 ///
 /// Searches each directory in ``ENVOY_STACK_ROOTS`` for a subdirectory named
-/// ``name`` that contains a ``latest`` pointer file. Returns the first match.
+/// ``name`` that contains a ``latest.estack`` symlink. Returns the first match.
 ///
 /// Args:
 ///     name: Stack name to resolve (for example ``'studio'``).
@@ -123,8 +121,9 @@ fn resolve_named_stack(py: Python<'_>, name: &str) -> PyResult<Option<PyObject>>
 
 /// List all available named stacks across all ``ENVOY_STACK_ROOTS`` roots.
 ///
-/// Scans each stack root for named subdirectories that have a ``latest``
-/// pointer file. Deduplicates by name — the first root that defines a given
+/// Scans each stack root for named subdirectories that have a
+/// ``latest.estack`` symlink. Deduplicates by name — the first root that
+/// defines a given
 /// name wins, matching :func:`resolveNamedStack`.
 ///
 /// Returns:
@@ -153,41 +152,6 @@ fn list_stack_versions(py: Python<'_>, name: &str) -> PyResult<Vec<(String, PyOb
         .collect()
 }
 
-/// Publish a new version of a named stack.
-///
-/// Copies ``source_path`` into ``<stack_root>/<name>/<timestamp>.estack`` and
-/// updates the ``<stack_root>/<name>/latest`` pointer file.
-///
-/// Args:
-///     stack_root: Root directory for stack storage.
-///     name: Stack name (for example ``'studio'``).
-///     source_path: Path to the source bundles-stack YAML file.
-///     dry_run: If ``True``, print what would happen and return without
-///         writing.
-///
-/// Returns:
-///     The absolute path of the newly written stack file.
-///
-/// Raises:
-///     ValidationError: If ``source_path`` does not exist or is not a file.
-///     EnvironmentBuildError: If the destination directory or files cannot be
-///         written.
-#[pyfunction(name = "publishStack", signature = (stack_root, name, source_path, *, dry_run=false))]
-fn publish_stack(
-    py: Python<'_>,
-    stack_root: &Bound<'_, PyAny>,
-    name: &str,
-    source_path: &Bound<'_, PyAny>,
-    dry_run: bool,
-) -> PyResult<PyObject> {
-    let stack_root = path_like_to_pathbuf(stack_root)?;
-    let source_path = path_like_to_pathbuf(source_path)?;
-    let published_path = core_publish_stack(&stack_root, name, &source_path, dry_run)
-        .map_err(envoy_error_to_pyerr)?;
-
-    path_to_py_path(py, &published_path)
-}
-
 /// Return Envoy's effective shared config root.
 ///
 /// The result is ``$ENVOY_CONFIG_ROOT`` when that environment variable is
@@ -214,7 +178,6 @@ pub fn register_stack_registry_bindings(py: Python<'_>, m: &Bound<'_, PyModule>)
     m.add_function(wrap_pyfunction!(resolve_named_stack, m)?)?;
     m.add_function(wrap_pyfunction!(list_named_stacks, m)?)?;
     m.add_function(wrap_pyfunction!(list_stack_versions, m)?)?;
-    m.add_function(wrap_pyfunction!(publish_stack, m)?)?;
     Ok(())
 }
 
@@ -234,20 +197,6 @@ fn build_known_settings_dict(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     }
 
     Ok(settings)
-}
-
-fn path_like_to_pathbuf(value: &Bound<'_, PyAny>) -> PyResult<PathBuf> {
-    let py = value.py();
-    let os = PyModule::import_bound(py, "os")?;
-    let path_value = os.getattr("fspath")?.call1((value,))?;
-    if let Ok(text) = path_value.extract::<String>() {
-        return Ok(PathBuf::from(text));
-    }
-    if let Ok(bytes) = path_value.extract::<Vec<u8>>() {
-        return Ok(PathBuf::from(String::from_utf8_lossy(&bytes).into_owned()));
-    }
-
-    Err(PyTypeError::new_err("Expected a path-like object"))
 }
 
 fn path_to_py_path(py: Python<'_>, path: &Path) -> PyResult<PyObject> {

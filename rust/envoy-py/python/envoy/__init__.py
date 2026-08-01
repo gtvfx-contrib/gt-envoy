@@ -72,7 +72,6 @@ isStackName = _native.isStackName
 resolveNamedStack = _native.resolveNamedStack
 listNamedStacks = _native.listNamedStacks
 listStackVersions = _native.listStackVersions
-publishStack = _native.publishStack
 
 getEnvironment = _native.getEnvironment
 getAllowlist = _native.getAllowlist
@@ -169,7 +168,6 @@ __all__ = [
     "resolveNamedStack",
     "listNamedStacks",
     "listStackVersions",
-    "publishStack",
     "findCommandsFile",
     "getEnvironment",
     "getAllowlist",

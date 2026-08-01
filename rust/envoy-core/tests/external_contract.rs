@@ -3,7 +3,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 
 use envoy_core::discovery::{discover_bundles_auto, Bundle};
-use envoy_core::stack_registry::publish_stack;
+use envoy_core::stack::Stack;
 use tempfile::tempdir;
 
 struct EnvVarGuard {
@@ -49,16 +49,9 @@ fn supports_envoy_utils_discovery_and_stack_contract() {
     assert_eq!(bundle.bndlid(), "gt:contract_fixture");
 
     let source_stack = temp.path().join("contract.estack");
-    let stack_contents = format!(
-        "name: contract\nbundles:\n  - path: '{}'\n",
-        bundle_path.display()
-    );
+    let stack_contents = format!("bundles:\n  - path: '{}'\n", bundle_path.display());
     fs::write(&source_stack, stack_contents).expect("failed to write stack");
 
-    let stack_root = temp.path().join("stacks");
-    let published = publish_stack(&stack_root, "contract", &source_stack, false)
-        .expect("stack publish should succeed");
-
-    assert!(published.is_file());
-    assert!(stack_root.join("contract").join("latest").is_file());
+    let stack = Stack::new(&source_stack).expect("stack should load");
+    assert_eq!(stack.name(), "contract");
 }

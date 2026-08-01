@@ -136,7 +136,7 @@ Context lookup is not performed when no context is supplied.
 ## Named stacks
 
 A named Stack (for example, `studio`) is a slot stored under
-`ENVOY_STACK_ROOTS` with versioned history and a `latest` pointer.  This lets
+`ENVOY_STACK_ROOTS` with versioned history and a `latest.estack` symlink. This lets
 teams publish and update a shared runtime environment without distributing a
 specific file path.
 
@@ -159,54 +159,57 @@ colon-separated on Unix).  Envoy scans each root for named stack slots.
 === "PowerShell"
 
     ```powershell
-    $env:ENVOY_STACK_ROOTS = "R:/studio/envoy/stacks"
+    $env:ENVOY_STACK_ROOTS = "R:/studio/envoy/stack"
     ```
 
 === "cmd"
 
     ```batch
-    set ENVOY_STACK_ROOTS=R:/studio/envoy/stacks
+    set ENVOY_STACK_ROOTS=R:/studio/envoy/stack
     ```
 
 === "Unix/macOS"
 
     ```bash
-    export ENVOY_STACK_ROOTS=/studio/envoy/stacks
+    export ENVOY_STACK_ROOTS=/studio/envoy/stack
     ```
 
 ### Named Stack directory structure
 
 ```
-R:\studio\envoy\stacks\
+R:\studio\envoy\stack\
 └── studio\
-    ├── 2026-06-21T10-13-00.estack   ← versioned Stack
-    ├── 2026-06-22T09-00-00.estack   ← newer version
-    └── latest                       ← text: "2026-06-22T09-00-00.estack"
+    ├── 2026-06-21T10-13-00\
+    │   └── studio.estack            ← versioned Stack
+    ├── 2026-06-22T09-00-00\
+    │   └── studio.estack            ← newer version
+    └── latest.estack                → 2026-06-22T09-00-00\studio.estack
 ```
 
-Each version is a timestamped copy of an `.estack` YAML file. The `latest`
-file contains just the filename of the most recently published version.
+Each version is a timestamped directory containing an `.estack` file named for
+the stack. `latest.estack` is a relative symlink to the most recently published
+version.
 
 ### Publishing a named Stack
 
 Use
 [`engit publish stack`](https://github.com/gtvfx-envoy/envoy_utils/blob/main/docs/cli-reference/engit.md#engit-publish-stack)
-from Envoy Utils to publish a new version and update `latest`:
+from Envoy Utils to publish a new version and update `latest.estack`:
 
 ```powershell
-engit publish stack studio R:/my/studio.estack
+engit publish stack V:/repo/gtvfx-envoy/stacks/studio/studio.estack
 ```
 
 With an explicit stack root (instead of using `ENVOY_STACK_PUBLISH_ROOT`):
 
 ```powershell
-engit publish stack studio R:/my/studio.estack --output R:/studio/envoy/stacks
+engit publish stack V:/repo/gtvfx-envoy/stacks/studio/studio.estack --output R:/studio/envoy/stack
 ```
 
 Dry-run to preview without writing:
 
 ```powershell
-engit publish stack studio R:/my/studio.estack --dry-run
+engit publish stack V:/repo/gtvfx-envoy/stacks/studio/studio.estack --dry-run
 ```
 
 ### Listing available named stacks
@@ -289,7 +292,7 @@ stack = envoy.Stack.from_name('studio')
 print(stack.name)              # 'studio'
 print(stack.namespace)         # 'gt'
 print(stack.registry_version)  # '2026-06-21T10-13-00'
-print(stack.path)              # /studio/envoy/stacks/studio/2026-...estack
+print(stack.path)              # /studio/envoy/stack/studio/2026-.../studio.estack
 print(stack.commands)          # merged command list
 
 # From the current CLI-equivalent selection sources
@@ -323,7 +326,7 @@ envoy.isStackName('/path/to/f.estack')     # False
 
 # Resolve a name to the latest published path
 path = envoy.resolveNamedStack('studio')
-print(path)  # Path('/studio/envoy/stacks/studio/2026-06-22T09-00-00.estack')
+print(path)  # Path('/studio/envoy/stack/studio/2026-06-22T09-00-00/studio.estack')
 
 # List all available named Stacks
 for entry in envoy.listNamedStacks():
@@ -332,14 +335,6 @@ for entry in envoy.listNamedStacks():
 # All published versions for one name (newest first)
 for version, path in envoy.listStackVersions('studio'):
     print(version, path)
-
-# Publish a new version programmatically
-from pathlib import Path
-envoy.publishStack(
-    stack_root=Path('R:/studio/envoy/stacks'),
-    name='studio',
-    source_path=Path('R:/my/studio.estack'),
-)
 ```
 
 The Stack root environment variable name is available as

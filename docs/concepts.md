@@ -166,7 +166,7 @@ Envoy discovers and resolves the first `team.json` found across discovered bundl
 
 A Stack is a strict YAML `.estack` file describing one isolated, ordered
 runtime bundle collection. Select one directly with `--stack`, `ENVOY_STACK`,
-or the `stack` user setting.
+or the `stack` user setting. Its name is derived from its filename stem.
 
 Named, versioned stacks live under `ENVOY_STACK_ROOTS`. When
 `ENVOY_STACK_CONTEXT=team:project:feature` is set, envoy tries stack
@@ -174,7 +174,6 @@ namespaces in this order: `team:project:feature`, `team:project`, `team`, and
 finally `gt`. Multiple stacks at the same matching level are an error.
 
 ```yaml
-name: build
 namespace: team:project
 metadata:
   owner: build-tools
