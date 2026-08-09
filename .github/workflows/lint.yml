@@ -145,10 +145,12 @@ jobs:
       - name: Ensure Git Bash is on PATH
         shell: pwsh
         run: |
-          $paths = @('C:\Program Files\Git\cmd', 'C:\Program Files\Git\bin', 'C:\Program Files\Git\usr\bin') |
-              Where-Object { Test-Path $_ }
-          if (-not $paths) { throw 'Git Bash is required by the Rust toolchain action.' }
-          foreach ($entry in $paths) { Add-Content -Path $env:GITHUB_PATH -Value $entry }
+          $git_bash_directory = 'C:\Program Files\Git\bin'
+          $git_bash_path = Join-Path $git_bash_directory 'bash.exe'
+          if (-not (Test-Path -LiteralPath $git_bash_path)) {
+              throw 'Git Bash is required by the Rust toolchain action.'
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $git_bash_directory
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
