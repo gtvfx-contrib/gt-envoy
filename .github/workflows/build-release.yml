@@ -36,7 +36,7 @@ jobs:
       - name: Ensure Git Bash is on PATH
         shell: pwsh
         run: |
-          $paths = @('C:\Program Files\Git\bin', 'C:\Program Files\Git\usr\bin') |
+          $paths = @('C:\Program Files\Git\cmd', 'C:\Program Files\Git\bin', 'C:\Program Files\Git\usr\bin') |
               Where-Object { Test-Path $_ }
           if (-not $paths) { throw 'Git Bash is required by the Rust toolchain action.' }
           foreach ($entry in $paths) { Add-Content -Path $env:GITHUB_PATH -Value $entry }
