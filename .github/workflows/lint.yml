@@ -14,7 +14,7 @@ permissions:
 jobs:
   ruff:
     name: Ruff (lint + format check)
-    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+    runs-on: ["self-hosted", "Linux", "X64"]
 
     steps:
       - name: Checkout
@@ -36,7 +36,7 @@ jobs:
 
   rust:
     name: Rust (fmt + clippy + test)
-    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+    runs-on: ["self-hosted", "Linux", "X64"]
 
     steps:
       - name: Checkout
@@ -69,7 +69,7 @@ jobs:
 
   rust-envoy-py:
     name: Rust envoy-py (fmt + clippy + test, PyO3)
-    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+    runs-on: ["self-hosted", "Linux", "X64"]
 
     steps:
       - name: Checkout
@@ -131,7 +131,7 @@ jobs:
 
   windows:
     name: Windows x64 tests
-    runs-on: ["self-hosted", "Windows", "X64", "synology"]
+    runs-on: ["self-hosted", "Windows", "X64"]
 
     steps:
       - name: Checkout
@@ -264,7 +264,7 @@ jobs:
 
   changes:
     name: Detect macOS-relevant changes
-    runs-on: ["self-hosted", "Linux", "X64", "synology"]
+    runs-on: ["self-hosted", "Linux", "X64"]
     outputs:
       code: ${{ steps.filter.outputs.code }}
 
