@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 use envoy_core::bundle_cache::{open_default_bundle_cache, resolve_bundle_cache_dir};
 use envoy_core::commands::{find_commands_file, CommandDefinition, CommandRegistry};
@@ -18,6 +19,7 @@ use envoy_core::stack::{Stack, DEFAULT_STACK_MAX_DEPTH, DEFAULT_STACK_NAMESPACE}
 use envoy_core::stack_registry::{
     is_stack_name, list_named_stacks, resolve_named_stack, STACK_ROOTS_VAR,
 };
+use envoy_core::telemetry::{CommandKind, CommandRunContext, ErrorCategory};
 use envoy_core::user_config::{known_settings, UserConfig};
 use envoy_core::wrapper::ApplicationWrapper;
 
@@ -31,12 +33,137 @@ struct ExecutionOptions<'a> {
     inherit_env: bool,
     env_allowlist: Option<&'a [String]>,
     env_override: Option<&'a str>,
+    /// Complete original envoy argv, for the `envoy.command.run` record.
+    raw_argv: &'a [String],
+    /// When this invocation started, for the `envoy.command.run` record.
+    invocation_start: SystemTime,
+    /// Resolved stack, if any, for the `envoy.command.run` record.
+    stack: Option<&'a Stack>,
 }
 
 struct LoadedRegistry {
     registry: CommandRegistry,
     bundles: Option<Vec<BundleInfo>>,
     stack: Option<Stack>,
+}
+
+/// Builds and records one `envoy.command.run` telemetry event for a single
+/// envoy-cli early-return branch, then returns the branch's own exit code
+/// unchanged -- so every branch (built-ins, resolution failures, and the
+/// managed-command path) gets instrumented the same way, not just the
+/// managed-command success path.
+///
+/// Best-effort by construction: [`envoy_core::telemetry::record_command_run`]
+/// never panics and never affects the returned exit code.
+struct CommandRunEmission<'a> {
+    kind: CommandKind,
+    raw_argv: &'a [String],
+    invocation_start: SystemTime,
+    stack: Option<&'a Stack>,
+    bundles: Option<&'a [BundleInfo]>,
+    command_name: Option<&'a str>,
+    command_argv: Option<Vec<String>>,
+    bundle_id: Option<String>,
+    error_category: Option<ErrorCategory>,
+    bundle_env: Option<&'a HashMap<String, String>>,
+}
+
+impl<'a> CommandRunEmission<'a> {
+    fn new(kind: CommandKind, raw_argv: &'a [String], invocation_start: SystemTime) -> Self {
+        Self {
+            kind,
+            raw_argv,
+            invocation_start,
+            stack: None,
+            bundles: None,
+            command_name: None,
+            command_argv: None,
+            bundle_id: None,
+            error_category: None,
+            bundle_env: None,
+        }
+    }
+
+    fn with_stack(mut self, stack: Option<&'a Stack>) -> Self {
+        self.stack = stack;
+        self
+    }
+
+    fn with_bundles(mut self, bundles: Option<&'a [BundleInfo]>) -> Self {
+        self.bundles = bundles;
+        self
+    }
+
+    fn with_command_name(mut self, command_name: &'a str) -> Self {
+        self.command_name = Some(command_name);
+        self
+    }
+
+    fn with_command_argv(mut self, command_argv: Vec<String>) -> Self {
+        self.command_argv = Some(command_argv);
+        self
+    }
+
+    fn with_bundle_id(mut self, bundle_id: Option<String>) -> Self {
+        self.bundle_id = bundle_id;
+        self
+    }
+
+    fn with_error_category(mut self, error_category: ErrorCategory) -> Self {
+        self.error_category = Some(error_category);
+        self
+    }
+
+    fn with_bundle_env(mut self, bundle_env: Option<&'a HashMap<String, String>>) -> Self {
+        self.bundle_env = bundle_env;
+        self
+    }
+
+    /// Assemble the context, record it, and return `exit_code` unchanged.
+    fn emit_and_return(self, exit_code: i32) -> i32 {
+        let (stack_name, stack_namespace, stack_registry_version) = match self.stack {
+            Some(stack) => (
+                Some(stack.name().to_string()),
+                Some(stack.namespace().to_string()),
+                stack.registry_version().map(str::to_string),
+            ),
+            None => (None, None, None),
+        };
+        let team = resolve_team_config_for_bundles(self.bundles).map(|team| team.name.clone());
+        let end_time = SystemTime::now();
+        let duration_ms = end_time
+            .duration_since(self.invocation_start)
+            .ok()
+            .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok());
+
+        let context = CommandRunContext {
+            kind: self.kind,
+            command_name: self.command_name.map(str::to_string),
+            stack_name,
+            stack_namespace,
+            stack_registry_version,
+            team,
+            bundle_id: self.bundle_id,
+            envoy_version: Some(env!("ENVOY_VERSION").to_string()),
+            installation_id: None,
+            success: Some(exit_code == 0),
+            exit_code: Some(exit_code),
+            duration_ms,
+            cli_argv: self.raw_argv.to_vec(),
+            command_argv: self.command_argv.unwrap_or_default(),
+            extra_redact_args: Vec::new(),
+            error_category: self.error_category,
+        };
+
+        envoy_core::telemetry::record_command_run(
+            context,
+            self.invocation_start,
+            end_time,
+            self.bundle_env,
+        );
+
+        exit_code
+    }
 }
 
 pub(crate) fn run(argv: &[String]) -> i32 {
@@ -50,7 +177,7 @@ pub(crate) fn run(argv: &[String]) -> i32 {
         }
     };
 
-    run_cli(cli)
+    run_cli(cli, argv)
 }
 
 /// Install a default `tracing` subscriber writing to stderr, honoring
@@ -71,21 +198,31 @@ fn init_tracing() {
         .try_init();
 }
 
-fn run_cli(cli: Cli) -> i32 {
+fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
+    let invocation_start = SystemTime::now();
+
     if cli.list_configs {
-        return handle_list_configs();
+        let exit_code = handle_list_configs();
+        return CommandRunEmission::new(CommandKind::ListConfigs, raw_argv, invocation_start)
+            .emit_and_return(exit_code);
     }
 
     if let Some(raw) = cli.set_config.as_deref() {
-        return handle_set_config(raw);
+        let exit_code = handle_set_config(raw);
+        return CommandRunEmission::new(CommandKind::SetConfig, raw_argv, invocation_start)
+            .emit_and_return(exit_code);
     }
 
     if cli.get_config.is_some() {
-        return handle_get_config(cli.get_config.as_deref());
+        let exit_code = handle_get_config(cli.get_config.as_deref());
+        return CommandRunEmission::new(CommandKind::GetConfig, raw_argv, invocation_start)
+            .emit_and_return(exit_code);
     }
 
     if cli.docs {
-        return open_docs();
+        let exit_code = open_docs();
+        return CommandRunEmission::new(CommandKind::Docs, raw_argv, invocation_start)
+            .emit_and_return(exit_code);
     }
 
     let user_cfg = UserConfig::load(None);
@@ -98,22 +235,43 @@ fn run_cli(cli: Cli) -> i32 {
         stack,
     } = match load_registry_for_cli(&cli, verbose) {
         Ok(result) => result,
-        Err(code) => return code,
+        Err(code) => {
+            return CommandRunEmission::new(
+                CommandKind::ResolutionFailure,
+                raw_argv,
+                invocation_start,
+            )
+            .with_error_category(ErrorCategory::ResolutionFailure)
+            .emit_and_return(code)
+        }
     };
 
     if registry.is_empty()
         && !raw_path_without_env_override(cli.command.as_deref(), cli.env.as_deref())
     {
         eprintln!("Error: No commands loaded");
-        return 1;
+        return CommandRunEmission::new(CommandKind::ResolutionFailure, raw_argv, invocation_start)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .with_error_category(ErrorCategory::CommandNotFound)
+            .emit_and_return(1);
     }
 
     if cli.list {
-        return list_commands(&registry);
+        let exit_code = list_commands(&registry);
+        return CommandRunEmission::new(CommandKind::List, raw_argv, invocation_start)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .emit_and_return(exit_code);
     }
 
     if let Some(command_name) = cli.info.as_deref() {
-        return show_command_info(&registry, command_name);
+        let exit_code = show_command_info(&registry, command_name);
+        return CommandRunEmission::new(CommandKind::Info, raw_argv, invocation_start)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .with_command_name(command_name)
+            .emit_and_return(exit_code);
     }
 
     let env_allowlist = parse_allowlist_env();
@@ -124,34 +282,52 @@ fn run_cli(cli: Cli) -> i32 {
     }
 
     if let Some(command_name) = cli.diagnose.as_deref() {
-        return run_diagnose(
+        let filtered_command_name = Some(command_name).filter(|name| !name.is_empty());
+        let exit_code = run_diagnose(
             &registry,
             bundles.as_deref(),
             stack.as_ref(),
-            Some(command_name).filter(|name| !name.is_empty()),
+            filtered_command_name,
             cli.inherit_env,
             env_allowlist.as_deref(),
         );
+        let mut emission =
+            CommandRunEmission::new(CommandKind::Diagnose, raw_argv, invocation_start)
+                .with_stack(stack.as_ref())
+                .with_bundles(bundles.as_deref());
+        if let Some(command_name) = filtered_command_name {
+            emission = emission.with_command_name(command_name);
+        }
+        return emission.emit_and_return(exit_code);
     }
 
     if let Some(command_name) = cli.which.as_deref() {
-        return show_which(
+        let exit_code = show_which(
             &registry,
             command_name,
             bundles.as_deref(),
             cli.inherit_env,
             env_allowlist.as_deref(),
         );
+        return CommandRunEmission::new(CommandKind::Which, raw_argv, invocation_start)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .with_command_name(command_name)
+            .emit_and_return(exit_code);
     }
 
     if let Some(trace_var) = cli.trace.as_deref() {
         let Some(command_name) = cli.command.as_deref() else {
             eprintln!("Error: --trace requires a COMMAND argument");
             eprintln!("Example: envoy --trace UE_PYTHONPATH unreal");
-            return 1;
+            return CommandRunEmission::new(CommandKind::Trace, raw_argv, invocation_start)
+                .with_stack(stack.as_ref())
+                .with_bundles(bundles.as_deref())
+                .with_error_category(ErrorCategory::Validation)
+                .emit_and_return(1);
         };
 
-        return trace_command(
+        let exit_code = trace_command(
             &registry,
             command_name,
             trace_var,
@@ -160,18 +336,28 @@ fn run_cli(cli: Cli) -> i32 {
             env_allowlist.as_deref(),
             cli.env.as_deref(),
         );
+        return CommandRunEmission::new(CommandKind::Trace, raw_argv, invocation_start)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .with_command_name(command_name)
+            .emit_and_return(exit_code);
     }
 
     let Some(command_name) = cli.command.as_deref() else {
         if let Err(error) = args::print_help() {
             eprintln!("Error: {error}");
-            return 1;
+            return CommandRunEmission::new(CommandKind::Help, raw_argv, invocation_start)
+                .with_stack(stack.as_ref())
+                .with_bundles(bundles.as_deref())
+                .emit_and_return(1);
         }
-        return 0;
+        return CommandRunEmission::new(CommandKind::Help, raw_argv, invocation_start)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .emit_and_return(0);
     };
 
-    let start = std::time::Instant::now();
-    let exit_code = run_command(
+    run_command(
         &registry,
         command_name,
         &cli.args,
@@ -181,31 +367,11 @@ fn run_cli(cli: Cli) -> i32 {
             inherit_env: cli.inherit_env,
             env_allowlist: env_allowlist.as_deref(),
             env_override: cli.env.as_deref(),
+            raw_argv,
+            invocation_start,
+            stack: stack.as_ref(),
         },
-    );
-
-    // Best-effort usage tracking: a no-op unless a caller has opted in via
-    // `envoy.enable_telemetry(...)`. Recording this unconditionally (rather
-    // than only when telemetry happens to already be enabled) means any
-    // future in-process caller that enables telemetry before invoking the
-    // CLI dispatch (e.g. via `envoy.cli_main`) gets `command_run` events
-    // without envoy-cli needing to know that decision was made.
-    let mut attributes = std::collections::HashMap::new();
-    attributes.insert(
-        "command".to_string(),
-        envoy_core::telemetry::TelemetryValue::Str(command_name.to_string()),
-    );
-    attributes.insert(
-        "duration_ms".to_string(),
-        envoy_core::telemetry::TelemetryValue::Int(start.elapsed().as_millis() as i64),
-    );
-    attributes.insert(
-        "success".to_string(),
-        envoy_core::telemetry::TelemetryValue::Bool(exit_code == 0),
-    );
-    envoy_core::telemetry::track("command_run", attributes);
-
-    exit_code
+    )
 }
 
 fn load_registry_for_cli(cli: &Cli, verbose: bool) -> Result<LoadedRegistry, i32> {
@@ -492,13 +658,33 @@ fn run_diagnose(
     println!();
 
     println!(
-        "Telemetry: {}",
+        "Telemetry (explicit Python API opt-in): {}",
         if envoy_core::telemetry::is_enabled() {
             "enabled"
         } else {
             "disabled (default; call envoy.enable_telemetry(...) to opt in)"
         }
     );
+    let spool_depth = envoy_core::telemetry::spool::TelemetrySpool::new().depth();
+    match envoy_core::telemetry::resolve_telemetry_config(None) {
+        Some(config) => {
+            println!("Telemetry (automatic envoy.command.run export): enabled");
+            println!("  transport:            {}", config.transport.as_str());
+            println!("  endpoint:             {}", config.sanitized_endpoint());
+            println!("  configuration source: {}", config.source.as_str());
+            println!(
+                "  schema version:       {}",
+                envoy_core::telemetry::schema::SCHEMA_VERSION
+            );
+        }
+        None => {
+            println!(
+                "Telemetry (automatic envoy.command.run export): disabled (no \
+ENVOY_TELEMETRY_ENDPOINT / OTEL_EXPORTER_OTLP_* resolved, or ENVOY_TELEMETRY_ENABLED=false)"
+            );
+        }
+    }
+    println!("  local spool depth:    {spool_depth}");
     println!();
 
     if let Some(bundles) = bundles.filter(|values| !values.is_empty()) {
@@ -738,18 +924,33 @@ fn run_command(
     options: ExecutionOptions<'_>,
 ) -> i32 {
     let is_raw = is_raw_path(command_name);
+    let kind = if is_raw {
+        CommandKind::RawExecutable
+    } else {
+        CommandKind::ManagedCommand
+    };
+    let emission = || {
+        CommandRunEmission::new(kind, options.raw_argv, options.invocation_start)
+            .with_stack(options.stack)
+            .with_bundles(options.bundles)
+            .with_command_name(command_name)
+    };
 
     if !is_raw && registry.get(command_name).is_none() {
         eprintln!("Error: Command '{command_name}' not found");
         eprintln!("Run 'envoy --list' to see available commands");
-        return 1;
+        return emission()
+            .with_error_category(ErrorCategory::CommandNotFound)
+            .emit_and_return(1);
     }
 
     if let Some(env_override) = options.env_override {
         if registry.get(env_override).is_none() {
             eprintln!("Error: Environment override command '{env_override}' not found");
             eprintln!("Run 'envoy --list' to see available commands");
-            return 1;
+            return emission()
+                .with_error_category(ErrorCategory::CommandNotFound)
+                .emit_and_return(1);
         }
     }
 
@@ -782,7 +983,9 @@ fn run_command(
             Ok(result) => result,
             Err(error) => {
                 eprintln!("Error: {}", display_envoy_error(&error));
-                return 1;
+                return emission()
+                    .with_error_category(ErrorCategory::EnvironmentBuildFailure)
+                    .emit_and_return(1);
             }
         }
     };
@@ -800,17 +1003,26 @@ fn run_command(
         (executable, full_args)
     };
 
+    let mut subprocess_argv = vec![executable.clone()];
+    subprocess_argv.extend(full_args.iter().cloned());
+    let bundle_id = command.bundle.clone();
+
     if let Err(error) = ProcessExecutor::resolve_executable(
         Path::new(&executable),
         env_map.get("PATH").map(String::as_str),
     ) {
         eprintln!("Error: {}", display_envoy_error(&error));
-        return 1;
+        return emission()
+            .with_command_argv(subprocess_argv)
+            .with_bundle_id(bundle_id)
+            .with_bundle_env(Some(&env_map))
+            .with_error_category(ErrorCategory::ExecutionFailure)
+            .emit_and_return(1);
     }
 
     let mut config = WrapperConfig::new(executable);
     config.args = full_args;
-    config.env = Some(env_map);
+    config.env = Some(env_map.clone());
     config.inherit_env = false;
     config.capture_output = false;
     config.stream_output = false;
@@ -818,14 +1030,23 @@ fn run_command(
     config.raise_on_error = false;
 
     let mut wrapper = ApplicationWrapper::new(config);
-    match wrapper.run() {
-        Ok(result) if result.return_code == -2 => 130,
-        Ok(result) => result.return_code.try_into().unwrap_or(1),
+    let (exit_code, error_category) = match wrapper.run() {
+        Ok(result) if result.return_code == -2 => (130, None),
+        Ok(result) => (result.return_code.try_into().unwrap_or(1), None),
         Err(error) => {
             eprintln!("Error: {}", display_envoy_error(&error));
-            1
+            (1, Some(ErrorCategory::ExecutionFailure))
         }
+    };
+
+    let mut emission = emission()
+        .with_command_argv(subprocess_argv)
+        .with_bundle_id(bundle_id)
+        .with_bundle_env(Some(&env_map));
+    if let Some(error_category) = error_category {
+        emission = emission.with_error_category(error_category);
     }
+    emission.emit_and_return(exit_code)
 }
 
 fn trace_command(
