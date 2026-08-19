@@ -19,10 +19,16 @@ it applies fleet-wide automatically:
   and written atomically under that path -- no listening service required
   there.
 - Standard `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT`
-  / `OTEL_EXPORTER_OTLP_HEADERS` / `OTEL_EXPORTER_OTLP_TIMEOUT` /
-  `OTEL_SERVICE_NAME` / `OTEL_RESOURCE_ATTRIBUTES` are honored as a
-  fallback when `ENVOY_TELEMETRY_ENDPOINT` is unset, for teams already
-  standardized on plain OTel env vars.
+  are honored as an **endpoint fallback**, used only when
+  `ENVOY_TELEMETRY_ENDPOINT` itself is unset.
+- `OTEL_EXPORTER_OTLP_HEADERS` / `OTEL_EXPORTER_OTLP_TIMEOUT` /
+  `OTEL_SERVICE_NAME` / `OTEL_RESOURCE_ATTRIBUTES`, by contrast, always
+  apply whenever they're set -- regardless of whether
+  `ENVOY_TELEMETRY_ENDPOINT` or the endpoint fallback resolved the
+  destination. In particular, `OTEL_EXPORTER_OTLP_HEADERS` is how a
+  shared Collector bearer token reaches the exporter even when
+  `ENVOY_TELEMETRY_ENDPOINT` (not an `OTEL_*` var) is what selected the
+  destination.
 - `ENVOY_TELEMETRY_ENABLED=false` always disables collection, regardless
   of any other setting -- your own opt-out always wins over a
   studio-wide default.

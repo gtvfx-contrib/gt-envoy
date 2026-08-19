@@ -24,318 +24,133 @@ Generally, we follow the **PEP 8 style guide** with the following specific modif
 
 ### Never Override Python Built-ins
 
-**CRITICAL RULE:** Never use variable names that shadow Python built-in functions or types. This causes bugs and makes code confusing.
-
-**Common built-ins to avoid as variable names:**
+**CRITICAL RULE:** Never use variable names that shadow Python built-in functions or types (`id`, `type`, `list`, `dict`, `set`, `str`, `input`, `open`, `filter`, `dir`, `exit`, `format`, `hash`, `len`, and similar). Shadowing prevents using that built-in later in the same scope and confuses readers who expect built-in behavior.
 
 ```python
-# Built-in functions - NEVER use as variable names:
-id, type, list, dict, set, str, int, float, bool, tuple, range, object
-input, open, file, filter, map, next, sum, min, max, abs, all, any
-bytes, chr, ord, dir, exit, help, quit, print, format, hash, len
-pow, round, sorted, zip, vars, repr, eval, exec, compile
-globals, locals, iter, reversed, slice, super, property
-staticmethod, classmethod
-
-# BAD - Overrides built-ins:
+# BAD - overrides built-ins
 type = "Window"
 dir = "C:/temp"
-exit = exit_node
-id = node.id
-list = []
 filter = "*.max"
 
-# GOOD - Use descriptive names instead:
+# GOOD - descriptive names instead
 asset_type = "Window"
 directory = "C:/temp"
-save_directory = mxs.maxFilePath
-exit_point = exit_node
-node_id = node.id
-items = []
 file_filter = "*.max"
 ```
 
-**Why this matters:**
-- Shadowing built-ins prevents you from using those functions later in the same scope
-- Makes debugging extremely difficult
-- Can cause subtle bugs that are hard to track down
-- Confuses code readers who expect built-in behavior
-
-**Always check:** Before using short, common variable names, verify they're not Python built-ins by checking if they're syntax-highlighted differently in your editor.
-
 ### Line Length
 
-Follow these line length guidelines:
-
-- **Target**: Keep lines under **80 characters** when possible
-- **Maximum**: Hard limit of **100 characters** per line
-- **Line Breaking Rule**: Only break lines when they approach or exceed 100 characters. Do NOT break lines unnecessarily if they fit comfortably within the limits
-- **Long lines**: Break long lines using parentheses, backslashes, or logical break points
-
-```python
-# Preferred - under 80 characters (keep on single line)
-result = someFunction(arg1, arg2, arg3)
-
-# Acceptable - under 100 characters (keep on single line)
-button.clicked.connect(self.someMethodName)
-
-# Only break when approaching/exceeding 100 characters
-result = someFunction(
-    arg1, arg2, arg3, arg4, arg5, arg6, arg7
-)
-```
+- **Target**: under **80 characters** when possible; **hard limit of 100**.
+- Only break a line when it approaches or exceeds the limit — don't break lines that
+  already fit comfortably just for the sake of it.
 
 ## Docstring Standards
+
 We follow **Google Style Python docstrings** as documented at:
 https://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html
 
-### Critical Rule: Empty Line at End
-**ALWAYS include 1 empty line at the end of docstrings** (unless it's a single-line docstring):
+**Critical rule:** a multi-line docstring must end with one blank line before the
+closing `"""` (a single-line docstring does not need one).
 
-```python
-# Single-line docstring - NO empty line needed
-def simpleFunction(self):
-    """Brief description of the function."""
-    return "result"
-
-# Multi-line docstring - empty line required at end
-def myFunction(arg1: str, arg2: int) -> str:
-    """Brief description of the function.
-
-    Args:
-        arg1: Description of first argument.
-        arg2: Description of second argument.
-
-    Returns:
-        Description of return value.
-
-    """
-    return "result"
-```
-
-### Google Style Sections
-Use these standard sections in order (only include sections that are relevant):
-
-1. **Summary line**: One-line summary that fits on one line
-2. **Extended description** (optional): More details after a blank line
-3. **Args**: Function/method parameters
-4. **Returns**: Return value description
-5. **Yields**: For generators (instead of Returns)
-6. **Raises**: Exceptions that may be raised
-7. **Note** or **Notes**: Additional notes
-8. **Example** or **Examples**: Usage examples
-9. **Attributes**: For classes, document public attributes
-10. **Todo**: Future improvements
-
-### Args Section Format
-```python
-def exampleFunction(param1, param2=None, *args, **kwargs):
-    """Function with various parameter types.
-
-    Args:
-        param1 (int): The first parameter.
-        param2 (str, optional): The second parameter. Defaults to None.
-            Second line of description should be indented.
-        *args: Variable length argument list.
-        **kwargs: Arbitrary keyword arguments.
-
-    Returns:
-        bool: True if successful, False otherwise.
-
-    """
-```
-
-### Args Section with Type Hints
-When using PEP 484 type hints, types are optional in docstring:
+Use these sections, in order, including only the ones relevant to a given docstring:
+summary line → extended description (optional) → `Args` → `Returns` (or `Yields` for
+generators) → `Raises` → `Note(s)` → `Example(s)` → `Attributes` (classes) → `Todo`.
 
 ```python
 def exampleFunction(param1: int, param2: str = None) -> bool:
-    """Function with type hints.
+    """Brief one-line summary.
 
     Args:
-        param1: The first parameter (type from annotation).
-        param2: The second parameter (type from annotation). Defaults to None.
+        param1: Description of the first parameter.
+        param2: Description of the second parameter. Defaults to None.
 
     Returns:
-        True if successful, False otherwise.
-
-    """
-```
-
-### Returns Section Format
-```python
-def getResult():
-    """Get a result value.
-
-    Returns:
-        dict: Dictionary containing:
-            - 'success' (bool): Whether operation succeeded
-            - 'message' (str): Status message
-            - 'data' (list): Result data
-
-    """
-```
-
-### Raises Section Format
-```python
-def validateInput(value):
-    """Validate input value.
-
-    Args:
-        value: The value to validate.
+        Description of the return value.
 
     Raises:
-        ValueError: If value is negative.
-        TypeError: If value is not a number.
-
-    """
-```
-
-### Class Docstrings
-```python
-class ExampleClass:
-    """Summary line for the class.
-
-    Extended description of the class purpose and usage.
-
-    Attributes:
-        attr1 (str): Description of attr1.
-        attr2 (int, optional): Description of attr2.
-
-    """
-
-    def __init__(self, param1, param2):
-        """Initialize the ExampleClass.
-
-        Note:
-            Do not include the `self` parameter in Args section.
-
-        Args:
-            param1 (str): Description of param1.
-            param2 (int): Description of param2.
-
-        """
-        self.attr1 = param1
-        self.attr2 = param2
-```
-
-### Method Docstrings
-```python
-class ExampleClass:
-    def exampleMethod(self, param1):
-        """Brief description of the method.
-
-        Note:
-            Do not include the `self` parameter in Args section.
-
-        Args:
-            param1: The first parameter.
-
-        Returns:
-            True if successful, False otherwise.
-
-        """
-        return True
-```
-
-### Property Docstrings
-```python
-@property
-def my_property(self):
-    """str: Properties should be documented in their getter method.
-
-    The type can be specified at the start of the summary line.
-
-    """
-    return self._my_property
-```
-
-### Function Overrides
-Indicate function overrides in docstrings:
-
-```python
-def someMethod(self, param1):
-    """Override: Method description.
-
-    This overrides the parent class method to provide custom behavior.
-
-    Args:
-        param1: Description of parameter.
-
-    Returns:
-        Description of return value.
-
-    """
-```
-
-### Examples Section
-
-Use pure Google Style doctest examples within docstrings.
-
-```python
-def exampleFunction(n):
-    """Generate numbers from 0 to n-1.
-
-    Args:
-        n (int): The upper limit of the range to generate.
-
-    Yields:
-        int: The next number in the range of 0 to n-1.
-
-    Examples:
-    - Basic usage:
-        >>> print([i for i in exampleFunction(4)])
-        [0, 1, 2, 3]
-
-    """
-    for i in range(n):
-        yield i
-```
-
-**Multiple Examples with Doctest Formatting:**
-
-Use bullet points (`-`) with doctest examples.
-
-```python
-class DatabaseInterface(metaclass=ABCSingleton):
-    """Thread-safe singleton with abstract methods.
-
-    Examples:
-    - Basic usage:
-        >>> db1 = MySQLDatabase()
-        >>> db1.query_count = 5
-        
-        >>> db2 = MySQLDatabase()
-        >>> print(db2.query_count)  # 5 (same instance)
-        5
-        >>> print(db1 is db2)
-        True
-    
-    - Force re-initialization:
-        >>> db3 = MySQLDatabase(_reinit=True)
-        >>> print(db3.query_count)  # 0 (fresh instance)
-        0
-
-    """
-```
-
-### Note Section
-```python
-def complexFunction(data):
-    """Process complex data.
-
-    Args:
-        data: The data to process.
-
-    Returns:
-        Processed data.
+        ValueError: If param1 is negative.
 
     Note:
-        This function modifies the input data in-place for performance.
-        Make a copy if you need to preserve the original.
+        Any additional caveat worth calling out.
 
     """
 ```
+
+- Omit `self`/`cls` from a method's `Args` section.
+- For classes, document public attributes in an `Attributes:` section on the class's
+  own docstring, not `__init__`'s.
+- For `@property` getters, put the type at the start of the summary line, e.g.
+  `"""str: Description."""`.
+- For usage examples, use doctest-style `>>>` blocks under an `Examples:` section;
+  bullet (`-`) each one if there's more than one.
+- Note when a method overrides a parent class method (e.g. start the summary with
+  `"""Override: ..."`).
 
 ### Exception Standards
 **Try to catch specific exceptions rather than using a broad `Exception` catch.**
+
+## Compliance
+
+**Never reference the proprietary `bl` tool by name anywhere in this repo** — not in
+code, comments, docstrings, docs, or commit messages. If `bl`'s design is useful
+inspiration, describe the underlying concept generically instead of naming or
+attributing it. (This has already required a compliance fix once — see
+`envoy-stretch-goals_plan.md`'s "Compliance issue" section — so treat it as a hard
+rule, not a one-off cleanup.)
+
+## Rust (`rust/`)
+
+This repo's core logic is being ported to Rust (`envoy-core`, `envoy-cli`, `envoy-py`).
+The Python conventions above apply only to `.py` files (`py/`, `scripts/`); Rust code
+follows ordinary Rust/rustdoc idioms instead — snake_case functions/variables,
+`UpperCamelCase` types, no `camelCase` — plus the project-specific patterns below,
+which reflect what this codebase actually does today, not generic Rust advice.
+
+### Error handling
+Each crate defines its own `thiserror`-derived error enum (`EnvoyError` in
+`envoy-core`, `TelemetryError` for the telemetry module, etc.) with one variant per
+failure mode, rather than `anyhow`/`Box<dyn Error>`. Follow this pattern for new
+fallible APIs in `envoy-core`/`envoy-cli`.
+
+### Doc comments
+Module-level `//!` docs at the top of each file explain the module's purpose and
+design rationale in prose (often with a short example); public items get `///` doc
+comments. This is plain rustdoc style, not the Google-style Args/Returns sections used
+for Python above.
+
+### Tests
+- Unit tests live in a `#[cfg(test)] mod tests` block at the bottom of the same file,
+  using `use super::*;`.
+- **Any test that mutates a real process environment variable (`std::env::set_var`/
+  `remove_var`) must acquire `crate::env_test_lock::MUTEX`** (defined in
+  `envoy-core/src/lib.rs`) before mutating, in addition to saving/restoring the
+  previous value. `cargo test` runs across parallel threads in one process, and env
+  vars are process-global, so two tests in *different* modules that each only guard
+  their own local state can still race on the same real var and fail intermittently
+  when run as part of the full suite, even though each passes individually run alone.
+  This is not hypothetical: a real test in `telemetry/file_drop.rs` needed exactly
+  this fix during development.
+- Use a small `EnvVarGuard` RAII struct (save the previous value in `::set`, restore
+  it in `Drop`) to manage temporary env var changes — this exact pattern already
+  recurs per-file across the codebase (`user_config.rs`, `environment.rs`,
+  `team_config.rs`, `stack_registry.rs`, etc.); match it rather than inventing a new
+  save/restore idiom.
+
+### Validation gate
+Before considering a Rust change complete, run the same checks CI does
+(`.github/workflows/lint.yml`):
+```powershell
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+(`envoy-py` needs `LIBRARY_PATH` set for its PyO3/libpython link step on some
+self-hosted runners — see `lint.yml` — but plain `envoy-core`/`envoy-cli` changes
+don't need that.)
+
+### Windows build noise
+`cargo build`/`cargo test` on Windows may print
+`note: did not finalize incremental compilation session directory ... Access is
+denied. (os error 5)` — this is usually harmless (often antivirus/indexing
+transiently locking a newly-written file) as long as the build still reports
+`Finished`. Don't treat this note alone as a build failure.

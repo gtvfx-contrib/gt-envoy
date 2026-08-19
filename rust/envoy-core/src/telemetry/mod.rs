@@ -51,7 +51,7 @@ use std::time::{Duration, SystemTime};
 
 use opentelemetry::trace::{Span, Tracer, TracerProvider as _};
 use opentelemetry::KeyValue;
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -193,9 +193,26 @@ impl OtlpSink {
     /// which matters since envoy is primarily a short-lived, synchronous
     /// CLI tool.
     pub fn new(endpoint: &str) -> Result<Self, TelemetryError> {
-        let exporter = opentelemetry_otlp::SpanExporter::builder()
+        Self::with_headers(endpoint, None)
+    }
+
+    /// Build a new sink exporting to `endpoint`, additionally sending
+    /// `raw_headers` (the raw `OTEL_EXPORTER_OTLP_HEADERS` value, e.g.
+    /// `"Authorization=Bearer abc123"`) as HTTP headers on every export
+    /// request -- this is how a shared bearer token reaches a studio
+    /// Collector that requires one.
+    pub fn with_headers(endpoint: &str, raw_headers: Option<&str>) -> Result<Self, TelemetryError> {
+        let mut builder = opentelemetry_otlp::SpanExporter::builder()
             .with_http()
-            .with_endpoint(endpoint)
+            .with_endpoint(endpoint);
+        if let Some(raw_headers) = raw_headers {
+            let headers = parse_otlp_headers(raw_headers);
+            if !headers.is_empty() {
+                builder = builder.with_headers(headers);
+            }
+        }
+
+        let exporter = builder
             .build()
             .map_err(|error| TelemetryError::ExporterBuild {
                 endpoint: endpoint.to_string(),
@@ -255,6 +272,26 @@ impl TelemetrySink for OtlpSink {
         // exit.
         self.provider.force_flush().is_ok()
     }
+}
+
+/// Parse a raw `OTEL_EXPORTER_OTLP_HEADERS` value (per the OTel spec:
+/// comma-separated `key=value` pairs, e.g.
+/// `"Authorization=Bearer abc123,X-Extra=foo"`) into a header map.
+///
+/// Malformed entries (missing `=`, empty key) are skipped rather than
+/// erroring -- a best-effort parse matches the rest of this module's
+/// "telemetry must never break a command" philosophy.
+fn parse_otlp_headers(raw: &str) -> HashMap<String, String> {
+    raw.split(',')
+        .filter_map(|entry| {
+            let (key, value) = entry.split_once('=')?;
+            let key = key.trim();
+            if key.is_empty() {
+                return None;
+            }
+            Some((key.to_string(), value.trim().to_string()))
+        })
+        .collect()
 }
 
 /// Global sink storage, defaulting to [`NullSink`] on first access.
@@ -489,5 +526,84 @@ mod tests {
     #[test]
     fn null_sink_flush_defaults_to_true() {
         assert!(NullSink.flush(Duration::from_millis(10)));
+    }
+
+    #[test]
+    fn parse_otlp_headers_splits_comma_separated_key_value_pairs() {
+        let headers = parse_otlp_headers("Authorization=Bearer abc123,X-Extra=foo");
+        assert_eq!(
+            headers.get("Authorization"),
+            Some(&"Bearer abc123".to_string())
+        );
+        assert_eq!(headers.get("X-Extra"), Some(&"foo".to_string()));
+    }
+
+    #[test]
+    fn parse_otlp_headers_handles_a_single_pair() {
+        let headers = parse_otlp_headers("Authorization=Bearer abc123");
+        assert_eq!(headers.len(), 1);
+        assert_eq!(
+            headers.get("Authorization"),
+            Some(&"Bearer abc123".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_otlp_headers_skips_malformed_entries() {
+        let headers = parse_otlp_headers("no-equals-sign,=empty-key,Valid=value");
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers.get("Valid"), Some(&"value".to_string()));
+    }
+
+    #[test]
+    fn parse_otlp_headers_returns_empty_map_for_empty_input() {
+        assert!(parse_otlp_headers("").is_empty());
+    }
+
+    #[test]
+    fn otlp_sink_sends_configured_headers_on_the_wire() {
+        // A real, network-level test (mock HTTP server, no mocking of the
+        // exporter itself) that the resolved OTEL_EXPORTER_OTLP_HEADERS
+        // value actually reaches the Collector as an HTTP header --
+        // added after discovering, during live end-to-end testing against
+        // a real bearer-token-checked Collector, that `config.headers`
+        // was being resolved but never applied to the exporter at all.
+        let server = tiny_http::Server::http("127.0.0.1:0").expect("mock server should bind");
+        let addr = server
+            .server_addr()
+            .to_ip()
+            .expect("should have an IP addr");
+        let endpoint = format!("http://{addr}/v1/traces");
+
+        let handle = std::thread::spawn(move || {
+            let request = server.recv().expect("should receive a request");
+            let header_value = request
+                .headers()
+                .iter()
+                .find(|header| {
+                    header
+                        .field
+                        .as_str()
+                        .as_str()
+                        .eq_ignore_ascii_case("authorization")
+                })
+                .map(|header| header.value.as_str().to_string());
+            let _ = request.respond(tiny_http::Response::from_string("ok"));
+            header_value
+        });
+
+        let sink = OtlpSink::with_headers(&endpoint, Some("Authorization=Bearer testtoken123"))
+            .expect("sink should build");
+        let now = SystemTime::now();
+        sink.record(&TelemetryEvent {
+            name: "test_event".to_string(),
+            attributes: HashMap::new(),
+            start_time: now,
+            timestamp: now,
+        });
+        sink.flush(Duration::from_secs(5));
+
+        let received_header = handle.join().expect("server thread should not panic");
+        assert_eq!(received_header, Some("Bearer testtoken123".to_string()));
     }
 }

@@ -55,14 +55,16 @@ pub fn record_command_run(
 
 fn build_sink(config: &TelemetryConfig) -> Box<dyn TelemetrySink> {
     match config.transport {
-        TelemetryTransport::Http => match OtlpSink::new(&config.endpoint) {
-            Ok(sink) => Box::new(sink),
-            // An endpoint that fails to even build (e.g. an invalid URL) is
-            // a configuration error, not a transient outage -- retrying it
-            // via the spool would never succeed, so this discards rather
-            // than spooling indefinitely.
-            Err(_) => Box::new(NullSink),
-        },
+        TelemetryTransport::Http => {
+            match OtlpSink::with_headers(&config.endpoint, config.headers.as_deref()) {
+                Ok(sink) => Box::new(sink),
+                // An endpoint that fails to even build (e.g. an invalid URL) is
+                // a configuration error, not a transient outage -- retrying it
+                // via the spool would never succeed, so this discards rather
+                // than spooling indefinitely.
+                Err(_) => Box::new(NullSink),
+            }
+        }
         TelemetryTransport::FileDrop => Box::new(FileDropSink::new(config.endpoint.clone())),
     }
 }
