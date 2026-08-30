@@ -81,6 +81,21 @@ pub(crate) struct Cli {
     )]
     pub env: Option<String>,
 
+    #[arg(
+        long,
+        value_name = "TAG",
+        help = "Attach a free-text tag to this invocation's telemetry record, \
+if telemetry is enabled."
+    )]
+    pub tag: Option<String>,
+
+    #[arg(
+        long,
+        help = "Disable telemetry for this invocation only, regardless of the \
+usual env/config-driven opt-in."
+    )]
+    pub incognito: bool,
+
     #[arg(long, short = 'v', help = "Enable verbose logging")]
     pub verbose: bool,
 

@@ -104,6 +104,8 @@ fn help_lists_expected_flags() {
         "--list-configs",
         "--ignore-config",
         "--env <ENV_COMMAND>",
+        "--tag <TAG>",
+        "--incognito",
         "--trace <VAR>",
         "-cf",
         "-s",
@@ -592,6 +594,49 @@ fn telemetry_is_off_by_default_and_writes_no_files() {
     // Closed-by-default: with no ENVOY_TELEMETRY_ENDPOINT resolved, nothing
     // should ever be written, even though the drop dir exists.
     assert_eq!(telemetry_files_in(drop_dir.path()).len(), 0);
+}
+
+#[test]
+fn telemetry_incognito_flag_suppresses_recording_even_with_an_endpoint_configured() {
+    let config_root = ScratchDir::new("envoy_telemetry_incognito");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let args = raw_exit_code_args(0);
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .arg("--incognito")
+        .args(&args)
+        .assert()
+        .success();
+
+    assert_eq!(
+        telemetry_files_in(drop_dir.path()).len(),
+        0,
+        "--incognito should suppress telemetry even with a resolvable endpoint"
+    );
+}
+
+#[test]
+fn telemetry_tag_flag_is_attached_to_the_recorded_event() {
+    let config_root = ScratchDir::new("envoy_telemetry_tag");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let args = raw_exit_code_args(0);
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .args(["--tag", "nightly-build"])
+        .args(&args)
+        .assert()
+        .success();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+    assert_eq!(value["attributes"]["envoy.tag"]["Str"], "nightly-build");
 }
 
 #[test]

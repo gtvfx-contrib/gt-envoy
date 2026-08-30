@@ -31,6 +31,8 @@ en    [OPTIONS] [command] [args ...]
 | `--list-configs` | `-lc` | List all known configurable settings |
 | `--ignore-config` | `-ic` | Bypass user config for this run |
 | `--env ENV_COMMAND` | `-e` | Run command inside a different command's environment |
+| `--tag TAG` | | Attach a free-text tag to this invocation's telemetry record, if enabled |
+| `--incognito` | | Disable telemetry for this invocation only |
 | `--inherit-env` | `-i` | Inherit the full system environment (overrides closed mode) |
 | `--verbose` | `-v` | Enable verbose logging |
 | `--trace VAR` | | Trace how `VAR` is mutated through env file processing |

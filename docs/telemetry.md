@@ -40,6 +40,19 @@ always beats a fleet-wide default.
 Check the current state any time with `envoy --diagnose` (see the
 [CLI reference](cli-reference/envoy.md#--diagnose-command)).
 
+## Per-run controls
+
+Two flags apply regardless of how telemetry is otherwise configured:
+
+- `--incognito` disables telemetry for that single invocation only,
+  overriding `ENVOY_TELEMETRY_ENDPOINT`/`ENVOY_TELEMETRY_ENABLED` for
+  just that run -- nothing is even resolved or attempted, let alone sent.
+- `--tag TAG` attaches a free-text tag (`envoy.tag`) to the invocation's
+  record, if one is recorded. Useful for marking ad hoc or one-off runs
+  (a specific test, an investigation) apart from routine usage in the
+  shared dashboard. Has no effect when telemetry isn't enabled or is
+  suppressed by `--incognito`.
+
 ## What gets recorded
 
 One `envoy.command.run` record per invocation -- built-ins (`--list`,
