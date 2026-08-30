@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import asyncio as _asyncio
 import importlib
+import os as _os
+import runpy as _runpy
 import sys as _sys
+from pathlib import Path as _Path
 
 from . import testing
 
@@ -209,3 +212,50 @@ __all__ = [
     "EnvironmentBuildError",
     "ValidationError",
 ]
+
+
+def _run_pyinit_scripts() -> None:
+    """Run Python files from every directory listed in ``ENVOY_PYINIT``.
+
+    Opt-in extension point, off by default: when ``ENVOY_PYINIT`` is unset
+    or empty, this is a no-op. Otherwise, each directory in the
+    platform-separated (``;`` on Windows, ``:`` elsewhere, matching
+    ``ENVOY_BNDL_ROOTS``/``ENVOY_STACK_ROOTS``) environment variable is
+    scanned non-recursively for ``*.py`` files, which are run in sorted
+    order via :func:`runpy.run_path`. This happens at the very end of
+    module initialization so scripts can freely ``import envoy`` and use
+    the full public API.
+
+    A script that raises is treated as best-effort, matching the graceful-
+    degradation pattern used elsewhere in envoy (e.g. bundle cache open
+    failures, see ``envoy_core::bundle_cache::open_default_bundle_cache``):
+    the exception is reported to stderr and the remaining scripts still
+    run, so one broken script cannot block every subsequent ``import envoy``
+    for everyone.
+
+    """
+    raw = _os.environ.get("ENVOY_PYINIT", "")
+    if not raw.strip():
+        return
+
+    separator = ";" if _sys.platform == "win32" else ":"
+    for directory in raw.split(separator):
+        directory = directory.strip()
+        if not directory:
+            continue
+
+        directory_path = _Path(directory)
+        if not directory_path.is_dir():
+            continue
+
+        for script in sorted(directory_path.glob("*.py")):
+            try:
+                _runpy.run_path(str(script), run_name="__main__")
+            except Exception as error:  # intentionally broad: best-effort, see docstring
+                print(
+                    f"Warning: ENVOY_PYINIT script {script} failed: {error}",
+                    file=_sys.stderr,
+                )
+
+
+_run_pyinit_scripts()
