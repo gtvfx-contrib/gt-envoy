@@ -150,12 +150,38 @@ jobs:
           if (-not (Test-Path -LiteralPath $git_bash_path)) {
               throw 'Git Bash is required by the Rust toolchain action.'
           }
-          Add-Content -LiteralPath $env:GITHUB_PATH -Value $git_bash_directory
+          # Append rather than prepend: $GITHUB_PATH always *prepends* for
+          # subsequent steps, which would put Git's own tools (e.g. its
+          # coreutils link.exe) ahead of the MSVC linker cargo/rustc need to
+          # link this target. Setting PATH explicitly via $GITHUB_ENV instead
+          # keeps Git Bash discoverable without letting it shadow MSVC.
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "PATH=$env:PATH;$git_bash_directory"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: x86_64-pc-windows-msvc
+
+      - name: Verify MSVC toolchain
+        shell: pwsh
+        run: |
+          if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+            throw "Microsoft Visual C++ compiler (cl.exe) not found. Ensure Visual Studio Build Tools are installed."
+          }
+          # cl.exe resolving is not sufficient: Git for Windows ships its own
+          # coreutils link.exe (for hardlinks), which is a different program
+          # entirely. If it precedes the MSVC linker on PATH, cargo/rustc
+          # invoke it instead and fail with a confusing "link: extra operand"
+          # error. Fail fast here with a clear message instead.
+          $link = Get-Command link.exe -ErrorAction SilentlyContinue
+          if (-not $link) {
+            throw "link.exe not found. Ensure Visual Studio Build Tools are installed."
+          }
+          if ($link.Source -notmatch 'Microsoft Visual Studio|VC\\Tools\\MSVC') {
+            throw "link.exe resolved to '$($link.Source)', which is not the MSVC linker (likely Git's coreutils link.exe shadowing it on PATH). Fix PATH ordering so the MSVC tools directory precedes Git's."
+          }
+          Write-Host "MSVC toolchain verified (cl.exe and link.exe both resolve to MSVC)"
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2
