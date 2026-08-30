@@ -595,7 +595,7 @@ fn telemetry_is_off_by_default_and_writes_no_files() {
 }
 
 #[test]
-fn telemetry_file_drop_records_a_successful_managed_command() {
+fn telemetry_file_drop_records_a_successful_raw_executable_command() {
     let config_root = ScratchDir::new("envoy_telemetry_config_root");
     let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
     let args = raw_exit_code_args(0);

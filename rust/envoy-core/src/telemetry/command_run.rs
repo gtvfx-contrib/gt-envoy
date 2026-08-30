@@ -15,7 +15,7 @@ use super::file_drop::FileDropSink;
 use super::install_id::installation_id;
 use super::schema::{self, CommandRunContext};
 use super::spool::{self, SpooledRecord, TelemetrySpool};
-use super::{NullSink, OtlpSink, TelemetryEvent, TelemetrySink, TelemetryValue};
+use super::{OtlpSink, TelemetryEvent, TelemetrySink, TelemetryValue};
 
 /// Record one `envoy.command.run` event for the current invocation.
 ///
@@ -53,19 +53,23 @@ pub fn record_command_run(
     );
 }
 
-fn build_sink(config: &TelemetryConfig) -> Box<dyn TelemetrySink> {
+fn build_sink(config: &TelemetryConfig) -> Option<Box<dyn TelemetrySink>> {
     match config.transport {
         TelemetryTransport::Http => {
             match OtlpSink::with_headers(&config.endpoint, config.headers.as_deref()) {
-                Ok(sink) => Box::new(sink),
+                Ok(sink) => Some(Box::new(sink)),
                 // An endpoint that fails to even build (e.g. an invalid URL) is
                 // a configuration error, not a transient outage -- retrying it
-                // via the spool would never succeed, so this discards rather
-                // than spooling indefinitely.
-                Err(_) => Box::new(NullSink),
+                // via the spool would never succeed. Returning `None` (rather
+                // than a sink that reports success) lets the caller skip
+                // touching the spool entirely this invocation: it must not
+                // enqueue this event, but critically it also must not treat
+                // already-spooled records (from a *previous*, validly
+                // constructed invocation) as delivered and delete them.
+                Err(_) => None,
             }
         }
-        TelemetryTransport::FileDrop => Box::new(FileDropSink::new(config.endpoint.clone())),
+        TelemetryTransport::FileDrop => Some(Box::new(FileDropSink::new(config.endpoint.clone()))),
     }
 }
 
@@ -76,7 +80,9 @@ fn deliver_with_spool(
     start_time: SystemTime,
     end_time: SystemTime,
 ) {
-    let sink = build_sink(config);
+    let Some(sink) = build_sink(config) else {
+        return;
+    };
     let spool = TelemetrySpool::new();
     let transport_label = config.transport.as_str();
 
@@ -192,6 +198,47 @@ mod tests {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    #[test]
+    fn an_unconstructible_sink_does_not_wipe_an_existing_spool_backlog() {
+        let _lock = crate::env_test_lock::MUTEX
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let config_root = tempdir().expect("tempdir should be created");
+        let _guard = EnvVarGuard::set_many(&[
+            (
+                "ENVOY_CONFIG_ROOT",
+                Some(config_root.path().to_str().unwrap()),
+            ),
+            (TELEMETRY_ENABLED_VAR, None),
+            // An unclosed IPv6-literal bracket makes the OTLP exporter fail
+            // to build (invalid URI), exercising the same "sink can't even
+            // be constructed" path `build_sink` hits for a malformed
+            // real-world endpoint.
+            (TELEMETRY_ENDPOINT_VAR, Some("http://[::invalid")),
+        ]);
+
+        // Seed the spool with a record from some earlier, validly
+        // configured invocation, *before* this invocation's broken config
+        // is ever consulted.
+        let spool = TelemetrySpool::new();
+        spool
+            .enqueue(&spool::SpooledRecord {
+                name: "envoy.command.run".to_string(),
+                attributes: HashMap::new(),
+                timestamp_unix_millis: 1_000,
+            })
+            .expect("should enqueue");
+        assert_eq!(spool.depth(), 1);
+
+        let now = SystemTime::now();
+        record_command_run(sample_context(), now, now, None);
+
+        // The pre-existing backlog must survive a later invocation whose
+        // own sink can't be built -- it must be neither "delivered" nor
+        // discarded.
+        assert_eq!(spool.depth(), 1);
     }
 
     #[test]

@@ -144,7 +144,13 @@ impl TelemetryConfig {
 
         if let Some(scheme_end) = self.endpoint.find("://") {
             let (scheme, rest) = self.endpoint.split_at(scheme_end + 3);
-            if let Some(at_index) = rest.find('@') {
+            // Only look for userinfo (`user:pass@`/`user@`) within the
+            // authority component -- i.e. before the first `/`, `?`, or
+            // `#` -- so an `@` occurring later, in the path, query, or
+            // fragment, isn't mistaken for embedded credentials and
+            // incorrectly stripped.
+            let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+            if let Some(at_index) = rest[..authority_end].find('@') {
                 return format!("{scheme}{}", &rest[at_index + 1..]);
             }
         }
@@ -500,6 +506,28 @@ mod tests {
         assert_eq!(sanitized, "http://collector.example/v1/traces");
         assert!(!sanitized.contains("secret-pass"));
         assert!(!sanitized.contains("supersecrettoken"));
+    }
+
+    #[test]
+    fn sanitized_endpoint_ignores_an_at_sign_outside_the_authority() {
+        // An `@` in the query string (or path/fragment) is not userinfo
+        // and must survive untouched -- only an `@` within the authority
+        // component (before the first `/`, `?`, or `#`) is credentials.
+        let config = TelemetryConfig {
+            endpoint: "http://collector.example/v1/traces?owner=team@example.com".to_string(),
+            transport: TelemetryTransport::Http,
+            source: TelemetryConfigSource::ProcessEnv,
+            headers: None,
+            timeout: None,
+            service_name: None,
+            resource_attributes: None,
+            extra_redact_args: Vec::new(),
+        };
+
+        assert_eq!(
+            config.sanitized_endpoint(),
+            "http://collector.example/v1/traces?owner=team@example.com"
+        );
     }
 
     #[test]

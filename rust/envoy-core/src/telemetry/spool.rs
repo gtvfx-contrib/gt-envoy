@@ -13,7 +13,8 @@
 //! data -- redaction happens once, before a record is ever constructed, so
 //! nothing sensitive is retried or persisted longer than the original event.
 
-use std::collections::HashMap;
+use std::cell::Cell;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -137,13 +138,29 @@ impl TelemetrySpool {
         })?;
 
         let lock_path = self.lock_path();
+        let file_name = spool_file_name(record.timestamp_unix_millis);
+        let record_path = self.dir.join(&file_name);
+        // `with_exclusive_lock` can fail either because it couldn't
+        // acquire/release the lock itself (a `lock_path` problem) or
+        // because this closure's own write failed (a `record_path`
+        // problem, since `enforce_bounds_locked` never itself returns
+        // `Err` -- its own I/O failures are already swallowed). Track
+        // which one actually happened so the reported path is accurate.
+        let write_failed = Cell::new(false);
         with_exclusive_lock(&lock_path, || {
-            let file_name = spool_file_name(record.timestamp_unix_millis);
-            fs::write(self.dir.join(&file_name), &json)?;
+            let result = fs::write(&record_path, &json);
+            if result.is_err() {
+                write_failed.set(true);
+            }
+            result?;
             self.enforce_bounds_locked()
         })
         .map_err(|source| SpoolError::Io {
-            path: self.dir.clone(),
+            path: if write_failed.get() {
+                record_path.clone()
+            } else {
+                lock_path.clone()
+            },
             source,
         })
     }
@@ -151,7 +168,10 @@ impl TelemetrySpool {
     /// Evict oldest-first until both bounds are satisfied. Must only be
     /// called while holding the exclusive lock.
     fn enforce_bounds_locked(&self) -> std::io::Result<()> {
-        let mut paths = self.spooled_file_paths();
+        // A `VecDeque` (rather than repeated `Vec::remove(0)`, which is
+        // O(n) per call and O(n^2) overall across a large eviction) lets
+        // oldest-first removal stay O(1) per entry.
+        let mut paths: VecDeque<PathBuf> = self.spooled_file_paths().into();
         let mut total_size: u64 = paths
             .iter()
             .filter_map(|path| fs::metadata(path).ok())
@@ -159,7 +179,7 @@ impl TelemetrySpool {
             .sum();
 
         while !paths.is_empty() && (paths.len() > self.max_count || total_size > self.max_bytes) {
-            let oldest = paths.remove(0);
+            let oldest = paths.pop_front().expect("checked non-empty above");
             if let Ok(metadata) = fs::metadata(&oldest) {
                 total_size = total_size.saturating_sub(metadata.len());
             }
@@ -181,39 +201,59 @@ impl TelemetrySpool {
     /// Never blocks longer than `budget` on I/O beyond `deliver`'s own
     /// calls; a large backlog simply gets picked up further across more
     /// invocations rather than delaying any single command.
+    ///
+    /// Holds the same exclusive lock `enqueue` uses for the whole flush
+    /// loop (including `deliver`'s own calls), so enqueue/flush/eviction
+    /// are serialized consistently across concurrent `envoy` processes --
+    /// without it, one process's flush could read a file mid-write by
+    /// another's `enqueue` (spurious corrupt-file deletion) or two
+    /// processes could both read and deliver the same record.
     pub fn flush_with_budget(
         &self,
         budget: Duration,
         mut deliver: impl FnMut(&SpooledRecord) -> bool,
     ) -> usize {
+        // Mirrors `enqueue`: the lock file can't be created inside a
+        // not-yet-existing spool directory, which `spooled_file_paths`
+        // otherwise tolerates today (via `unwrap_or_default`).
+        if fs::create_dir_all(&self.dir).is_err() {
+            return 0;
+        }
+
         let start = Instant::now();
         let mut flushed = 0usize;
-
-        for path in self.spooled_file_paths() {
-            if start.elapsed() >= budget {
-                break;
-            }
-
-            let record = match fs::read(&path)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<SpooledRecord>(&bytes).ok())
-            {
-                Some(record) => record,
-                None => {
-                    // Unreadable/corrupt spooled file -- drop it rather
-                    // than block the flush on it forever.
-                    let _ = fs::remove_file(&path);
-                    continue;
+        let lock_path = self.lock_path();
+        // Best-effort: if the lock itself can't be acquired, simply flush
+        // nothing this invocation rather than failing the caller, matching
+        // how callers already treat `enqueue`'s own `Result` as best-effort.
+        let _ = with_exclusive_lock(&lock_path, || {
+            for path in self.spooled_file_paths() {
+                if start.elapsed() >= budget {
+                    break;
                 }
-            };
 
-            if deliver(&record) {
-                let _ = fs::remove_file(&path);
-                flushed += 1;
-            } else {
-                break;
+                let record = match fs::read(&path)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<SpooledRecord>(&bytes).ok())
+                {
+                    Some(record) => record,
+                    None => {
+                        // Unreadable/corrupt spooled file -- drop it rather
+                        // than block the flush on it forever.
+                        let _ = fs::remove_file(&path);
+                        continue;
+                    }
+                };
+
+                if deliver(&record) {
+                    let _ = fs::remove_file(&path);
+                    flushed += 1;
+                } else {
+                    break;
+                }
             }
-        }
+            Ok(())
+        });
 
         flushed
     }

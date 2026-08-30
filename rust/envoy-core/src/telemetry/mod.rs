@@ -152,6 +152,11 @@ pub trait TelemetrySink: Send + Sync {
     /// [`command_run`]). Default: always confirmed, which is correct for
     /// [`NullSink`] (nothing to deliver) and for sinks whose `record()`
     /// result is already the real, final answer.
+    ///
+    /// `budget` is best-effort: a sink whose underlying transport doesn't
+    /// support cancelling an in-flight call partway through (e.g.
+    /// [`OtlpSink`], whose exporter has its own fixed, build-time timeout --
+    /// see [`OtlpSink::with_headers`]) may not honor this exact duration.
     fn flush(&self, budget: Duration) -> bool {
         let _ = budget;
         true
@@ -183,6 +188,15 @@ pub struct OtlpSink {
     provider: SdkTracerProvider,
 }
 
+/// Fixed timeout applied to every OTLP export request, set once at exporter
+/// construction (the underlying HTTP client has no way to vary its timeout
+/// per call). Tighter than the OTel SDK's own 10s default -- so a hung or
+/// slow collector can't block [`TelemetrySink::flush`] far past its
+/// intended bound -- but looser than [`spool::DEFAULT_FLUSH_BUDGET`], to
+/// avoid routing normal (if not instant) network conditions into the spool
+/// fallback unnecessarily.
+const OTLP_EXPORT_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl OtlpSink {
     /// Build a new sink exporting to `endpoint` (e.g.
     /// `"http://localhost:4318/v1/traces"`, the default OTLP/HTTP path for
@@ -201,10 +215,15 @@ impl OtlpSink {
     /// `"Authorization=Bearer abc123"`) as HTTP headers on every export
     /// request -- this is how a shared bearer token reaches a studio
     /// Collector that requires one.
+    /// Applies [`OTLP_EXPORT_TIMEOUT`] to the underlying exporter. This is
+    /// fixed at construction (the exporter has no per-call timeout), so
+    /// [`TelemetrySink::flush`]'s own `budget` parameter is necessarily
+    /// best-effort for this sink -- see that method's docs.
     pub fn with_headers(endpoint: &str, raw_headers: Option<&str>) -> Result<Self, TelemetryError> {
         let mut builder = opentelemetry_otlp::SpanExporter::builder()
             .with_http()
-            .with_endpoint(endpoint);
+            .with_endpoint(endpoint)
+            .with_timeout(OTLP_EXPORT_TIMEOUT);
         if let Some(raw_headers) = raw_headers {
             let headers = parse_otlp_headers(raw_headers);
             if !headers.is_empty() {
@@ -265,6 +284,12 @@ impl TelemetrySink for OtlpSink {
     }
 
     fn flush(&self, _budget: Duration) -> bool {
+        // `_budget` is intentionally unused: the exporter's own timeout
+        // (`OTLP_EXPORT_TIMEOUT`, applied once in `with_headers`) is fixed
+        // at construction, so this can't honor a *dynamic, per-call*
+        // duration -- see `TelemetrySink::flush`'s doc comment. It's still
+        // bounded, just not by this exact value.
+        //
         // `force_flush` is safe to call repeatedly (unlike `shutdown`,
         // which permanently marks the provider shut down), so this can run
         // once per delivered record (current event and any spooled
