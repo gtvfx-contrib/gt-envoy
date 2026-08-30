@@ -31,6 +31,7 @@ en    [OPTIONS] [command] [args ...]
 | `--list-configs` | `-lc` | List all known configurable settings |
 | `--ignore-config` | `-ic` | Bypass user config for this run |
 | `--env ENV_COMMAND` | `-e` | Run command inside a different command's environment |
+| `--shell` | | Drop into an interactive shell inside a command's resolved environment, instead of running it |
 | `--inherit-env` | `-i` | Inherit the full system environment (overrides closed mode) |
 | `--verbose` | `-v` | Enable verbose logging |
 | `--trace VAR` | | Trace how `VAR` is mutated through env file processing |
@@ -171,7 +172,24 @@ Run a command inside a different command's environment:
 en --env python cmd
 ```
 
-Opens `cmd.exe` with the `python` environment — useful for interactive inspection.
+Opens `cmd.exe` with the `python` environment — useful for interactive
+inspection, though `--shell python` below is the more direct way to do
+exactly this.
+
+### `--shell`
+
+Drop into an interactive shell (`cmd.exe`/`$SHELL`) inside a command's
+resolved environment for inspection, instead of running the command itself:
+
+```powershell
+en --shell python
+```
+
+Resolves `python`'s environment exactly as a normal run would, then
+launches the shell reported by that environment's own `COMSPEC`/`SHELL`
+(falling back to the current process's, then a platform default). Type
+`exit` to return. Combine with `--env`/`-e` to inspect a *different*
+command's environment than the one named.
 
 ## Discovery Flags
 

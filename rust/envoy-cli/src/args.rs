@@ -81,6 +81,13 @@ pub(crate) struct Cli {
     )]
     pub env: Option<String>,
 
+    #[arg(
+        long,
+        help = "Drop into an interactive shell (cmd.exe/$SHELL) inside COMMAND's \
+resolved environment for inspection, instead of running COMMAND itself."
+    )]
+    pub shell: bool,
+
     #[arg(long, short = 'v', help = "Enable verbose logging")]
     pub verbose: bool,
 
