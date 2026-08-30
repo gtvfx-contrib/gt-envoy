@@ -50,7 +50,16 @@ fn base_command() -> Command {
         .env_remove("ENVOY_STACK_ROOTS")
         .env_remove("ENVOY_CONFIG_ROOT")
         .env_remove("ENVOY_COMMANDS_FILE")
-        .env_remove("ENVOY_ALLOWLIST");
+        .env_remove("ENVOY_ALLOWLIST")
+        .env_remove("ENVOY_TELEMETRY_ENABLED")
+        .env_remove("ENVOY_TELEMETRY_ENDPOINT")
+        .env_remove("ENVOY_TELEMETRY_REDACT_ARGS")
+        .env_remove("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+        .env_remove("OTEL_EXPORTER_OTLP_ENDPOINT")
+        .env_remove("OTEL_EXPORTER_OTLP_HEADERS")
+        .env_remove("OTEL_EXPORTER_OTLP_TIMEOUT")
+        .env_remove("OTEL_SERVICE_NAME")
+        .env_remove("OTEL_RESOURCE_ATTRIBUTES");
     command
 }
 
@@ -61,6 +70,22 @@ fn write_stack(path: &Path, namespace: &str, bundle: &Path) {
         format!("namespace: {namespace}\nbundles:\n  - path: '{bundle_path}'\n"),
     )
     .expect("stack should be written");
+}
+
+/// All JSON files dropped under `dir`, sorted by filename (chronological,
+/// since telemetry file-drop names are timestamp-prefixed).
+fn telemetry_files_in(dir: &Path) -> Vec<PathBuf> {
+    let mut paths: Vec<PathBuf> = fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+                .collect()
+        })
+        .unwrap_or_default();
+    paths.sort();
+    paths
 }
 
 #[test]
@@ -453,7 +478,7 @@ fn diagnose_without_command_summarizes_stack_bundles_and_team() {
     assert!(stdout.contains("Bundle cache:"), "stdout was:\n{stdout}");
     assert!(stdout.contains("VCS detected:"), "stdout was:\n{stdout}");
     assert!(
-        stdout.contains("Telemetry: disabled"),
+        stdout.contains("Telemetry (automatic envoy.command.run export): disabled"),
         "stdout was:\n{stdout}"
     );
     assert!(
@@ -528,4 +553,248 @@ fn diagnose_with_unknown_command_fails_with_clear_error() {
         stderr.contains("Command 'does_not_exist' not found"),
         "stderr was:\n{stderr}"
     );
+}
+
+fn raw_exit_code_args(code: u32) -> Vec<String> {
+    #[cfg(windows)]
+    {
+        let comspec =
+            env::var("ComSpec").unwrap_or_else(|_| String::from(r"C:\Windows\System32\cmd.exe"));
+        vec![
+            comspec,
+            "/c".to_string(),
+            "exit".to_string(),
+            code.to_string(),
+        ]
+    }
+    #[cfg(not(windows))]
+    {
+        vec![
+            "/bin/sh".to_string(),
+            "-c".to_string(),
+            format!("exit {code}"),
+        ]
+    }
+}
+
+#[test]
+fn telemetry_is_off_by_default_and_writes_no_files() {
+    let config_root = ScratchDir::new("envoy_telemetry_config_root");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let args = raw_exit_code_args(0);
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .args(&args)
+        .assert()
+        .success();
+
+    // Closed-by-default: with no ENVOY_TELEMETRY_ENDPOINT resolved, nothing
+    // should ever be written, even though the drop dir exists.
+    assert_eq!(telemetry_files_in(drop_dir.path()).len(), 0);
+}
+
+#[test]
+fn telemetry_file_drop_records_a_successful_raw_executable_command() {
+    let config_root = ScratchDir::new("envoy_telemetry_config_root");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let args = raw_exit_code_args(0);
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .args(&args)
+        .assert()
+        .success();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+    assert_eq!(value["name"], "envoy.command.run");
+    assert_eq!(
+        value["attributes"]["envoy.command.kind"]["Str"],
+        "raw_executable"
+    );
+    assert_eq!(value["attributes"]["envoy.success"]["Bool"], true);
+    assert_eq!(value["attributes"]["envoy.exit_code"]["Int"], 0);
+}
+
+#[test]
+fn telemetry_records_a_nonzero_exit_managed_command() {
+    let config_root = ScratchDir::new("envoy_telemetry_config_root");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let args = raw_exit_code_args(7);
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .args(&args)
+        .assert()
+        .code(7);
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+    assert_eq!(value["attributes"]["envoy.success"]["Bool"], false);
+    assert_eq!(value["attributes"]["envoy.exit_code"]["Int"], 7);
+}
+
+#[test]
+fn telemetry_records_a_missing_command_resolution_failure() {
+    let scratch = ScratchDir::new("envoy_telemetry_missing_command");
+    let envoy_dir = scratch.path().join(".envoy");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"known": {"environment": []}}"#,
+    )
+    .expect("commands.json should be written");
+    let config_root = ScratchDir::new("envoy_telemetry_config_root");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .arg("missing_command")
+        .current_dir(scratch.path())
+        .assert()
+        .failure();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+    assert_eq!(
+        value["attributes"]["envoy.error_category"]["Str"],
+        "command_not_found"
+    );
+}
+
+#[test]
+fn telemetry_records_built_in_list_and_diagnose_commands() {
+    let scratch = ScratchDir::new("envoy_telemetry_builtins");
+    let envoy_dir = scratch.path().join(".envoy");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"known": {"environment": []}}"#,
+    )
+    .expect("commands.json should be written");
+    let config_root = ScratchDir::new("envoy_telemetry_config_root");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .arg("--list")
+        .current_dir(scratch.path())
+        .assert()
+        .success();
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .arg("--diagnose")
+        .current_dir(scratch.path())
+        .assert()
+        .success();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(
+        files.len(),
+        2,
+        "expected one telemetry file per built-in invocation"
+    );
+
+    let kinds: Vec<String> = files
+        .iter()
+        .map(|path| {
+            let contents = fs::read_to_string(path).expect("telemetry file should be readable");
+            let value: serde_json::Value =
+                serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+            value["attributes"]["envoy.command.kind"]["Str"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    assert!(kinds.contains(&"list".to_string()), "kinds were: {kinds:?}");
+    assert!(
+        kinds.contains(&"diagnose".to_string()),
+        "kinds were: {kinds:?}"
+    );
+}
+
+#[test]
+fn telemetry_unreachable_destination_never_changes_command_behavior_or_exit_code() {
+    let config_root = ScratchDir::new("envoy_telemetry_config_root");
+    let blocking_file = config_root.path().join("blocked-by-a-file");
+    fs::write(&blocking_file, b"not a directory").expect("blocking file should be written");
+    let unreachable_dir = blocking_file.join("telemetry-drop");
+
+    let args = raw_exit_code_args(3);
+
+    // The command's own exit code must be completely unaffected by an
+    // unreachable telemetry destination.
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", &unreachable_dir)
+        .args(&args)
+        .assert()
+        .code(3);
+
+    // The failed delivery should have been spooled rather than silently
+    // discarded. Filter to `.json` record files, ignoring the sidecar
+    // `.lock` file the spool also creates in the same directory.
+    let spool_dir = config_root.path().join("telemetry").join("spool");
+    let spooled = telemetry_files_in(&spool_dir).len();
+    assert_eq!(spooled, 1, "expected the failed delivery to be spooled");
+}
+
+#[test]
+fn telemetry_redacts_secret_looking_arguments_before_export() {
+    let config_root = ScratchDir::new("envoy_telemetry_config_root");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let secret = "super-secret-token-value-123";
+
+    #[cfg(windows)]
+    let args: Vec<String> = {
+        let comspec =
+            env::var("ComSpec").unwrap_or_else(|_| String::from(r"C:\Windows\System32\cmd.exe"));
+        vec![
+            comspec,
+            "/c".to_string(),
+            "exit".to_string(),
+            "0".to_string(),
+        ]
+    };
+    #[cfg(not(windows))]
+    let args: Vec<String> = vec![
+        "/bin/sh".to_string(),
+        "-c".to_string(),
+        "exit 0".to_string(),
+    ];
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .args(&args)
+        .arg("--token")
+        .arg(secret)
+        .assert()
+        .success();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    assert!(
+        !contents.contains(secret),
+        "telemetry payload must never contain the raw secret value:\n{contents}"
+    );
+    assert!(contents.contains("REDACTED"));
 }

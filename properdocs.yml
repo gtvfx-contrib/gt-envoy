@@ -69,6 +69,7 @@ nav:
   - Bundle Discovery: bundle-discovery.md
   - Environment Modes: environment-modes.md
   - User Configuration: user-config.md
+  - Telemetry: telemetry.md
   - CLI Reference:
     - envoy: cli-reference/envoy.md
   - Reference: reference/

@@ -34,7 +34,7 @@ en    [OPTIONS] [command] [args ...]
 | `--inherit-env` | `-i` | Inherit the full system environment (overrides closed mode) |
 | `--verbose` | `-v` | Enable verbose logging |
 | `--trace VAR` | | Trace how `VAR` is mutated through env file processing |
-| `--diagnose [COMMAND]` | | Show bundle/team/stack/cache/VCS diagnostics; add `COMMAND` for its full resolved environment |
+| `--diagnose [COMMAND]` | | Show bundle/team/stack/cache/VCS/telemetry diagnostics; add `COMMAND` for its full resolved environment |
 | `--docs` | | Open the envoy documentation in the default browser |
 | `--version` | | Show version and exit |
 | `--help` | `-h` | Show help message |
@@ -144,12 +144,22 @@ Bundle cache: C:\Users\you\AppData\Local\envoy\bundle_cache (reachable)
 VCS detected: git at R:/repo/gtvfx-envoy
   0 pending change(s)
 
-Telemetry: disabled (default; call envoy.enable_telemetry(...) to opt in)
+Telemetry (explicit Python API opt-in): disabled (default; call envoy.enable_telemetry(...) to opt in)
+Telemetry (automatic envoy.command.run export): disabled (no ENVOY_TELEMETRY_ENDPOINT / OTEL_EXPORTER_OTLP_* resolved, or ENVOY_TELEMETRY_ENABLED=false)
+  local spool depth:    0
 
 Bundle root reachability:
   - gt:pythoncore            [local        ] reachable: R:/repo/gtvfx-envoy/pythoncore
   - gt:unreal                [local        ] reachable: R:/repo/gtvfx-envoy/unreal
 ```
+
+When `ENVOY_TELEMETRY_ENDPOINT` (or a standard `OTEL_EXPORTER_OTLP_*`
+variable) resolves, the automatic-export line instead reports the
+resolved transport (`http` or `file-drop`), a sanitized endpoint (no
+headers/credentials), configuration source, schema version, and local
+spool depth. See [Telemetry](../telemetry.md) for the full picture --
+what gets recorded, redaction, the local retry spool, and the shared
+studio dashboard this feeds.
 
 For a single-variable, step-by-step operator trace instead, use `--trace VAR COMMAND`.
 
