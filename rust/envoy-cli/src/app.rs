@@ -15,9 +15,9 @@ use envoy_core::runtime::{
     collect_env_files, is_raw_path, prepare_env, resolve_cached_bundles,
     resolve_team_config_for_bundles,
 };
-use envoy_core::stack::{Stack, DEFAULT_STACK_MAX_DEPTH, DEFAULT_STACK_NAMESPACE};
+use envoy_core::stack::{Stack, DEFAULT_STACK_MAX_DEPTH, DEFAULT_STACK_NAMESPACE, STACK_SETTING};
 use envoy_core::stack_registry::{
-    is_stack_name, list_named_stacks, resolve_named_stack, STACK_ROOTS_VAR,
+    is_stack_name, list_named_stacks, resolve_named_stack, NamedStackEntry, STACK_ROOTS_VAR,
 };
 use envoy_core::telemetry::{CommandKind, CommandRunContext, ErrorCategory};
 use envoy_core::user_config::{known_settings, UserConfig};
@@ -222,6 +222,24 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     if cli.docs {
         let exit_code = open_docs();
         return CommandRunEmission::new(CommandKind::Docs, raw_argv, invocation_start)
+            .emit_and_return(exit_code);
+    }
+
+    if cli.list_stacks {
+        let exit_code = handle_list_stacks();
+        return CommandRunEmission::new(CommandKind::ListStacks, raw_argv, invocation_start)
+            .emit_and_return(exit_code);
+    }
+
+    if let Some(raw) = cli.set_stack.as_deref() {
+        let exit_code = handle_set_stack(raw, cli.verbose);
+        return CommandRunEmission::new(CommandKind::SetStack, raw_argv, invocation_start)
+            .emit_and_return(exit_code);
+    }
+
+    if cli.get_stack {
+        let exit_code = handle_get_stack(cli.ignore_config);
+        return CommandRunEmission::new(CommandKind::GetStack, raw_argv, invocation_start)
             .emit_and_return(exit_code);
     }
 
@@ -1297,23 +1315,97 @@ fn handle_list_configs() -> i32 {
     println!("Usage:  envoy --set-config KEY=VALUE");
     println!("        envoy --set-config KEY=       (clear a setting)");
 
+    print_named_stacks_section();
+
+    0
+}
+
+fn print_named_stacks_section() {
     let named_stacks = list_named_stacks();
     if !named_stacks.is_empty() {
         println!();
         println!("Available named stacks ({STACK_ROOTS_VAR}):");
         println!();
-        for entry in named_stacks {
-            println!("  {:<20}  version: {}", entry.name, entry.version);
-            println!("    {}", entry.path.display());
-        }
+        print_named_stack_entries(&named_stacks);
         println!();
-        println!("Usage:  envoy --set-config stack=<name>");
+        println!("Usage:  envoy --set-stack <name>");
     } else if env::var_os(STACK_ROOTS_VAR).is_some() {
         println!();
         println!("No named stacks found in {STACK_ROOTS_VAR}.");
     }
+}
 
+fn print_named_stack_entries(entries: &[NamedStackEntry]) {
+    for entry in entries {
+        println!("  {:<20}  version: {}", entry.name, entry.version);
+        println!("    {}", entry.path.display());
+    }
+}
+
+fn handle_list_stacks() -> i32 {
+    let named_stacks = list_named_stacks();
+    if named_stacks.is_empty() {
+        println!("No named stacks found in {STACK_ROOTS_VAR}.");
+        return 0;
+    }
+
+    println!("Available named stacks ({STACK_ROOTS_VAR}):");
+    println!();
+    print_named_stack_entries(&named_stacks);
+    println!();
+    println!("Usage:  envoy --stack <name>       (use for one invocation)");
+    println!("        envoy --set-stack <name>   (persist as the default)");
     0
+}
+
+fn handle_set_stack(raw: &str, verbose: bool) -> i32 {
+    // Validate before persisting: a bad value stored via --set-config
+    // silently breaks every subsequent invocation until noticed, so
+    // --set-stack resolves it up front the same way a normal run would.
+    if let Err(code) = resolve_stack_value(raw, verbose) {
+        return code;
+    }
+
+    let mut config = UserConfig::load(None);
+    if let Err(error) = config.set(STACK_SETTING, raw) {
+        eprintln!("Error: {}", display_envoy_error(&error));
+        return 1;
+    }
+    if let Err(error) = config.save() {
+        eprintln!("Error: {}", display_envoy_error(&error));
+        return 1;
+    }
+
+    println!("Saved default stack: {raw}");
+    println!("Config: {}", config.path.display());
+    0
+}
+
+fn handle_get_stack(ignore_config: bool) -> i32 {
+    match Stack::current(
+        ignore_config,
+        None,
+        DEFAULT_STACK_NAMESPACE,
+        DEFAULT_STACK_MAX_DEPTH,
+    ) {
+        Ok(Some(stack)) => {
+            println!("Stack: {}", stack.name());
+            if let Some(version) = stack.registry_version() {
+                println!("  Version: {version}");
+            }
+            println!("  Path: {}", stack.path().display());
+            0
+        }
+        Ok(None) => {
+            println!("No stack currently selected.");
+            println!("Set one with: envoy --set-stack <NAME_OR_PATH>");
+            0
+        }
+        Err(error) => {
+            eprintln!("Error resolving stack: {}", display_envoy_error(&error));
+            1
+        }
+    }
 }
 
 fn open_docs() -> i32 {

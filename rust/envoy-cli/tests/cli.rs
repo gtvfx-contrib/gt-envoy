@@ -99,6 +99,9 @@ fn help_lists_expected_flags() {
         "--which <COMMAND>",
         "--commands-file <PATH>",
         "--stack <NAME_OR_PATH>",
+        "--set-stack <NAME_OR_PATH>",
+        "--get-stack",
+        "--list-stacks",
         "--set-config <KEY=VALUE>",
         "--get-config [<KEY>]",
         "--list-configs",
@@ -204,6 +207,90 @@ fn stack_config_can_be_set_read_and_cleared_through_cli() {
         .assert()
         .success();
     assert!(stdout_text(&cleared_assert).contains("stack: <not set>"));
+}
+
+fn write_minimal_checkout_bundle(bundle_root: &Path) {
+    fs::create_dir_all(bundle_root.join(".git")).expect(".git dir should be created");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"known": {"environment": []}}"#,
+    )
+    .expect("commands.json should be written");
+}
+
+#[test]
+fn set_stack_validates_and_persists_a_real_stack_path() {
+    let scratch = ScratchDir::new("envoy_set_stack_valid");
+    let bundle_root = scratch.path().join("gt").join("maya");
+    write_minimal_checkout_bundle(&bundle_root);
+    let stack_path = scratch.path().join("studio.estack");
+    write_stack(&stack_path, "bfd", &bundle_root);
+    let stack_value = stack_path.to_string_lossy();
+
+    let set_assert = base_command()
+        .args(["--set-stack", &stack_value])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+    assert!(stdout_text(&set_assert).contains("Saved default stack"));
+
+    let persisted_config = UserConfig::load(Some(scratch.path().join("user_config.json")));
+    assert_eq!(persisted_config.get("stack"), Some(stack_value.as_ref()));
+
+    let get_assert = base_command()
+        .args(["--get-stack"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+    let get_stdout = stdout_text(&get_assert);
+    assert!(
+        get_stdout.contains("Stack: studio"),
+        "stdout was:\n{get_stdout}"
+    );
+    assert!(get_stdout.contains(stack_path.display().to_string().as_str()));
+}
+
+#[test]
+fn set_stack_rejects_an_unresolvable_value_without_persisting() {
+    let scratch = ScratchDir::new("envoy_set_stack_invalid");
+
+    let assert = base_command()
+        .args(["--set-stack", "definitely-not-a-real-stack"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+    assert!(stderr.contains("not found"), "stderr was:\n{stderr}");
+
+    let persisted_config = UserConfig::load(Some(scratch.path().join("user_config.json")));
+    assert_eq!(persisted_config.get("stack"), None);
+}
+
+#[test]
+fn get_stack_reports_none_selected_when_nothing_is_configured() {
+    let scratch = ScratchDir::new("envoy_get_stack_none");
+
+    let assert = base_command()
+        .args(["--get-stack"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+    assert!(stdout_text(&assert).contains("No stack currently selected"));
+}
+
+#[test]
+fn list_stacks_reports_none_found_with_empty_stack_roots() {
+    let scratch = ScratchDir::new("envoy_list_stacks_empty");
+
+    let assert = base_command()
+        .args(["--list-stacks"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .env("ENVOY_STACK_ROOTS", "")
+        .assert()
+        .success();
+    assert!(stdout_text(&assert).contains("No named stacks found"));
 }
 
 #[test]
