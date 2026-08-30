@@ -157,6 +157,18 @@ jobs:
           # keeps Git Bash discoverable without letting it shadow MSVC.
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "PATH=$env:PATH;$git_bash_directory"
 
+      # This job never ran vcvarsall.bat, so cl.exe/link.exe were never
+      # guaranteed to be on PATH at all: rustc has to fall back to its own
+      # MSVC auto-detection (registry/vswhere-based) to find the linker,
+      # which is not reliable on every self-hosted runner. Setting up the
+      # Developer Command Prompt environment explicitly makes the MSVC
+      # tools directory (with the real link.exe) authoritative on PATH for
+      # every later step, regardless of what else is already on PATH.
+      - name: Set up MSVC dev environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
