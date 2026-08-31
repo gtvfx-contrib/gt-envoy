@@ -137,8 +137,11 @@ impl<'a> CommandRunEmission<'a> {
         self
     }
 
+    /// Attach `tag`, deterministically truncating it to
+    /// [`crate::args::MAX_TAG_LENGTH`] Unicode scalar values if needed (see
+    /// that constant's doc comment for why truncation, not rejection).
     fn with_tag(mut self, tag: Option<&str>) -> Self {
-        self.tag = tag.map(str::to_string);
+        self.tag = tag.map(truncate_tag);
         self
     }
 
@@ -229,48 +232,36 @@ fn init_tracing() {
 fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     let invocation_start = SystemTime::now();
 
+    // Centralizes the common `CommandRunEmission` wiring (raw argv,
+    // invocation start, --incognito, --tag) that every early-return branch
+    // below needs, so a new branch can't forget one of these fields --
+    // notably --tag, which previously only reached the managed-command path
+    // via `ExecutionOptions`/`run_command`, silently doing nothing for
+    // every built-in branch (`--list`, `--info`, `--docs`, etc.) even
+    // though telemetry was still recorded for them.
+    let emission = |kind: CommandKind| {
+        CommandRunEmission::new(kind, raw_argv, invocation_start, cli.incognito)
+            .with_tag(cli.tag.as_deref())
+    };
+
     if cli.list_configs {
         let exit_code = handle_list_configs();
-        return CommandRunEmission::new(
-            CommandKind::ListConfigs,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .emit_and_return(exit_code);
+        return emission(CommandKind::ListConfigs).emit_and_return(exit_code);
     }
 
     if let Some(raw) = cli.set_config.as_deref() {
         let exit_code = handle_set_config(raw);
-        return CommandRunEmission::new(
-            CommandKind::SetConfig,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .emit_and_return(exit_code);
+        return emission(CommandKind::SetConfig).emit_and_return(exit_code);
     }
 
     if cli.get_config.is_some() {
         let exit_code = handle_get_config(cli.get_config.as_deref());
-        return CommandRunEmission::new(
-            CommandKind::GetConfig,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .emit_and_return(exit_code);
+        return emission(CommandKind::GetConfig).emit_and_return(exit_code);
     }
 
     if cli.docs {
         let exit_code = open_docs();
-        return CommandRunEmission::new(
-            CommandKind::Docs,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .emit_and_return(exit_code);
+        return emission(CommandKind::Docs).emit_and_return(exit_code);
     }
 
     let user_cfg = UserConfig::load(None);
@@ -284,14 +275,9 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     } = match load_registry_for_cli(&cli, verbose) {
         Ok(result) => result,
         Err(code) => {
-            return CommandRunEmission::new(
-                CommandKind::ResolutionFailure,
-                raw_argv,
-                invocation_start,
-                cli.incognito,
-            )
-            .with_error_category(ErrorCategory::ResolutionFailure)
-            .emit_and_return(code)
+            return emission(CommandKind::ResolutionFailure)
+                .with_error_category(ErrorCategory::ResolutionFailure)
+                .emit_and_return(code)
         }
     };
 
@@ -299,43 +285,28 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
         && !raw_path_without_env_override(cli.command.as_deref(), cli.env.as_deref())
     {
         eprintln!("Error: No commands loaded");
-        return CommandRunEmission::new(
-            CommandKind::ResolutionFailure,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .with_stack(stack.as_ref())
-        .with_bundles(bundles.as_deref())
-        .with_error_category(ErrorCategory::CommandNotFound)
-        .emit_and_return(1);
+        return emission(CommandKind::ResolutionFailure)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .with_error_category(ErrorCategory::CommandNotFound)
+            .emit_and_return(1);
     }
 
     if cli.list {
         let exit_code = list_commands(&registry);
-        return CommandRunEmission::new(
-            CommandKind::List,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .with_stack(stack.as_ref())
-        .with_bundles(bundles.as_deref())
-        .emit_and_return(exit_code);
+        return emission(CommandKind::List)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .emit_and_return(exit_code);
     }
 
     if let Some(command_name) = cli.info.as_deref() {
         let exit_code = show_command_info(&registry, command_name);
-        return CommandRunEmission::new(
-            CommandKind::Info,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .with_stack(stack.as_ref())
-        .with_bundles(bundles.as_deref())
-        .with_command_name(command_name)
-        .emit_and_return(exit_code);
+        return emission(CommandKind::Info)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .with_command_name(command_name)
+            .emit_and_return(exit_code);
     }
 
     let env_allowlist = parse_allowlist_env();
@@ -355,18 +326,13 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             cli.inherit_env,
             env_allowlist.as_deref(),
         );
-        let mut emission = CommandRunEmission::new(
-            CommandKind::Diagnose,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .with_stack(stack.as_ref())
-        .with_bundles(bundles.as_deref());
+        let mut result = emission(CommandKind::Diagnose)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref());
         if let Some(command_name) = filtered_command_name {
-            emission = emission.with_command_name(command_name);
+            result = result.with_command_name(command_name);
         }
-        return emission.emit_and_return(exit_code);
+        return result.emit_and_return(exit_code);
     }
 
     if let Some(command_name) = cli.which.as_deref() {
@@ -377,32 +343,22 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             cli.inherit_env,
             env_allowlist.as_deref(),
         );
-        return CommandRunEmission::new(
-            CommandKind::Which,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .with_stack(stack.as_ref())
-        .with_bundles(bundles.as_deref())
-        .with_command_name(command_name)
-        .emit_and_return(exit_code);
+        return emission(CommandKind::Which)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .with_command_name(command_name)
+            .emit_and_return(exit_code);
     }
 
     if let Some(trace_var) = cli.trace.as_deref() {
         let Some(command_name) = cli.command.as_deref() else {
             eprintln!("Error: --trace requires a COMMAND argument");
             eprintln!("Example: envoy --trace UE_PYTHONPATH unreal");
-            return CommandRunEmission::new(
-                CommandKind::Trace,
-                raw_argv,
-                invocation_start,
-                cli.incognito,
-            )
-            .with_stack(stack.as_ref())
-            .with_bundles(bundles.as_deref())
-            .with_error_category(ErrorCategory::Validation)
-            .emit_and_return(1);
+            return emission(CommandKind::Trace)
+                .with_stack(stack.as_ref())
+                .with_bundles(bundles.as_deref())
+                .with_error_category(ErrorCategory::Validation)
+                .emit_and_return(1);
         };
 
         let exit_code = trace_command(
@@ -414,40 +370,25 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             env_allowlist.as_deref(),
             cli.env.as_deref(),
         );
-        return CommandRunEmission::new(
-            CommandKind::Trace,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .with_stack(stack.as_ref())
-        .with_bundles(bundles.as_deref())
-        .with_command_name(command_name)
-        .emit_and_return(exit_code);
+        return emission(CommandKind::Trace)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .with_command_name(command_name)
+            .emit_and_return(exit_code);
     }
 
     let Some(command_name) = cli.command.as_deref() else {
         if let Err(error) = args::print_help() {
             eprintln!("Error: {error}");
-            return CommandRunEmission::new(
-                CommandKind::Help,
-                raw_argv,
-                invocation_start,
-                cli.incognito,
-            )
+            return emission(CommandKind::Help)
+                .with_stack(stack.as_ref())
+                .with_bundles(bundles.as_deref())
+                .emit_and_return(1);
+        }
+        return emission(CommandKind::Help)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
-            .emit_and_return(1);
-        }
-        return CommandRunEmission::new(
-            CommandKind::Help,
-            raw_argv,
-            invocation_start,
-            cli.incognito,
-        )
-        .with_stack(stack.as_ref())
-        .with_bundles(bundles.as_deref())
-        .emit_and_return(0);
+            .emit_and_return(0);
     };
 
     run_command(
@@ -1478,6 +1419,13 @@ fn parse_allowlist_env() -> Option<Vec<String>> {
     }
 }
 
+/// Deterministically truncate `tag` to `crate::args::MAX_TAG_LENGTH`
+/// Unicode scalar values, splitting on a char boundary (never a byte
+/// boundary) so a multi-byte character is never cut in half.
+fn truncate_tag(tag: &str) -> String {
+    tag.chars().take(args::MAX_TAG_LENGTH).collect()
+}
+
 fn repr_string(value: &str) -> String {
     format!("{value:?}")
 }
@@ -1499,5 +1447,37 @@ fn display_envoy_error(error: &EnvoyError) -> String {
 fn debug(verbose: bool, message: &str) {
     if verbose {
         eprintln!("debug: {message}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::truncate_tag;
+
+    #[test]
+    fn truncate_tag_leaves_a_short_tag_untouched() {
+        assert_eq!(truncate_tag("nightly-build"), "nightly-build");
+    }
+
+    #[test]
+    fn truncate_tag_caps_an_overlong_tag_at_the_max_length() {
+        let overlong = "a".repeat(crate::args::MAX_TAG_LENGTH + 50);
+
+        let truncated = truncate_tag(&overlong);
+
+        assert_eq!(truncated.chars().count(), crate::args::MAX_TAG_LENGTH);
+        assert_eq!(truncated, "a".repeat(crate::args::MAX_TAG_LENGTH));
+    }
+
+    #[test]
+    fn truncate_tag_never_splits_a_multi_byte_character() {
+        // Each "é" is 2 bytes in UTF-8; a byte-based truncation to an odd
+        // byte count would panic or produce invalid UTF-8. Char-based
+        // truncation must never do this regardless of length.
+        let overlong = "é".repeat(crate::args::MAX_TAG_LENGTH + 10);
+
+        let truncated = truncate_tag(&overlong);
+
+        assert_eq!(truncated.chars().count(), crate::args::MAX_TAG_LENGTH);
     }
 }

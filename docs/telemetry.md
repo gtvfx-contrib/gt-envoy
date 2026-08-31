@@ -51,7 +51,14 @@ Two flags apply regardless of how telemetry is otherwise configured:
   record, if one is recorded. Useful for marking ad hoc or one-off runs
   (a specific test, an investigation) apart from routine usage in the
   shared dashboard. Has no effect when telemetry isn't enabled or is
-  suppressed by `--incognito`.
+  suppressed by `--incognito`. Applies uniformly across every kind of
+  invocation envoy records -- built-ins like `--list`/`--docs` included,
+  not just managed-command runs.
+  Truncated to 200 characters (Unicode scalar values, not bytes) if
+  longer -- silently capped rather than rejected, so an overlong tag can
+  never fail an otherwise-successful command; this also keeps payload
+  size bounded and avoids exceeding attribute-value limits some OTLP
+  backends enforce.
 
 ## What gets recorded
 

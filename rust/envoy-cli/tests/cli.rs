@@ -639,6 +639,63 @@ fn telemetry_tag_flag_is_attached_to_the_recorded_event() {
     assert_eq!(value["attributes"]["envoy.tag"]["Str"], "nightly-build");
 }
 
+/// Regression test: `--tag` previously only reached the telemetry record
+/// via `run_command`'s `ExecutionOptions`, so it silently did nothing for
+/// any built-in branch of `run_cli` (`--list-configs`, `--docs`, `--list`,
+/// etc.) even though those branches still record their own
+/// `envoy.command.run` event. `--list-configs` is used here as a
+/// representative built-in that returns before bundle/registry resolution.
+#[test]
+fn telemetry_tag_flag_is_attached_for_a_built_in_command_not_just_managed_commands() {
+    let config_root = ScratchDir::new("envoy_telemetry_tag_builtin");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .args(["--tag", "nightly-build", "--list-configs"])
+        .assert()
+        .success();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+    assert_eq!(
+        value["attributes"]["envoy.command.kind"]["Str"],
+        "list_configs"
+    );
+    assert_eq!(value["attributes"]["envoy.tag"]["Str"], "nightly-build");
+}
+
+#[test]
+fn telemetry_tag_flag_is_truncated_to_the_documented_max_length() {
+    let config_root = ScratchDir::new("envoy_telemetry_tag_overlong");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let overlong_tag = "a".repeat(500);
+    let args = raw_exit_code_args(0);
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .args(["--tag", &overlong_tag])
+        .args(&args)
+        .assert()
+        .success();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+    let recorded_tag = value["attributes"]["envoy.tag"]["Str"]
+        .as_str()
+        .expect("envoy.tag should be a string attribute");
+    assert_eq!(recorded_tag.chars().count(), 200);
+    assert_eq!(recorded_tag, "a".repeat(200));
+}
+
 #[test]
 fn telemetry_file_drop_records_a_successful_raw_executable_command() {
     let config_root = ScratchDir::new("envoy_telemetry_config_root");
