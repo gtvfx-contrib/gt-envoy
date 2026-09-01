@@ -39,6 +39,10 @@ struct ExecutionOptions<'a> {
     invocation_start: SystemTime,
     /// Resolved stack, if any, for the `envoy.command.run` record.
     stack: Option<&'a Stack>,
+    /// Disables telemetry for this invocation only, from `--incognito`.
+    incognito: bool,
+    /// Free-text tag from `--tag`, for the `envoy.command.run` record.
+    tag: Option<&'a str>,
 }
 
 struct LoadedRegistry {
@@ -66,10 +70,22 @@ struct CommandRunEmission<'a> {
     bundle_id: Option<String>,
     error_category: Option<ErrorCategory>,
     bundle_env: Option<&'a HashMap<String, String>>,
+    /// From `--incognito`: when `true`, `emit_and_return` skips telemetry
+    /// entirely (not even resolving configuration), unconditionally, for
+    /// this invocation only. Required at construction (rather than an
+    /// optional builder method) so a new call site can't accidentally
+    /// forget to wire it up and record telemetry the caller asked to skip.
+    incognito: bool,
+    tag: Option<String>,
 }
 
 impl<'a> CommandRunEmission<'a> {
-    fn new(kind: CommandKind, raw_argv: &'a [String], invocation_start: SystemTime) -> Self {
+    fn new(
+        kind: CommandKind,
+        raw_argv: &'a [String],
+        invocation_start: SystemTime,
+        incognito: bool,
+    ) -> Self {
         Self {
             kind,
             raw_argv,
@@ -81,6 +97,8 @@ impl<'a> CommandRunEmission<'a> {
             bundle_id: None,
             error_category: None,
             bundle_env: None,
+            incognito,
+            tag: None,
         }
     }
 
@@ -119,8 +137,20 @@ impl<'a> CommandRunEmission<'a> {
         self
     }
 
+    /// Attach `tag`, deterministically truncating it to
+    /// [`crate::args::MAX_TAG_LENGTH`] Unicode scalar values if needed (see
+    /// that constant's doc comment for why truncation, not rejection).
+    fn with_tag(mut self, tag: Option<&str>) -> Self {
+        self.tag = tag.map(truncate_tag);
+        self
+    }
+
     /// Assemble the context, record it, and return `exit_code` unchanged.
     fn emit_and_return(self, exit_code: i32) -> i32 {
+        if self.incognito {
+            return exit_code;
+        }
+
         let (stack_name, stack_namespace, stack_registry_version) = match self.stack {
             Some(stack) => (
                 Some(stack.name().to_string()),
@@ -153,6 +183,7 @@ impl<'a> CommandRunEmission<'a> {
             command_argv: self.command_argv.unwrap_or_default(),
             extra_redact_args: Vec::new(),
             error_category: self.error_category,
+            tag: self.tag,
         };
 
         envoy_core::telemetry::record_command_run(
@@ -201,22 +232,31 @@ fn init_tracing() {
 fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     let invocation_start = SystemTime::now();
 
+    // Centralizes the common `CommandRunEmission` wiring (raw argv,
+    // invocation start, --incognito, --tag) that every early-return branch
+    // below needs, so a new branch can't forget one of these fields --
+    // notably --tag, which previously only reached the managed-command path
+    // via `ExecutionOptions`/`run_command`, silently doing nothing for
+    // every built-in branch (`--list`, `--info`, `--docs`, etc.) even
+    // though telemetry was still recorded for them.
+    let emission = |kind: CommandKind| {
+        CommandRunEmission::new(kind, raw_argv, invocation_start, cli.incognito)
+            .with_tag(cli.tag.as_deref())
+    };
+
     if cli.list_configs {
         let exit_code = handle_list_configs();
-        return CommandRunEmission::new(CommandKind::ListConfigs, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::ListConfigs).emit_and_return(exit_code);
     }
 
     if let Some(raw) = cli.set_config.as_deref() {
         let exit_code = handle_set_config(raw);
-        return CommandRunEmission::new(CommandKind::SetConfig, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::SetConfig).emit_and_return(exit_code);
     }
 
     if cli.get_config.is_some() {
         let exit_code = handle_get_config(cli.get_config.as_deref());
-        return CommandRunEmission::new(CommandKind::GetConfig, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::GetConfig).emit_and_return(exit_code);
     }
 
     // A bare --docs (empty value) needs no bundle context, so it can still
@@ -224,8 +264,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     // --docs BUNDLE falls through to the later, bundle-aware branch instead.
     if cli.docs.as_deref() == Some("") {
         let exit_code = open_docs();
-        return CommandRunEmission::new(CommandKind::Docs, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::Docs).emit_and_return(exit_code);
     }
 
     let user_cfg = UserConfig::load(None);
@@ -239,19 +278,15 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     } = match load_registry_for_cli(&cli, verbose) {
         Ok(result) => result,
         Err(code) => {
-            return CommandRunEmission::new(
-                CommandKind::ResolutionFailure,
-                raw_argv,
-                invocation_start,
-            )
-            .with_error_category(ErrorCategory::ResolutionFailure)
-            .emit_and_return(code)
+            return emission(CommandKind::ResolutionFailure)
+                .with_error_category(ErrorCategory::ResolutionFailure)
+                .emit_and_return(code)
         }
     };
 
     if let Some(bundle_id) = cli.docs.as_deref().filter(|value| !value.is_empty()) {
         let exit_code = open_bundle_docs(bundles.as_deref(), bundle_id);
-        return CommandRunEmission::new(CommandKind::Docs, raw_argv, invocation_start)
+        return emission(CommandKind::Docs)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .emit_and_return(exit_code);
@@ -261,7 +296,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
         && !raw_path_without_env_override(cli.command.as_deref(), cli.env.as_deref())
     {
         eprintln!("Error: No commands loaded");
-        return CommandRunEmission::new(CommandKind::ResolutionFailure, raw_argv, invocation_start)
+        return emission(CommandKind::ResolutionFailure)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .with_error_category(ErrorCategory::CommandNotFound)
@@ -270,7 +305,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
 
     if cli.list {
         let exit_code = list_commands(&registry);
-        return CommandRunEmission::new(CommandKind::List, raw_argv, invocation_start)
+        return emission(CommandKind::List)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .emit_and_return(exit_code);
@@ -278,7 +313,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
 
     if let Some(command_name) = cli.info.as_deref() {
         let exit_code = show_command_info(&registry, command_name);
-        return CommandRunEmission::new(CommandKind::Info, raw_argv, invocation_start)
+        return emission(CommandKind::Info)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .with_command_name(command_name)
@@ -302,14 +337,13 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             cli.inherit_env,
             env_allowlist.as_deref(),
         );
-        let mut emission =
-            CommandRunEmission::new(CommandKind::Diagnose, raw_argv, invocation_start)
-                .with_stack(stack.as_ref())
-                .with_bundles(bundles.as_deref());
+        let mut result = emission(CommandKind::Diagnose)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref());
         if let Some(command_name) = filtered_command_name {
-            emission = emission.with_command_name(command_name);
+            result = result.with_command_name(command_name);
         }
-        return emission.emit_and_return(exit_code);
+        return result.emit_and_return(exit_code);
     }
 
     if let Some(command_name) = cli.which.as_deref() {
@@ -320,7 +354,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             cli.inherit_env,
             env_allowlist.as_deref(),
         );
-        return CommandRunEmission::new(CommandKind::Which, raw_argv, invocation_start)
+        return emission(CommandKind::Which)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .with_command_name(command_name)
@@ -331,7 +365,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
         let Some(command_name) = cli.command.as_deref() else {
             eprintln!("Error: --trace requires a COMMAND argument");
             eprintln!("Example: envoy --trace UE_PYTHONPATH unreal");
-            return CommandRunEmission::new(CommandKind::Trace, raw_argv, invocation_start)
+            return emission(CommandKind::Trace)
                 .with_stack(stack.as_ref())
                 .with_bundles(bundles.as_deref())
                 .with_error_category(ErrorCategory::Validation)
@@ -347,7 +381,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             env_allowlist.as_deref(),
             cli.env.as_deref(),
         );
-        return CommandRunEmission::new(CommandKind::Trace, raw_argv, invocation_start)
+        return emission(CommandKind::Trace)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .with_command_name(command_name)
@@ -357,12 +391,12 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     let Some(command_name) = cli.command.as_deref() else {
         if let Err(error) = args::print_help() {
             eprintln!("Error: {error}");
-            return CommandRunEmission::new(CommandKind::Help, raw_argv, invocation_start)
+            return emission(CommandKind::Help)
                 .with_stack(stack.as_ref())
                 .with_bundles(bundles.as_deref())
                 .emit_and_return(1);
         }
-        return CommandRunEmission::new(CommandKind::Help, raw_argv, invocation_start)
+        return emission(CommandKind::Help)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .emit_and_return(0);
@@ -381,6 +415,8 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             raw_argv,
             invocation_start,
             stack: stack.as_ref(),
+            incognito: cli.incognito,
+            tag: cli.tag.as_deref(),
         },
     )
 }
@@ -941,10 +977,16 @@ fn run_command(
         CommandKind::ManagedCommand
     };
     let emission = || {
-        CommandRunEmission::new(kind, options.raw_argv, options.invocation_start)
-            .with_stack(options.stack)
-            .with_bundles(options.bundles)
-            .with_command_name(command_name)
+        CommandRunEmission::new(
+            kind,
+            options.raw_argv,
+            options.invocation_start,
+            options.incognito,
+        )
+        .with_stack(options.stack)
+        .with_bundles(options.bundles)
+        .with_command_name(command_name)
+        .with_tag(options.tag)
     };
 
     if !is_raw && registry.get(command_name).is_none() {
@@ -1367,7 +1409,7 @@ fn resolve_bundle_docs_target(
         .find(|bundle| bundle.bndlid() == bundle_id)
         .ok_or_else(|| {
             format!(
-                "Bundle '{bundle_id}' not found\nRun 'envoy --diagnose' to see discovered bundles"
+                "Bundle '{bundle_id}' not found; run 'envoy --diagnose' to see discovered bundles"
             )
         })?;
 
@@ -1444,6 +1486,13 @@ fn parse_allowlist_env() -> Option<Vec<String>> {
     }
 }
 
+/// Deterministically truncate `tag` to `crate::args::MAX_TAG_LENGTH`
+/// Unicode scalar values, splitting on a char boundary (never a byte
+/// boundary) so a multi-byte character is never cut in half.
+fn truncate_tag(tag: &str) -> String {
+    tag.chars().take(args::MAX_TAG_LENGTH).collect()
+}
+
 fn repr_string(value: &str) -> String {
     format!("{value:?}")
 }
@@ -1473,43 +1522,96 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn temp_bundle_root(name: &str) -> PathBuf {
-        let dir = env::temp_dir().join(format!(
-            "envoy_app_test_{name}_{}_{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).expect("temp bundle root should be created");
-        dir
+    #[test]
+    fn truncate_tag_leaves_a_short_tag_untouched() {
+        assert_eq!(truncate_tag("nightly-build"), "nightly-build");
+    }
+
+    #[test]
+    fn truncate_tag_caps_an_overlong_tag_at_the_max_length() {
+        let overlong = "a".repeat(crate::args::MAX_TAG_LENGTH + 50);
+
+        let truncated = truncate_tag(&overlong);
+
+        assert_eq!(truncated.chars().count(), crate::args::MAX_TAG_LENGTH);
+        assert_eq!(truncated, "a".repeat(crate::args::MAX_TAG_LENGTH));
+    }
+
+    #[test]
+    fn truncate_tag_never_splits_a_multi_byte_character() {
+        // Each "é" is 2 bytes in UTF-8; a byte-based truncation to an odd
+        // byte count would panic or produce invalid UTF-8. Char-based
+        // truncation must never do this regardless of length.
+        let overlong = "é".repeat(crate::args::MAX_TAG_LENGTH + 10);
+
+        let truncated = truncate_tag(&overlong);
+
+        assert_eq!(truncated.chars().count(), crate::args::MAX_TAG_LENGTH);
+    }
+
+    /// RAII guard for a scratch bundle-root directory used by the tests
+    /// below. Always removes the directory on drop -- including when an
+    /// assertion panics partway through a test -- instead of relying on a
+    /// manual `fs::remove_dir_all` call at the end of each test.
+    struct TempBundleRoot {
+        path: PathBuf,
+    }
+
+    impl TempBundleRoot {
+        fn new(name: &str) -> Self {
+            let path = env::temp_dir().join(format!(
+                "envoy_app_test_{name}_{}_{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&path).expect("temp bundle root should be created");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempBundleRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
     }
 
     #[test]
     fn resolve_bundle_docs_target_prefers_docs_index_html_over_readme() {
-        let root = temp_bundle_root("docs_index");
-        fs::create_dir_all(root.join("docs")).unwrap();
-        fs::write(root.join("docs").join("index.html"), "<html></html>").unwrap();
-        fs::write(root.join("README.md"), "# readme").unwrap();
-        let bundle = BundleInfo::new(root.clone(), "maya".to_string(), "gt".to_string());
+        let root = TempBundleRoot::new("docs_index");
+        fs::create_dir_all(root.path().join("docs")).unwrap();
+        fs::write(root.path().join("docs").join("index.html"), "<html></html>").unwrap();
+        fs::write(root.path().join("README.md"), "# readme").unwrap();
+        let bundle = BundleInfo::new(
+            root.path().to_path_buf(),
+            "maya".to_string(),
+            "gt".to_string(),
+        );
 
         let result = resolve_bundle_docs_target(Some(&[bundle]), "gt:maya");
 
-        assert_eq!(result, Ok(root.join("docs").join("index.html")));
-        let _ = fs::remove_dir_all(&root);
+        assert_eq!(result, Ok(root.path().join("docs").join("index.html")));
     }
 
     #[test]
     fn resolve_bundle_docs_target_falls_back_to_readme() {
-        let root = temp_bundle_root("readme_fallback");
-        fs::write(root.join("README.md"), "# readme").unwrap();
-        let bundle = BundleInfo::new(root.clone(), "maya".to_string(), "gt".to_string());
+        let root = TempBundleRoot::new("readme_fallback");
+        fs::write(root.path().join("README.md"), "# readme").unwrap();
+        let bundle = BundleInfo::new(
+            root.path().to_path_buf(),
+            "maya".to_string(),
+            "gt".to_string(),
+        );
 
         let result = resolve_bundle_docs_target(Some(&[bundle]), "gt:maya");
 
-        assert_eq!(result, Ok(root.join("README.md")));
-        let _ = fs::remove_dir_all(&root);
+        assert_eq!(result, Ok(root.path().join("README.md")));
     }
 
     #[test]
@@ -1521,13 +1623,16 @@ mod tests {
 
     #[test]
     fn resolve_bundle_docs_target_errors_when_no_docs_present() {
-        let root = temp_bundle_root("no_docs");
-        let bundle = BundleInfo::new(root.clone(), "maya".to_string(), "gt".to_string());
+        let root = TempBundleRoot::new("no_docs");
+        let bundle = BundleInfo::new(
+            root.path().to_path_buf(),
+            "maya".to_string(),
+            "gt".to_string(),
+        );
 
         let result = resolve_bundle_docs_target(Some(&[bundle]), "gt:maya");
 
         assert!(result.is_err_and(|message| message.contains("No docs found")));
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
