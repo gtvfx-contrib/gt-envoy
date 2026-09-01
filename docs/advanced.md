@@ -89,6 +89,25 @@ You can write paths with either separator in JSON files:
 
 The subprocess will see `R:\repo\my-bundle\py` on Windows.
 
+## Python API Initialization Hooks (`ENVOY_PYINIT`)
+
+Set `ENVOY_PYINIT` to a platform-separated (`;` on Windows, `:` elsewhere)
+list of directories to have `import envoy` run every `*.py` file in each
+directory (non-recursive, sorted by filename) once the module has finished
+initializing:
+
+```powershell
+$env:ENVOY_PYINIT = "R:/studio/envoy_pyinit;C:/dev/my_pyinit_scripts"
+python -c "import envoy"
+```
+
+Scripts run after the full public API is available, so they can freely
+`import envoy` themselves. A script that raises is reported to stderr and
+does not prevent the remaining scripts (or the `import envoy` itself) from
+completing -- treat this the same as any other best-effort extension point
+in envoy (e.g. bundle cache warmup). Unset or empty, `ENVOY_PYINIT` is a
+no-op.
+
 ## Bundle Publishing
 
 The `engit publish bundle` command produces a clean, deployment-ready copy of any bundle:

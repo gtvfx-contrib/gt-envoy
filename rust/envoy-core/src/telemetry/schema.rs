@@ -52,6 +52,7 @@ pub const ATTR_COMMAND_ARGV_DISPLAY: &str = "envoy.command.argv_display";
 pub const ATTR_TRANSPORT: &str = "envoy.telemetry.transport";
 pub const ATTR_DELIVERED_VIA_RETRY: &str = "envoy.telemetry.delivered_via_retry";
 pub const ATTR_ERROR_CATEGORY: &str = "envoy.error_category";
+pub const ATTR_TAG: &str = "envoy.tag";
 
 /// Prefix for indexed CLI-argument attributes (`envoy.cli.arg.0`, `.1`, ...).
 pub const ATTR_CLI_ARG_PREFIX: &str = "envoy.cli.arg.";
@@ -95,6 +96,7 @@ pub enum CommandKind {
     Diagnose,
     Trace,
     Docs,
+    Shell,
     SetConfig,
     GetConfig,
     ListConfigs,
@@ -116,6 +118,7 @@ impl CommandKind {
             CommandKind::Diagnose => "diagnose",
             CommandKind::Trace => "trace",
             CommandKind::Docs => "docs",
+            CommandKind::Shell => "shell",
             CommandKind::SetConfig => "set_config",
             CommandKind::GetConfig => "get_config",
             CommandKind::ListConfigs => "list_configs",
@@ -156,6 +159,9 @@ pub struct CommandRunContext {
     /// Additional sensitive flag names from `ENVOY_TELEMETRY_REDACT_ARGS`.
     pub extra_redact_args: Vec<String>,
     pub error_category: Option<ErrorCategory>,
+    /// Free-text tag from `--tag`, attached as-is (not redacted -- unlike
+    /// argv, this is a value the user deliberately chose to attach).
+    pub tag: Option<String>,
 }
 
 impl CommandRunContext {
@@ -185,6 +191,7 @@ impl CommandRunContext {
         insert_str(&mut attrs, ATTR_BUNDLE_ID, &self.bundle_id);
         insert_str(&mut attrs, ATTR_ENVOY_VERSION, &self.envoy_version);
         insert_str(&mut attrs, ATTR_INSTALLATION_ID, &self.installation_id);
+        insert_str(&mut attrs, ATTR_TAG, &self.tag);
 
         if let Some(value) = self.success {
             attrs.insert(ATTR_SUCCESS.to_string(), TelemetryValue::Bool(value));
@@ -350,6 +357,21 @@ mod tests {
             attrs.get(ATTR_DURATION_MS),
             Some(&TelemetryValue::Int(1500))
         );
+    }
+
+    #[test]
+    fn tag_is_attached_as_is_when_set_and_omitted_when_unset() {
+        let tagged = CommandRunContext {
+            tag: Some("nightly-build".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            tagged.build_attributes().get(ATTR_TAG),
+            Some(&TelemetryValue::Str("nightly-build".to_string()))
+        );
+
+        let untagged = CommandRunContext::default();
+        assert!(!untagged.build_attributes().contains_key(ATTR_TAG));
     }
 
     #[test]

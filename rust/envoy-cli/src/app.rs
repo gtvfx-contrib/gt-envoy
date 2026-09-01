@@ -17,7 +17,7 @@ use envoy_core::runtime::{
 };
 use envoy_core::stack::{Stack, DEFAULT_STACK_MAX_DEPTH, DEFAULT_STACK_NAMESPACE, STACK_SETTING};
 use envoy_core::stack_registry::{
-    is_stack_name, list_named_stacks, resolve_named_stack, NamedStackEntry, STACK_ROOTS_VAR,
+    is_stack_name, list_named_stacks, NamedStackEntry, STACK_ROOTS_VAR,
 };
 use envoy_core::telemetry::{CommandKind, CommandRunContext, ErrorCategory};
 use envoy_core::user_config::{known_settings, UserConfig};
@@ -39,6 +39,10 @@ struct ExecutionOptions<'a> {
     invocation_start: SystemTime,
     /// Resolved stack, if any, for the `envoy.command.run` record.
     stack: Option<&'a Stack>,
+    /// Disables telemetry for this invocation only, from `--incognito`.
+    incognito: bool,
+    /// Free-text tag from `--tag`, for the `envoy.command.run` record.
+    tag: Option<&'a str>,
 }
 
 struct LoadedRegistry {
@@ -66,10 +70,22 @@ struct CommandRunEmission<'a> {
     bundle_id: Option<String>,
     error_category: Option<ErrorCategory>,
     bundle_env: Option<&'a HashMap<String, String>>,
+    /// From `--incognito`: when `true`, `emit_and_return` skips telemetry
+    /// entirely (not even resolving configuration), unconditionally, for
+    /// this invocation only. Required at construction (rather than an
+    /// optional builder method) so a new call site can't accidentally
+    /// forget to wire it up and record telemetry the caller asked to skip.
+    incognito: bool,
+    tag: Option<String>,
 }
 
 impl<'a> CommandRunEmission<'a> {
-    fn new(kind: CommandKind, raw_argv: &'a [String], invocation_start: SystemTime) -> Self {
+    fn new(
+        kind: CommandKind,
+        raw_argv: &'a [String],
+        invocation_start: SystemTime,
+        incognito: bool,
+    ) -> Self {
         Self {
             kind,
             raw_argv,
@@ -81,6 +97,8 @@ impl<'a> CommandRunEmission<'a> {
             bundle_id: None,
             error_category: None,
             bundle_env: None,
+            incognito,
+            tag: None,
         }
     }
 
@@ -119,8 +137,20 @@ impl<'a> CommandRunEmission<'a> {
         self
     }
 
+    /// Attach `tag`, deterministically truncating it to
+    /// [`crate::args::MAX_TAG_LENGTH`] Unicode scalar values if needed (see
+    /// that constant's doc comment for why truncation, not rejection).
+    fn with_tag(mut self, tag: Option<&str>) -> Self {
+        self.tag = tag.map(truncate_tag);
+        self
+    }
+
     /// Assemble the context, record it, and return `exit_code` unchanged.
     fn emit_and_return(self, exit_code: i32) -> i32 {
+        if self.incognito {
+            return exit_code;
+        }
+
         let (stack_name, stack_namespace, stack_registry_version) = match self.stack {
             Some(stack) => (
                 Some(stack.name().to_string()),
@@ -153,6 +183,7 @@ impl<'a> CommandRunEmission<'a> {
             command_argv: self.command_argv.unwrap_or_default(),
             extra_redact_args: Vec::new(),
             error_category: self.error_category,
+            tag: self.tag,
         };
 
         envoy_core::telemetry::record_command_run(
@@ -201,46 +232,54 @@ fn init_tracing() {
 fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     let invocation_start = SystemTime::now();
 
+    // Centralizes the common `CommandRunEmission` wiring (raw argv,
+    // invocation start, --incognito, --tag) that every early-return branch
+    // below needs, so a new branch can't forget one of these fields --
+    // notably --tag, which previously only reached the managed-command path
+    // via `ExecutionOptions`/`run_command`, silently doing nothing for
+    // every built-in branch (`--list`, `--info`, `--docs`, etc.) even
+    // though telemetry was still recorded for them.
+    let emission = |kind: CommandKind| {
+        CommandRunEmission::new(kind, raw_argv, invocation_start, cli.incognito)
+            .with_tag(cli.tag.as_deref())
+    };
+
     if cli.list_configs {
         let exit_code = handle_list_configs();
-        return CommandRunEmission::new(CommandKind::ListConfigs, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::ListConfigs).emit_and_return(exit_code);
     }
 
     if let Some(raw) = cli.set_config.as_deref() {
         let exit_code = handle_set_config(raw);
-        return CommandRunEmission::new(CommandKind::SetConfig, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::SetConfig).emit_and_return(exit_code);
     }
 
     if cli.get_config.is_some() {
         let exit_code = handle_get_config(cli.get_config.as_deref());
-        return CommandRunEmission::new(CommandKind::GetConfig, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::GetConfig).emit_and_return(exit_code);
     }
 
-    if cli.docs {
+    // A bare --docs (empty value) needs no bundle context, so it can still
+    // short-circuit here without waiting for registry/bundle loading below.
+    // --docs BUNDLE falls through to the later, bundle-aware branch instead.
+    if cli.docs.as_deref() == Some("") {
         let exit_code = open_docs();
-        return CommandRunEmission::new(CommandKind::Docs, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::Docs).emit_and_return(exit_code);
     }
 
     if cli.list_stacks {
         let exit_code = handle_list_stacks();
-        return CommandRunEmission::new(CommandKind::ListStacks, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::ListStacks).emit_and_return(exit_code);
     }
 
     if let Some(raw) = cli.set_stack.as_deref() {
         let exit_code = handle_set_stack(raw, cli.verbose);
-        return CommandRunEmission::new(CommandKind::SetStack, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::SetStack).emit_and_return(exit_code);
     }
 
     if cli.get_stack {
         let exit_code = handle_get_stack(cli.ignore_config);
-        return CommandRunEmission::new(CommandKind::GetStack, raw_argv, invocation_start)
-            .emit_and_return(exit_code);
+        return emission(CommandKind::GetStack).emit_and_return(exit_code);
     }
 
     let user_cfg = UserConfig::load(None);
@@ -254,21 +293,25 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     } = match load_registry_for_cli(&cli, verbose) {
         Ok(result) => result,
         Err(code) => {
-            return CommandRunEmission::new(
-                CommandKind::ResolutionFailure,
-                raw_argv,
-                invocation_start,
-            )
-            .with_error_category(ErrorCategory::ResolutionFailure)
-            .emit_and_return(code)
+            return emission(CommandKind::ResolutionFailure)
+                .with_error_category(ErrorCategory::ResolutionFailure)
+                .emit_and_return(code)
         }
     };
+
+    if let Some(bundle_id) = cli.docs.as_deref().filter(|value| !value.is_empty()) {
+        let exit_code = open_bundle_docs(bundles.as_deref(), bundle_id);
+        return emission(CommandKind::Docs)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .emit_and_return(exit_code);
+    }
 
     if registry.is_empty()
         && !raw_path_without_env_override(cli.command.as_deref(), cli.env.as_deref())
     {
         eprintln!("Error: No commands loaded");
-        return CommandRunEmission::new(CommandKind::ResolutionFailure, raw_argv, invocation_start)
+        return emission(CommandKind::ResolutionFailure)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .with_error_category(ErrorCategory::CommandNotFound)
@@ -277,7 +320,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
 
     if cli.list {
         let exit_code = list_commands(&registry);
-        return CommandRunEmission::new(CommandKind::List, raw_argv, invocation_start)
+        return emission(CommandKind::List)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .emit_and_return(exit_code);
@@ -285,7 +328,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
 
     if let Some(command_name) = cli.info.as_deref() {
         let exit_code = show_command_info(&registry, command_name);
-        return CommandRunEmission::new(CommandKind::Info, raw_argv, invocation_start)
+        return emission(CommandKind::Info)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .with_command_name(command_name)
@@ -309,14 +352,13 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             cli.inherit_env,
             env_allowlist.as_deref(),
         );
-        let mut emission =
-            CommandRunEmission::new(CommandKind::Diagnose, raw_argv, invocation_start)
-                .with_stack(stack.as_ref())
-                .with_bundles(bundles.as_deref());
+        let mut result = emission(CommandKind::Diagnose)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref());
         if let Some(command_name) = filtered_command_name {
-            emission = emission.with_command_name(command_name);
+            result = result.with_command_name(command_name);
         }
-        return emission.emit_and_return(exit_code);
+        return result.emit_and_return(exit_code);
     }
 
     if let Some(command_name) = cli.which.as_deref() {
@@ -327,7 +369,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             cli.inherit_env,
             env_allowlist.as_deref(),
         );
-        return CommandRunEmission::new(CommandKind::Which, raw_argv, invocation_start)
+        return emission(CommandKind::Which)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .with_command_name(command_name)
@@ -338,7 +380,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
         let Some(command_name) = cli.command.as_deref() else {
             eprintln!("Error: --trace requires a COMMAND argument");
             eprintln!("Example: envoy --trace UE_PYTHONPATH unreal");
-            return CommandRunEmission::new(CommandKind::Trace, raw_argv, invocation_start)
+            return emission(CommandKind::Trace)
                 .with_stack(stack.as_ref())
                 .with_bundles(bundles.as_deref())
                 .with_error_category(ErrorCategory::Validation)
@@ -354,7 +396,7 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             env_allowlist.as_deref(),
             cli.env.as_deref(),
         );
-        return CommandRunEmission::new(CommandKind::Trace, raw_argv, invocation_start)
+        return emission(CommandKind::Trace)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .with_command_name(command_name)
@@ -364,32 +406,35 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
     let Some(command_name) = cli.command.as_deref() else {
         if let Err(error) = args::print_help() {
             eprintln!("Error: {error}");
-            return CommandRunEmission::new(CommandKind::Help, raw_argv, invocation_start)
+            return emission(CommandKind::Help)
                 .with_stack(stack.as_ref())
                 .with_bundles(bundles.as_deref())
                 .emit_and_return(1);
         }
-        return CommandRunEmission::new(CommandKind::Help, raw_argv, invocation_start)
+        return emission(CommandKind::Help)
             .with_stack(stack.as_ref())
             .with_bundles(bundles.as_deref())
             .emit_and_return(0);
     };
 
-    run_command(
-        &registry,
-        command_name,
-        &cli.args,
-        ExecutionOptions {
-            bundles: bundles.as_deref(),
-            verbose,
-            inherit_env: cli.inherit_env,
-            env_allowlist: env_allowlist.as_deref(),
-            env_override: cli.env.as_deref(),
-            raw_argv,
-            invocation_start,
-            stack: stack.as_ref(),
-        },
-    )
+    let options = ExecutionOptions {
+        bundles: bundles.as_deref(),
+        verbose,
+        inherit_env: cli.inherit_env,
+        env_allowlist: env_allowlist.as_deref(),
+        env_override: cli.env.as_deref(),
+        raw_argv,
+        invocation_start,
+        stack: stack.as_ref(),
+        incognito: cli.incognito,
+        tag: cli.tag.as_deref(),
+    };
+
+    if cli.shell {
+        return run_shell(&registry, command_name, options);
+    }
+
+    run_command(&registry, command_name, &cli.args, options)
 }
 
 fn load_registry_for_cli(cli: &Cli, verbose: bool) -> Result<LoadedRegistry, i32> {
@@ -538,18 +583,22 @@ fn load_registry_for_cli(cli: &Cli, verbose: bool) -> Result<LoadedRegistry, i32
 
 fn resolve_stack_value(raw: &str, verbose: bool) -> Result<Stack, i32> {
     if is_stack_name(raw) {
-        let Some(resolved) = resolve_named_stack(raw) else {
-            eprintln!("Error: Named stack {raw:?} not found in {STACK_ROOTS_VAR}.");
-            return Err(1);
-        };
-        debug(
-            verbose,
-            &format!("Resolved named stack {raw:?} to: {}", resolved.display()),
-        );
-        return Stack::from_name(raw).map_err(|error| {
+        // A single `Stack::from_name` call both resolves and loads the
+        // named stack; it returns the same "not found" validation error
+        // `resolve_named_stack` would have surfaced separately, so there is
+        // no need to resolve twice (once here, once inside `from_name`).
+        let stack = Stack::from_name(raw).map_err(|error| {
             eprintln!("Error loading named stack: {}", display_envoy_error(&error));
             1
-        });
+        })?;
+        debug(
+            verbose,
+            &format!(
+                "Resolved named stack {raw:?} to: {}",
+                stack.path().display()
+            ),
+        );
+        return Ok(stack);
     }
 
     Stack::new(raw).map_err(|error| {
@@ -948,10 +997,16 @@ fn run_command(
         CommandKind::ManagedCommand
     };
     let emission = || {
-        CommandRunEmission::new(kind, options.raw_argv, options.invocation_start)
-            .with_stack(options.stack)
-            .with_bundles(options.bundles)
-            .with_command_name(command_name)
+        CommandRunEmission::new(
+            kind,
+            options.raw_argv,
+            options.invocation_start,
+            options.incognito,
+        )
+        .with_stack(options.stack)
+        .with_bundles(options.bundles)
+        .with_command_name(command_name)
+        .with_tag(options.tag)
     };
 
     if !is_raw && registry.get(command_name).is_none() {
@@ -1065,6 +1120,150 @@ fn run_command(
         emission = emission.with_error_category(error_category);
     }
     emission.emit_and_return(exit_code)
+}
+
+/// Implements `envoy --shell COMMAND`: resolves COMMAND's environment the
+/// same way `run_command` would, but launches an interactive shell in it
+/// instead of COMMAND itself, for interactive inspection.
+fn run_shell(registry: &CommandRegistry, command_name: &str, options: ExecutionOptions<'_>) -> i32 {
+    let is_raw = is_raw_path(command_name);
+    let emission = || {
+        CommandRunEmission::new(
+            CommandKind::Shell,
+            options.raw_argv,
+            options.invocation_start,
+            options.incognito,
+        )
+        .with_stack(options.stack)
+        .with_bundles(options.bundles)
+        .with_command_name(command_name)
+        .with_tag(options.tag)
+    };
+
+    if !is_raw && registry.get(command_name).is_none() {
+        eprintln!("Error: Command '{command_name}' not found");
+        eprintln!("Run 'envoy --list' to see available commands");
+        return emission()
+            .with_error_category(ErrorCategory::CommandNotFound)
+            .emit_and_return(1);
+    }
+
+    if let Some(env_override) = options.env_override {
+        if registry.get(env_override).is_none() {
+            eprintln!("Error: Environment override command '{env_override}' not found");
+            eprintln!("Run 'envoy --list' to see available commands");
+            return emission()
+                .with_error_category(ErrorCategory::CommandNotFound)
+                .emit_and_return(1);
+        }
+    }
+
+    // Mirrors run_command's raw-path special case: a raw executable path
+    // with no --env override inherits the system env directly rather than
+    // going through prepare_env(), which would otherwise fail (or resolve
+    // an unrelated command's env) for a path that isn't a registered
+    // command at all.
+    let (env_map, command) = if is_raw && options.env_override.is_none() {
+        debug(
+            options.verbose,
+            &format!("Raw executable '{command_name}' with no env override; inheriting system env"),
+        );
+        (
+            env::vars().collect::<HashMap<String, String>>(),
+            CommandDefinition {
+                name: command_name.to_string(),
+                environment: Vec::new(),
+                alias: Some(vec![command_name.to_string()]),
+                bundle: None,
+                envoy_env_dir: None,
+                source_file: None,
+                platform_overrides: Vec::new(),
+            },
+        )
+    } else {
+        match prepare_env(
+            command_name,
+            registry,
+            options.bundles,
+            options.inherit_env,
+            options.env_allowlist,
+            options.env_override,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!("Error: {}", display_envoy_error(&error));
+                return emission()
+                    .with_error_category(ErrorCategory::EnvironmentBuildFailure)
+                    .emit_and_return(1);
+            }
+        }
+    };
+
+    let bundle_id = command.bundle.clone();
+    let shell_executable = resolve_shell_executable(&env_map);
+    let subprocess_argv = vec![shell_executable.clone()];
+
+    if let Err(error) = ProcessExecutor::resolve_executable(
+        Path::new(&shell_executable),
+        env_map.get("PATH").map(String::as_str),
+    ) {
+        eprintln!("Error: {}", display_envoy_error(&error));
+        return emission()
+            .with_command_argv(subprocess_argv)
+            .with_bundle_id(bundle_id)
+            .with_bundle_env(Some(&env_map))
+            .with_error_category(ErrorCategory::ExecutionFailure)
+            .emit_and_return(1);
+    }
+
+    println!("Entering shell inside {command_name}'s resolved environment. Type 'exit' to return.");
+
+    let mut config = WrapperConfig::new(shell_executable);
+    config.env = Some(env_map.clone());
+    config.inherit_env = false;
+    config.capture_output = false;
+    config.stream_output = false;
+    config.log_execution = options.verbose;
+    config.raise_on_error = false;
+
+    let mut wrapper = ApplicationWrapper::new(config);
+    let (exit_code, error_category) = match wrapper.run() {
+        Ok(result) if result.return_code == -2 => (130, None),
+        Ok(result) => (result.return_code.try_into().unwrap_or(1), None),
+        Err(error) => {
+            eprintln!("Error: {}", display_envoy_error(&error));
+            (1, Some(ErrorCategory::ExecutionFailure))
+        }
+    };
+
+    let mut emission = emission()
+        .with_command_argv(subprocess_argv)
+        .with_bundle_id(bundle_id)
+        .with_bundle_env(Some(&env_map));
+    if let Some(error_category) = error_category {
+        emission = emission.with_error_category(error_category);
+    }
+    emission.emit_and_return(exit_code)
+}
+
+/// Resolve which shell executable to launch for `--shell`, preferring the
+/// resolved environment's own `COMSPEC`/`SHELL` value (what a program
+/// launched in that environment would itself see) over the current
+/// process's, then falling back to a platform default.
+fn resolve_shell_executable(env_map: &HashMap<String, String>) -> String {
+    if cfg!(target_os = "windows") {
+        env_map
+            .get("COMSPEC")
+            .cloned()
+            .or_else(|| env::var("COMSPEC").ok())
+            .unwrap_or_else(|| "cmd.exe".to_string())
+    } else {
+        env_map
+            .get("SHELL")
+            .cloned()
+            .or_else(|| env::var("SHELL").ok())
+            .unwrap_or_else(|| "/bin/sh".to_string())
+    }
 }
 
 fn trace_command(
@@ -1345,7 +1544,11 @@ fn print_named_stack_entries(entries: &[NamedStackEntry]) {
 fn handle_list_stacks() -> i32 {
     let named_stacks = list_named_stacks();
     if named_stacks.is_empty() {
-        println!("No named stacks found in {STACK_ROOTS_VAR}.");
+        if env::var_os(STACK_ROOTS_VAR).is_some() {
+            println!("No named stacks found in {STACK_ROOTS_VAR}.");
+        } else {
+            println!("No named stacks found (set {STACK_ROOTS_VAR} to search for named stacks).");
+        }
         return 0;
     }
 
@@ -1413,20 +1616,76 @@ fn open_docs() -> i32 {
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| DOCS_URL.to_string());
 
+    open_in_default_handler(&target)
+}
+
+/// Implements `envoy --docs BUNDLE`: opens a discovered bundle's own
+/// `docs/index.html` if present, falling back to its `README.md`.
+///
+/// There is no dedicated per-bundle docs metadata field today, so this
+/// checks the same two conventional locations real bundles in this
+/// organization already use for documentation.
+fn open_bundle_docs(bundles: Option<&[BundleInfo]>, bundle_id: &str) -> i32 {
+    match resolve_bundle_docs_target(bundles, bundle_id) {
+        Ok(target) => open_in_default_handler(&target.display().to_string()),
+        Err(message) => {
+            eprintln!("Error: {message}");
+            1
+        }
+    }
+}
+
+/// Resolve the docs file `envoy --docs BUNDLE` should open, or an error
+/// message to print. Split out from [`open_bundle_docs`] so the resolution
+/// logic (bundle lookup, candidate paths) is unit-testable without actually
+/// spawning an OS file-open command.
+fn resolve_bundle_docs_target(
+    bundles: Option<&[BundleInfo]>,
+    bundle_id: &str,
+) -> Result<PathBuf, String> {
+    let bundles = bundles
+        .ok_or_else(|| format!("No bundles discovered; cannot open docs for '{bundle_id}'"))?;
+
+    let bundle = bundles
+        .iter()
+        .find(|bundle| bundle.bndlid() == bundle_id)
+        .ok_or_else(|| {
+            format!(
+                "Bundle '{bundle_id}' not found; run 'envoy --diagnose' to see discovered bundles"
+            )
+        })?;
+
+    let candidates = [
+        bundle.root.join("docs").join("index.html"),
+        bundle.root.join("README.md"),
+    ];
+
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            format!(
+                "No docs found for '{bundle_id}' (checked docs/index.html and README.md under {})",
+                bundle.root.display()
+            )
+        })
+}
+
+fn open_in_default_handler(target: &str) -> i32 {
     let result = if cfg!(target_os = "windows") {
         Command::new("cmd")
-            .args(["/c", "start", "", &target])
+            .args(["/c", "start", "", target])
             .spawn()
     } else if cfg!(target_os = "macos") {
-        Command::new("open").arg(&target).spawn()
+        Command::new("open").arg(target).spawn()
     } else {
-        Command::new("xdg-open").arg(&target).spawn()
+        Command::new("xdg-open").arg(target).spawn()
     };
 
     match result {
         Ok(_) => 0,
         Err(error) => {
-            eprintln!("Error: Failed to open docs: {error}");
+            eprintln!("Error: Failed to open {target}: {error}");
             1
         }
     }
@@ -1469,6 +1728,13 @@ fn parse_allowlist_env() -> Option<Vec<String>> {
     }
 }
 
+/// Deterministically truncate `tag` to `crate::args::MAX_TAG_LENGTH`
+/// Unicode scalar values, splitting on a char boundary (never a byte
+/// boundary) so a multi-byte character is never cut in half.
+fn truncate_tag(tag: &str) -> String {
+    tag.chars().take(args::MAX_TAG_LENGTH).collect()
+}
+
 fn repr_string(value: &str) -> String {
     format!("{value:?}")
 }
@@ -1490,5 +1756,131 @@ fn display_envoy_error(error: &EnvoyError) -> String {
 fn debug(verbose: bool, message: &str) {
     if verbose {
         eprintln!("debug: {message}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn truncate_tag_leaves_a_short_tag_untouched() {
+        assert_eq!(truncate_tag("nightly-build"), "nightly-build");
+    }
+
+    #[test]
+    fn truncate_tag_caps_an_overlong_tag_at_the_max_length() {
+        let overlong = "a".repeat(crate::args::MAX_TAG_LENGTH + 50);
+
+        let truncated = truncate_tag(&overlong);
+
+        assert_eq!(truncated.chars().count(), crate::args::MAX_TAG_LENGTH);
+        assert_eq!(truncated, "a".repeat(crate::args::MAX_TAG_LENGTH));
+    }
+
+    #[test]
+    fn truncate_tag_never_splits_a_multi_byte_character() {
+        // Each "é" is 2 bytes in UTF-8; a byte-based truncation to an odd
+        // byte count would panic or produce invalid UTF-8. Char-based
+        // truncation must never do this regardless of length.
+        let overlong = "é".repeat(crate::args::MAX_TAG_LENGTH + 10);
+
+        let truncated = truncate_tag(&overlong);
+
+        assert_eq!(truncated.chars().count(), crate::args::MAX_TAG_LENGTH);
+    }
+
+    /// RAII guard for a scratch bundle-root directory used by the tests
+    /// below. Always removes the directory on drop -- including when an
+    /// assertion panics partway through a test -- instead of relying on a
+    /// manual `fs::remove_dir_all` call at the end of each test.
+    struct TempBundleRoot {
+        path: PathBuf,
+    }
+
+    impl TempBundleRoot {
+        fn new(name: &str) -> Self {
+            let path = env::temp_dir().join(format!(
+                "envoy_app_test_{name}_{}_{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&path).expect("temp bundle root should be created");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempBundleRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_prefers_docs_index_html_over_readme() {
+        let root = TempBundleRoot::new("docs_index");
+        fs::create_dir_all(root.path().join("docs")).unwrap();
+        fs::write(root.path().join("docs").join("index.html"), "<html></html>").unwrap();
+        fs::write(root.path().join("README.md"), "# readme").unwrap();
+        let bundle = BundleInfo::new(
+            root.path().to_path_buf(),
+            "maya".to_string(),
+            "gt".to_string(),
+        );
+
+        let result = resolve_bundle_docs_target(Some(&[bundle]), "gt:maya");
+
+        assert_eq!(result, Ok(root.path().join("docs").join("index.html")));
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_falls_back_to_readme() {
+        let root = TempBundleRoot::new("readme_fallback");
+        fs::write(root.path().join("README.md"), "# readme").unwrap();
+        let bundle = BundleInfo::new(
+            root.path().to_path_buf(),
+            "maya".to_string(),
+            "gt".to_string(),
+        );
+
+        let result = resolve_bundle_docs_target(Some(&[bundle]), "gt:maya");
+
+        assert_eq!(result, Ok(root.path().join("README.md")));
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_errors_when_bundle_not_found() {
+        let result = resolve_bundle_docs_target(Some(&[]), "gt:maya");
+
+        assert!(result.is_err_and(|message| message.contains("not found")));
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_errors_when_no_docs_present() {
+        let root = TempBundleRoot::new("no_docs");
+        let bundle = BundleInfo::new(
+            root.path().to_path_buf(),
+            "maya".to_string(),
+            "gt".to_string(),
+        );
+
+        let result = resolve_bundle_docs_target(Some(&[bundle]), "gt:maya");
+
+        assert!(result.is_err_and(|message| message.contains("No docs found")));
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_errors_when_no_bundles_discovered() {
+        let result = resolve_bundle_docs_target(None, "gt:maya");
+
+        assert!(result.is_err_and(|message| message.contains("No bundles discovered")));
     }
 }

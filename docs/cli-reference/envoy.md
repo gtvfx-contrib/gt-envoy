@@ -31,11 +31,14 @@ en    [OPTIONS] [command] [args ...]
 | `--list-configs` | `-lc` | List all known configurable settings |
 | `--ignore-config` | `-ic` | Bypass user config for this run |
 | `--env ENV_COMMAND` | `-e` | Run command inside a different command's environment |
+| `--tag TAG` | | Attach a free-text tag to this invocation's telemetry record, if enabled. Truncated to 200 characters |
+| `--incognito` | | Disable telemetry for this invocation only |
+| `--shell` | | Drop into an interactive shell inside a command's resolved environment, instead of running it |
 | `--inherit-env` | `-i` | Inherit the full system environment (overrides closed mode) |
 | `--verbose` | `-v` | Enable verbose logging |
 | `--trace VAR` | | Trace how `VAR` is mutated through env file processing |
 | `--diagnose [COMMAND]` | | Show bundle/team/stack/cache/VCS/telemetry diagnostics; add `COMMAND` for its full resolved environment |
-| `--docs` | | Open the envoy documentation in the default browser |
+| `--docs [BUNDLE]` | | Open the envoy documentation in the default browser, or a specific bundle's own docs |
 | `--version` | | Show version and exit |
 | `--help` | `-h` | Show help message |
 
@@ -163,6 +166,20 @@ studio dashboard this feeds.
 
 For a single-variable, step-by-step operator trace instead, use `--trace VAR COMMAND`.
 
+### `--docs [BUNDLE]`
+
+With no argument, opens envoy's own documentation. Pass a discovered
+bundle's ID to open that bundle's own documentation instead -- its
+`docs/index.html` if present, falling back to its `README.md`:
+
+```powershell
+en --docs
+en --docs gt:pythoncore
+```
+
+There is no dedicated docs-location metadata field; this checks the same
+two conventional locations bundles in this organization already use.
+
 ### `--env` / `-e`
 
 Run a command inside a different command's environment:
@@ -171,7 +188,25 @@ Run a command inside a different command's environment:
 en --env python cmd
 ```
 
-Opens `cmd.exe` with the `python` environment — useful for interactive inspection.
+Opens `cmd.exe` with the `python` environment (Windows example; on
+Unix-like systems, use `en --env python sh` instead) — useful for
+interactive inspection, though `--shell python` below is the more direct
+way to do exactly this.
+
+### `--shell`
+
+Drop into an interactive shell (`cmd.exe`/`$SHELL`) inside a command's
+resolved environment for inspection, instead of running the command itself:
+
+```powershell
+en --shell python
+```
+
+Resolves `python`'s environment exactly as a normal run would, then
+launches the shell reported by that environment's own `COMSPEC`/`SHELL`
+(falling back to the current process's, then a platform default). Type
+`exit` to return. Combine with `--env`/`-e` to inspect a *different*
+command's environment than the one named.
 
 ## Discovery Flags
 
@@ -208,7 +243,7 @@ en --get-stack
 
 ### `--list-stacks`
 
-List all named Stacks discovered via `ENVOY_STACK_ROOTS`, then exit:
+List all named stacks discovered via `ENVOY_STACK_ROOTS`, then exit:
 
 ```powershell
 en --list-stacks
@@ -236,6 +271,7 @@ en -c R:/my-project/.envoy/commands.json my_command
 | `ENVOY_DISABLE_BUNDLE_CACHE` | Set to `1`/`true`/`yes` to disable the bundle cache entirely |
 | `ENVOY_DISABLE_DISCOVERY_CACHE` | Set to `1`/`true`/`yes` to force a fresh bundle-discovery scan, bypassing the on-disk discovery cache |
 | `ENVOY_VCS` | Force a specific VCS backend for detection: `git`, `perforce`, or `lore` |
+| `ENVOY_PYINIT` | Platform-separated directories whose `*.py` files run once `import envoy` finishes initializing (see [Advanced Topics](../advanced.md#python-api-initialization-hooks-envoy_pyinit)) |
 
 ## User Config Flags
 

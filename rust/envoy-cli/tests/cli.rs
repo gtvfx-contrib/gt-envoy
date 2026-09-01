@@ -107,6 +107,9 @@ fn help_lists_expected_flags() {
         "--list-configs",
         "--ignore-config",
         "--env <ENV_COMMAND>",
+        "--tag <TAG>",
+        "--incognito",
+        "--shell",
         "--trace <VAR>",
         "-cf",
         "-s",
@@ -220,6 +223,56 @@ fn write_minimal_checkout_bundle(bundle_root: &Path) {
     .expect("commands.json should be written");
 }
 
+/// `--docs` with no bundle argument opens envoy's own docs and is not
+/// covered by an integration test here (it spawns a real OS file-open
+/// command) -- see `app::tests::resolve_bundle_docs_target_*` in
+/// `src/app.rs` for unit coverage of the bundle-scoped resolution logic
+/// without that side effect. These two cases stay integration-testable
+/// because both return an error before ever reaching the OS-open call.
+#[test]
+fn docs_reports_bundle_not_found() {
+    let scratch = ScratchDir::new("envoy_docs_bundle_missing");
+    let bundle_root = scratch.path().join("gt").join("maya");
+    write_minimal_checkout_bundle(&bundle_root);
+    let stack_path = scratch.path().join("studio.estack");
+    write_stack(&stack_path, "bfd", &bundle_root);
+
+    let assert = base_command()
+        .arg("--stack")
+        .arg(&stack_path)
+        .args(["--docs", "gt:does-not-exist"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+    assert!(
+        stderr.contains("Bundle 'gt:does-not-exist' not found"),
+        "stderr was:\n{stderr}"
+    );
+}
+
+#[test]
+fn docs_reports_no_docs_found_for_a_bundle_without_docs_or_readme() {
+    let scratch = ScratchDir::new("envoy_docs_no_docs");
+    let bundle_root = scratch.path().join("gt").join("maya");
+    write_minimal_checkout_bundle(&bundle_root);
+    let stack_path = scratch.path().join("studio.estack");
+    write_stack(&stack_path, "bfd", &bundle_root);
+
+    let assert = base_command()
+        .arg("--stack")
+        .arg(&stack_path)
+        .args(["--docs", "gt:maya"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+    assert!(
+        stderr.contains("No docs found for 'gt:maya'"),
+        "stderr was:\n{stderr}"
+    );
+}
+
 #[test]
 fn set_stack_validates_and_persists_a_real_stack_path() {
     let scratch = ScratchDir::new("envoy_set_stack_valid");
@@ -249,7 +302,21 @@ fn set_stack_validates_and_persists_a_real_stack_path() {
         get_stdout.contains("Stack: studio"),
         "stdout was:\n{get_stdout}"
     );
-    assert!(get_stdout.contains(stack_path.display().to_string().as_str()));
+    // `Stack::current()` reports a canonicalized path with any Windows
+    // extended-length `\\?\` prefix stripped (see `resolve_input_path`/
+    // `normalize_windows_path` in envoy-core), so canonicalize
+    // `stack_path` the same way here too, to avoid flakiness if the raw
+    // and canonicalized forms differ (e.g. a symlinked temp dir).
+    let canonical_stack_path = fs::canonicalize(&stack_path)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| stack_path.display().to_string());
+    let expected_path = canonical_stack_path
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&canonical_stack_path);
+    assert!(
+        get_stdout.contains(expected_path),
+        "stdout was:\n{get_stdout}"
+    );
 }
 
 #[test]
@@ -619,6 +686,116 @@ fn diagnose_with_command_shows_resolved_environment() {
 }
 
 #[test]
+fn shell_mode_launches_a_shell_with_the_resolved_environment_applied() {
+    let scratch = ScratchDir::new("envoy_shell_mode");
+
+    let bundle_root = scratch.path().join("gt").join("maya");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(bundle_root.join(".git")).expect(".git dir should be created");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"mytool": {"environment": ["mytool_env.json"]}}"#,
+    )
+    .expect("commands.json should be written");
+    fs::write(
+        envoy_dir.join("mytool_env.json"),
+        r#"{"SHELL_MODE_MARKER": "hello-from-shell-mode"}"#,
+    )
+    .expect("mytool_env.json should be written");
+
+    #[cfg(windows)]
+    let shell_input = "echo %SHELL_MODE_MARKER%\r\nexit\r\n";
+    #[cfg(not(windows))]
+    let shell_input = "echo $SHELL_MODE_MARKER\nexit\n";
+
+    let assert = base_command()
+        .args(["--shell", "mytool"])
+        .env("ENVOY_BNDL_ROOTS", scratch.path())
+        .write_stdin(shell_input)
+        .assert()
+        .success();
+    let stdout = stdout_text(&assert);
+
+    assert!(
+        stdout.contains("Entering shell inside mytool's resolved environment"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("hello-from-shell-mode"),
+        "stdout was:\n{stdout}"
+    );
+}
+
+#[test]
+fn shell_mode_reports_command_not_found() {
+    let scratch = ScratchDir::new("envoy_shell_missing_command");
+    let bundle_root = scratch.path().join("gt").join("maya");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(bundle_root.join(".git")).expect(".git dir should be created");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"known": {"environment": []}}"#,
+    )
+    .expect("commands.json should be written");
+
+    let assert = base_command()
+        .args(["--shell", "does-not-exist"])
+        .env("ENVOY_BNDL_ROOTS", scratch.path())
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+
+    assert!(
+        stderr.contains("Command 'does-not-exist' not found"),
+        "stderr was:\n{stderr}"
+    );
+}
+
+/// Regression test: `run_shell` previously called `prepare_env` unconditionally
+/// for any COMMAND, including a raw executable path with no `--env` override.
+/// `run_command`'s equivalent case skips `prepare_env` entirely and inherits
+/// the system env directly -- `prepare_env`/`collect_env_files` require the
+/// command name to be a *registered* command (raw paths never are), so
+/// `--shell` on a raw path always failed with an environment-build error
+/// before this was fixed to mirror `run_command`'s special case.
+#[test]
+fn shell_mode_with_a_raw_executable_path_inherits_the_system_environment() {
+    let scratch = ScratchDir::new("envoy_shell_raw_path");
+
+    #[cfg(windows)]
+    let raw_path =
+        env::var("ComSpec").unwrap_or_else(|_| String::from(r"C:\Windows\System32\cmd.exe"));
+    #[cfg(not(windows))]
+    let raw_path = String::from("/bin/sh");
+
+    #[cfg(windows)]
+    let shell_input = "exit\r\n";
+    #[cfg(not(windows))]
+    let shell_input = "exit\n";
+
+    let assert = base_command()
+        .args(["--shell", &raw_path])
+        .current_dir(scratch.path())
+        .write_stdin(shell_input)
+        .assert()
+        .success();
+    let stdout = stdout_text(&assert);
+
+    assert!(
+        stdout.contains(&format!(
+            "Entering shell inside {raw_path}'s resolved environment"
+        )),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Failed to prepare environment"),
+        "stdout was:\n{stdout}"
+    );
+}
+
+#[test]
 fn diagnose_with_unknown_command_fails_with_clear_error() {
     let scratch = ScratchDir::new("envoy_diagnose_unknown");
     let envoy_dir = scratch.path().join(".envoy");
@@ -679,6 +856,106 @@ fn telemetry_is_off_by_default_and_writes_no_files() {
     // Closed-by-default: with no ENVOY_TELEMETRY_ENDPOINT resolved, nothing
     // should ever be written, even though the drop dir exists.
     assert_eq!(telemetry_files_in(drop_dir.path()).len(), 0);
+}
+
+#[test]
+fn telemetry_incognito_flag_suppresses_recording_even_with_an_endpoint_configured() {
+    let config_root = ScratchDir::new("envoy_telemetry_incognito");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let args = raw_exit_code_args(0);
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .arg("--incognito")
+        .args(&args)
+        .assert()
+        .success();
+
+    assert_eq!(
+        telemetry_files_in(drop_dir.path()).len(),
+        0,
+        "--incognito should suppress telemetry even with a resolvable endpoint"
+    );
+}
+
+#[test]
+fn telemetry_tag_flag_is_attached_to_the_recorded_event() {
+    let config_root = ScratchDir::new("envoy_telemetry_tag");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let args = raw_exit_code_args(0);
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .args(["--tag", "nightly-build"])
+        .args(&args)
+        .assert()
+        .success();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+    assert_eq!(value["attributes"]["envoy.tag"]["Str"], "nightly-build");
+}
+
+/// Regression test: `--tag` previously only reached the telemetry record
+/// via `run_command`'s `ExecutionOptions`, so it silently did nothing for
+/// any built-in branch of `run_cli` (`--list-configs`, `--docs`, `--list`,
+/// etc.) even though those branches still record their own
+/// `envoy.command.run` event. `--list-configs` is used here as a
+/// representative built-in that returns before bundle/registry resolution.
+#[test]
+fn telemetry_tag_flag_is_attached_for_a_built_in_command_not_just_managed_commands() {
+    let config_root = ScratchDir::new("envoy_telemetry_tag_builtin");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .args(["--tag", "nightly-build", "--list-configs"])
+        .assert()
+        .success();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+    assert_eq!(
+        value["attributes"]["envoy.command.kind"]["Str"],
+        "list_configs"
+    );
+    assert_eq!(value["attributes"]["envoy.tag"]["Str"], "nightly-build");
+}
+
+#[test]
+fn telemetry_tag_flag_is_truncated_to_the_documented_max_length() {
+    let config_root = ScratchDir::new("envoy_telemetry_tag_overlong");
+    let drop_dir = ScratchDir::new("envoy_telemetry_drop_dir");
+    let overlong_tag = "a".repeat(500);
+    let args = raw_exit_code_args(0);
+
+    base_command()
+        .env("ENVOY_CONFIG_ROOT", config_root.path())
+        .env("ENVOY_TELEMETRY_ENDPOINT", drop_dir.path())
+        .args(["--tag", &overlong_tag])
+        .args(&args)
+        .assert()
+        .success();
+
+    let files = telemetry_files_in(drop_dir.path());
+    assert_eq!(files.len(), 1, "expected exactly one telemetry file");
+    let contents = fs::read_to_string(&files[0]).expect("telemetry file should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&contents).expect("telemetry file should be valid JSON");
+    let recorded_tag = value["attributes"]["envoy.tag"]["Str"]
+        .as_str()
+        .expect("envoy.tag should be a string attribute");
+    assert_eq!(recorded_tag.chars().count(), 200);
+    assert_eq!(recorded_tag, "a".repeat(200));
 }
 
 #[test]
