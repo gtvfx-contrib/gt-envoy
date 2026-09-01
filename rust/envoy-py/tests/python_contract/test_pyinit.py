@@ -20,12 +20,8 @@ def test_unset_pyinit_is_a_noop(monkeypatch):
 
 def test_runs_py_files_from_a_directory_in_sorted_order(tmp_path, monkeypatch):
     order_log = tmp_path / "order.log"
-    (tmp_path / "01_first.py").write_text(
-        f"open({str(order_log)!r}, 'a').write('first\\n')"
-    )
-    (tmp_path / "02_second.py").write_text(
-        f"open({str(order_log)!r}, 'a').write('second\\n')"
-    )
+    (tmp_path / "01_first.py").write_text(f"open({str(order_log)!r}, 'a').write('first\\n')")
+    (tmp_path / "02_second.py").write_text(f"open({str(order_log)!r}, 'a').write('second\\n')")
 
     monkeypatch.setenv("ENVOY_PYINIT", str(tmp_path))
     envoy._run_pyinit_scripts()
@@ -67,9 +63,7 @@ def test_multiple_directories_are_platform_separated(tmp_path, monkeypatch):
     (second_dir / "b.py").write_text(f"open({str(marker)!r}, 'a').write('b')")
 
     separator = ";" if sys.platform == "win32" else ":"
-    monkeypatch.setenv(
-        "ENVOY_PYINIT", separator.join([str(first_dir), str(second_dir)])
-    )
+    monkeypatch.setenv("ENVOY_PYINIT", separator.join([str(first_dir), str(second_dir)]))
     envoy._run_pyinit_scripts()
 
     assert marker.read_text() == "ab"
