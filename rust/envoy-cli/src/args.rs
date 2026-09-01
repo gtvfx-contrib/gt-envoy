@@ -64,6 +64,27 @@ BUNDLE ID to open that bundle's own docs/index.html or README.md instead."
     pub stack: Option<String>,
 
     #[arg(
+        long = "set-stack",
+        value_name = "NAME_OR_PATH",
+        help = "Validate and persist NAME_OR_PATH as the default stack, then exit."
+    )]
+    pub set_stack: Option<String>,
+
+    #[arg(
+        long = "get-stack",
+        help = "Print the current effective stack (honoring the same \
+ENVOY_STACK / user-config / ENVOY_STACK_CONTEXT precedence as normal \
+resolution) and exit."
+    )]
+    pub get_stack: bool,
+
+    #[arg(
+        long = "list-stacks",
+        help = "List all named stacks discovered via ENVOY_STACK_ROOTS and exit."
+    )]
+    pub list_stacks: bool,
+
+    #[arg(
         long = "set-config",
         value_name = "KEY=VALUE",
         help = "Set a user config value and save it. Use KEY= to clear a setting."

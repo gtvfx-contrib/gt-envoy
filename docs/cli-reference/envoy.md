@@ -219,6 +219,36 @@ en -s R:/studio/studio.estack --list
 en --stack studio python script.py
 ```
 
+### `--set-stack NAME_OR_PATH`
+
+Validate `NAME_OR_PATH` (the same way `--stack` would resolve it) and
+persist it as the `stack` user-config setting, then exit. Equivalent to
+`--set-config stack=VALUE`, but rejects a value that doesn't actually
+resolve instead of silently saving it:
+
+```powershell
+en --set-stack studio
+en --set-stack R:/studio/studio.estack
+```
+
+### `--get-stack`
+
+Print the current *effective* stack -- honoring the same `ENVOY_STACK` /
+`stack` user-config / `ENVOY_STACK_CONTEXT` precedence used by normal
+resolution, not just the raw persisted setting -- then exit:
+
+```powershell
+en --get-stack
+```
+
+### `--list-stacks`
+
+List all named stacks discovered via `ENVOY_STACK_ROOTS`, then exit:
+
+```powershell
+en --list-stacks
+```
+
 ### `--commands-file` / `-c`
 
 Point directly at a `commands.json`, bypassing bundle discovery entirely:

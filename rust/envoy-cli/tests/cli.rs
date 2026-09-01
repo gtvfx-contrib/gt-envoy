@@ -99,6 +99,9 @@ fn help_lists_expected_flags() {
         "--which <COMMAND>",
         "--commands-file <PATH>",
         "--stack <NAME_OR_PATH>",
+        "--set-stack <NAME_OR_PATH>",
+        "--get-stack",
+        "--list-stacks",
         "--set-config <KEY=VALUE>",
         "--get-config [<KEY>]",
         "--list-configs",
@@ -268,6 +271,93 @@ fn docs_reports_no_docs_found_for_a_bundle_without_docs_or_readme() {
         stderr.contains("No docs found for 'gt:maya'"),
         "stderr was:\n{stderr}"
     );
+}
+
+#[test]
+fn set_stack_validates_and_persists_a_real_stack_path() {
+    let scratch = ScratchDir::new("envoy_set_stack_valid");
+    let bundle_root = scratch.path().join("gt").join("maya");
+    write_minimal_checkout_bundle(&bundle_root);
+    let stack_path = scratch.path().join("studio.estack");
+    write_stack(&stack_path, "bfd", &bundle_root);
+    let stack_value = stack_path.to_string_lossy();
+
+    let set_assert = base_command()
+        .args(["--set-stack", &stack_value])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+    assert!(stdout_text(&set_assert).contains("Saved default stack"));
+
+    let persisted_config = UserConfig::load(Some(scratch.path().join("user_config.json")));
+    assert_eq!(persisted_config.get("stack"), Some(stack_value.as_ref()));
+
+    let get_assert = base_command()
+        .args(["--get-stack"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+    let get_stdout = stdout_text(&get_assert);
+    assert!(
+        get_stdout.contains("Stack: studio"),
+        "stdout was:\n{get_stdout}"
+    );
+    // `Stack::current()` reports a canonicalized path with any Windows
+    // extended-length `\\?\` prefix stripped (see `resolve_input_path`/
+    // `normalize_windows_path` in envoy-core), so canonicalize
+    // `stack_path` the same way here too, to avoid flakiness if the raw
+    // and canonicalized forms differ (e.g. a symlinked temp dir).
+    let canonical_stack_path = fs::canonicalize(&stack_path)
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| stack_path.display().to_string());
+    let expected_path = canonical_stack_path
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&canonical_stack_path);
+    assert!(
+        get_stdout.contains(expected_path),
+        "stdout was:\n{get_stdout}"
+    );
+}
+
+#[test]
+fn set_stack_rejects_an_unresolvable_value_without_persisting() {
+    let scratch = ScratchDir::new("envoy_set_stack_invalid");
+
+    let assert = base_command()
+        .args(["--set-stack", "definitely-not-a-real-stack"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+    assert!(stderr.contains("not found"), "stderr was:\n{stderr}");
+
+    let persisted_config = UserConfig::load(Some(scratch.path().join("user_config.json")));
+    assert_eq!(persisted_config.get("stack"), None);
+}
+
+#[test]
+fn get_stack_reports_none_selected_when_nothing_is_configured() {
+    let scratch = ScratchDir::new("envoy_get_stack_none");
+
+    let assert = base_command()
+        .args(["--get-stack"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .success();
+    assert!(stdout_text(&assert).contains("No stack currently selected"));
+}
+
+#[test]
+fn list_stacks_reports_none_found_with_empty_stack_roots() {
+    let scratch = ScratchDir::new("envoy_list_stacks_empty");
+
+    let assert = base_command()
+        .args(["--list-stacks"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .env("ENVOY_STACK_ROOTS", "")
+        .assert()
+        .success();
+    assert!(stdout_text(&assert).contains("No named stacks found"));
 }
 
 #[test]
