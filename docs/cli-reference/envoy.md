@@ -38,7 +38,7 @@ en    [OPTIONS] [command] [args ...]
 | `--verbose` | `-v` | Enable verbose logging |
 | `--trace VAR` | | Trace how `VAR` is mutated through env file processing |
 | `--diagnose [COMMAND]` | | Show bundle/team/stack/cache/VCS/telemetry diagnostics; add `COMMAND` for its full resolved environment |
-| `--docs` | | Open the envoy documentation in the default browser |
+| `--docs [BUNDLE]` | | Open the envoy documentation in the default browser, or a specific bundle's own docs |
 | `--version` | | Show version and exit |
 | `--help` | `-h` | Show help message |
 
@@ -165,6 +165,20 @@ what gets recorded, redaction, the local retry spool, and the shared
 studio dashboard this feeds.
 
 For a single-variable, step-by-step operator trace instead, use `--trace VAR COMMAND`.
+
+### `--docs [BUNDLE]`
+
+With no argument, opens envoy's own documentation. Pass a discovered
+bundle's ID to open that bundle's own documentation instead -- its
+`docs/index.html` if present, falling back to its `README.md`:
+
+```powershell
+en --docs
+en --docs gt:pythoncore
+```
+
+There is no dedicated docs-location metadata field; this checks the same
+two conventional locations bundles in this organization already use.
 
 ### `--env` / `-e`
 

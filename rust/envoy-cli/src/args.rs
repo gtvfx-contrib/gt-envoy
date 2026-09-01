@@ -21,8 +21,15 @@ pub(crate) const MAX_TAG_LENGTH: usize = 200;
     after_help = LEGACY_ALIAS_HELP
 )]
 pub(crate) struct Cli {
-    #[arg(long, help = "Open the envoy documentation in the default browser.")]
-    pub docs: bool,
+    #[arg(
+        long,
+        value_name = "BUNDLE",
+        num_args = 0..=1,
+        default_missing_value = "",
+        help = "Open the envoy documentation in the default browser. Pass a \
+BUNDLE ID to open that bundle's own docs/index.html or README.md instead."
+    )]
+    pub docs: Option<String>,
 
     #[arg(long, help = "List all available commands")]
     pub list: bool,
@@ -291,7 +298,7 @@ fn option_value_expectation(token: &str) -> Option<ValueExpectation> {
     match token {
         "--info" | "--which" | "--commands-file" | "--stack" | "-s" | "--set-config" | "--env"
         | "-e" | "--trace" => Some(ValueExpectation::Required),
-        "--get-config" | "--diagnose" => Some(ValueExpectation::Optional),
+        "--get-config" | "--diagnose" | "--docs" => Some(ValueExpectation::Optional),
         _ => None,
     }
 }

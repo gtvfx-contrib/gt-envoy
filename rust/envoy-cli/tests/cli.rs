@@ -209,6 +209,67 @@ fn stack_config_can_be_set_read_and_cleared_through_cli() {
     assert!(stdout_text(&cleared_assert).contains("stack: <not set>"));
 }
 
+fn write_minimal_checkout_bundle(bundle_root: &Path) {
+    fs::create_dir_all(bundle_root.join(".git")).expect(".git dir should be created");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"known": {"environment": []}}"#,
+    )
+    .expect("commands.json should be written");
+}
+
+/// `--docs` with no bundle argument opens envoy's own docs and is not
+/// covered by an integration test here (it spawns a real OS file-open
+/// command) -- see `app::tests::resolve_bundle_docs_target_*` in
+/// `src/app.rs` for unit coverage of the bundle-scoped resolution logic
+/// without that side effect. These two cases stay integration-testable
+/// because both return an error before ever reaching the OS-open call.
+#[test]
+fn docs_reports_bundle_not_found() {
+    let scratch = ScratchDir::new("envoy_docs_bundle_missing");
+    let bundle_root = scratch.path().join("gt").join("maya");
+    write_minimal_checkout_bundle(&bundle_root);
+    let stack_path = scratch.path().join("studio.estack");
+    write_stack(&stack_path, "bfd", &bundle_root);
+
+    let assert = base_command()
+        .arg("--stack")
+        .arg(&stack_path)
+        .args(["--docs", "gt:does-not-exist"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+    assert!(
+        stderr.contains("Bundle 'gt:does-not-exist' not found"),
+        "stderr was:\n{stderr}"
+    );
+}
+
+#[test]
+fn docs_reports_no_docs_found_for_a_bundle_without_docs_or_readme() {
+    let scratch = ScratchDir::new("envoy_docs_no_docs");
+    let bundle_root = scratch.path().join("gt").join("maya");
+    write_minimal_checkout_bundle(&bundle_root);
+    let stack_path = scratch.path().join("studio.estack");
+    write_stack(&stack_path, "bfd", &bundle_root);
+
+    let assert = base_command()
+        .arg("--stack")
+        .arg(&stack_path)
+        .args(["--docs", "gt:maya"])
+        .env("ENVOY_CONFIG_ROOT", scratch.path())
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+    assert!(
+        stderr.contains("No docs found for 'gt:maya'"),
+        "stderr was:\n{stderr}"
+    );
+}
+
 #[test]
 fn raw_absolute_path_executable_runs_successfully() {
     #[cfg(windows)]

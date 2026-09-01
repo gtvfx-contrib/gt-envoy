@@ -259,7 +259,10 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
         return emission(CommandKind::GetConfig).emit_and_return(exit_code);
     }
 
-    if cli.docs {
+    // A bare --docs (empty value) needs no bundle context, so it can still
+    // short-circuit here without waiting for registry/bundle loading below.
+    // --docs BUNDLE falls through to the later, bundle-aware branch instead.
+    if cli.docs.as_deref() == Some("") {
         let exit_code = open_docs();
         return emission(CommandKind::Docs).emit_and_return(exit_code);
     }
@@ -280,6 +283,14 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
                 .emit_and_return(code)
         }
     };
+
+    if let Some(bundle_id) = cli.docs.as_deref().filter(|value| !value.is_empty()) {
+        let exit_code = open_bundle_docs(bundles.as_deref(), bundle_id);
+        return emission(CommandKind::Docs)
+            .with_stack(stack.as_ref())
+            .with_bundles(bundles.as_deref())
+            .emit_and_return(exit_code);
+    }
 
     if registry.is_empty()
         && !raw_path_without_env_override(cli.command.as_deref(), cli.env.as_deref())
@@ -1508,20 +1519,76 @@ fn open_docs() -> i32 {
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| DOCS_URL.to_string());
 
+    open_in_default_handler(&target)
+}
+
+/// Implements `envoy --docs BUNDLE`: opens a discovered bundle's own
+/// `docs/index.html` if present, falling back to its `README.md`.
+///
+/// There is no dedicated per-bundle docs metadata field today, so this
+/// checks the same two conventional locations real bundles in this
+/// organization already use for documentation.
+fn open_bundle_docs(bundles: Option<&[BundleInfo]>, bundle_id: &str) -> i32 {
+    match resolve_bundle_docs_target(bundles, bundle_id) {
+        Ok(target) => open_in_default_handler(&target.display().to_string()),
+        Err(message) => {
+            eprintln!("Error: {message}");
+            1
+        }
+    }
+}
+
+/// Resolve the docs file `envoy --docs BUNDLE` should open, or an error
+/// message to print. Split out from [`open_bundle_docs`] so the resolution
+/// logic (bundle lookup, candidate paths) is unit-testable without actually
+/// spawning an OS file-open command.
+fn resolve_bundle_docs_target(
+    bundles: Option<&[BundleInfo]>,
+    bundle_id: &str,
+) -> Result<PathBuf, String> {
+    let bundles = bundles
+        .ok_or_else(|| format!("No bundles discovered; cannot open docs for '{bundle_id}'"))?;
+
+    let bundle = bundles
+        .iter()
+        .find(|bundle| bundle.bndlid() == bundle_id)
+        .ok_or_else(|| {
+            format!(
+                "Bundle '{bundle_id}' not found; run 'envoy --diagnose' to see discovered bundles"
+            )
+        })?;
+
+    let candidates = [
+        bundle.root.join("docs").join("index.html"),
+        bundle.root.join("README.md"),
+    ];
+
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            format!(
+                "No docs found for '{bundle_id}' (checked docs/index.html and README.md under {})",
+                bundle.root.display()
+            )
+        })
+}
+
+fn open_in_default_handler(target: &str) -> i32 {
     let result = if cfg!(target_os = "windows") {
         Command::new("cmd")
-            .args(["/c", "start", "", &target])
+            .args(["/c", "start", "", target])
             .spawn()
     } else if cfg!(target_os = "macos") {
-        Command::new("open").arg(&target).spawn()
+        Command::new("open").arg(target).spawn()
     } else {
-        Command::new("xdg-open").arg(&target).spawn()
+        Command::new("xdg-open").arg(target).spawn()
     };
 
     match result {
         Ok(_) => 0,
         Err(error) => {
-            eprintln!("Error: Failed to open docs: {error}");
+            eprintln!("Error: Failed to open {target}: {error}");
             1
         }
     }
@@ -1597,7 +1664,8 @@ fn debug(verbose: bool, message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::truncate_tag;
+    use super::*;
+    use std::fs;
 
     #[test]
     fn truncate_tag_leaves_a_short_tag_untouched() {
@@ -1624,5 +1692,98 @@ mod tests {
         let truncated = truncate_tag(&overlong);
 
         assert_eq!(truncated.chars().count(), crate::args::MAX_TAG_LENGTH);
+    }
+
+    /// RAII guard for a scratch bundle-root directory used by the tests
+    /// below. Always removes the directory on drop -- including when an
+    /// assertion panics partway through a test -- instead of relying on a
+    /// manual `fs::remove_dir_all` call at the end of each test.
+    struct TempBundleRoot {
+        path: PathBuf,
+    }
+
+    impl TempBundleRoot {
+        fn new(name: &str) -> Self {
+            let path = env::temp_dir().join(format!(
+                "envoy_app_test_{name}_{}_{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            fs::create_dir_all(&path).expect("temp bundle root should be created");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempBundleRoot {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_prefers_docs_index_html_over_readme() {
+        let root = TempBundleRoot::new("docs_index");
+        fs::create_dir_all(root.path().join("docs")).unwrap();
+        fs::write(root.path().join("docs").join("index.html"), "<html></html>").unwrap();
+        fs::write(root.path().join("README.md"), "# readme").unwrap();
+        let bundle = BundleInfo::new(
+            root.path().to_path_buf(),
+            "maya".to_string(),
+            "gt".to_string(),
+        );
+
+        let result = resolve_bundle_docs_target(Some(&[bundle]), "gt:maya");
+
+        assert_eq!(result, Ok(root.path().join("docs").join("index.html")));
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_falls_back_to_readme() {
+        let root = TempBundleRoot::new("readme_fallback");
+        fs::write(root.path().join("README.md"), "# readme").unwrap();
+        let bundle = BundleInfo::new(
+            root.path().to_path_buf(),
+            "maya".to_string(),
+            "gt".to_string(),
+        );
+
+        let result = resolve_bundle_docs_target(Some(&[bundle]), "gt:maya");
+
+        assert_eq!(result, Ok(root.path().join("README.md")));
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_errors_when_bundle_not_found() {
+        let result = resolve_bundle_docs_target(Some(&[]), "gt:maya");
+
+        assert!(result.is_err_and(|message| message.contains("not found")));
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_errors_when_no_docs_present() {
+        let root = TempBundleRoot::new("no_docs");
+        let bundle = BundleInfo::new(
+            root.path().to_path_buf(),
+            "maya".to_string(),
+            "gt".to_string(),
+        );
+
+        let result = resolve_bundle_docs_target(Some(&[bundle]), "gt:maya");
+
+        assert!(result.is_err_and(|message| message.contains("No docs found")));
+    }
+
+    #[test]
+    fn resolve_bundle_docs_target_errors_when_no_bundles_discovered() {
+        let result = resolve_bundle_docs_target(None, "gt:maya");
+
+        assert!(result.is_err_and(|message| message.contains("No bundles discovered")));
     }
 }
