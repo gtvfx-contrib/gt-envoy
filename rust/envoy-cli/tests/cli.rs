@@ -106,6 +106,7 @@ fn help_lists_expected_flags() {
         "--env <ENV_COMMAND>",
         "--tag <TAG>",
         "--incognito",
+        "--shell",
         "--trace <VAR>",
         "-cf",
         "-s",
@@ -529,6 +530,116 @@ fn diagnose_with_command_shows_resolved_environment() {
     );
     assert!(
         stdout.contains("Use --trace VAR known"),
+        "stdout was:\n{stdout}"
+    );
+}
+
+#[test]
+fn shell_mode_launches_a_shell_with_the_resolved_environment_applied() {
+    let scratch = ScratchDir::new("envoy_shell_mode");
+
+    let bundle_root = scratch.path().join("gt").join("maya");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(bundle_root.join(".git")).expect(".git dir should be created");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"mytool": {"environment": ["mytool_env.json"]}}"#,
+    )
+    .expect("commands.json should be written");
+    fs::write(
+        envoy_dir.join("mytool_env.json"),
+        r#"{"SHELL_MODE_MARKER": "hello-from-shell-mode"}"#,
+    )
+    .expect("mytool_env.json should be written");
+
+    #[cfg(windows)]
+    let shell_input = "echo %SHELL_MODE_MARKER%\r\nexit\r\n";
+    #[cfg(not(windows))]
+    let shell_input = "echo $SHELL_MODE_MARKER\nexit\n";
+
+    let assert = base_command()
+        .args(["--shell", "mytool"])
+        .env("ENVOY_BNDL_ROOTS", scratch.path())
+        .write_stdin(shell_input)
+        .assert()
+        .success();
+    let stdout = stdout_text(&assert);
+
+    assert!(
+        stdout.contains("Entering shell inside mytool's resolved environment"),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("hello-from-shell-mode"),
+        "stdout was:\n{stdout}"
+    );
+}
+
+#[test]
+fn shell_mode_reports_command_not_found() {
+    let scratch = ScratchDir::new("envoy_shell_missing_command");
+    let bundle_root = scratch.path().join("gt").join("maya");
+    let envoy_dir = bundle_root.join(".envoy");
+    fs::create_dir_all(bundle_root.join(".git")).expect(".git dir should be created");
+    fs::create_dir_all(&envoy_dir).expect(".envoy dir should be created");
+    fs::write(
+        envoy_dir.join("commands.json"),
+        r#"{"known": {"environment": []}}"#,
+    )
+    .expect("commands.json should be written");
+
+    let assert = base_command()
+        .args(["--shell", "does-not-exist"])
+        .env("ENVOY_BNDL_ROOTS", scratch.path())
+        .assert()
+        .failure();
+    let stderr = stderr_text(&assert);
+
+    assert!(
+        stderr.contains("Command 'does-not-exist' not found"),
+        "stderr was:\n{stderr}"
+    );
+}
+
+/// Regression test: `run_shell` previously called `prepare_env` unconditionally
+/// for any COMMAND, including a raw executable path with no `--env` override.
+/// `run_command`'s equivalent case skips `prepare_env` entirely and inherits
+/// the system env directly -- `prepare_env`/`collect_env_files` require the
+/// command name to be a *registered* command (raw paths never are), so
+/// `--shell` on a raw path always failed with an environment-build error
+/// before this was fixed to mirror `run_command`'s special case.
+#[test]
+fn shell_mode_with_a_raw_executable_path_inherits_the_system_environment() {
+    let scratch = ScratchDir::new("envoy_shell_raw_path");
+
+    #[cfg(windows)]
+    let raw_path =
+        env::var("ComSpec").unwrap_or_else(|_| String::from(r"C:\Windows\System32\cmd.exe"));
+    #[cfg(not(windows))]
+    let raw_path = String::from("/bin/sh");
+
+    #[cfg(windows)]
+    let shell_input = "exit\r\n";
+    #[cfg(not(windows))]
+    let shell_input = "exit\n";
+
+    let assert = base_command()
+        .args(["--shell", &raw_path])
+        .current_dir(scratch.path())
+        .write_stdin(shell_input)
+        .assert()
+        .success();
+    let stdout = stdout_text(&assert);
+
+    assert!(
+        stdout.contains(&format!(
+            "Entering shell inside {raw_path}'s resolved environment"
+        )),
+        "stdout was:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Failed to prepare environment"),
         "stdout was:\n{stdout}"
     );
 }

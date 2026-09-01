@@ -391,23 +391,24 @@ fn run_cli(cli: Cli, raw_argv: &[String]) -> i32 {
             .emit_and_return(0);
     };
 
-    run_command(
-        &registry,
-        command_name,
-        &cli.args,
-        ExecutionOptions {
-            bundles: bundles.as_deref(),
-            verbose,
-            inherit_env: cli.inherit_env,
-            env_allowlist: env_allowlist.as_deref(),
-            env_override: cli.env.as_deref(),
-            raw_argv,
-            invocation_start,
-            stack: stack.as_ref(),
-            incognito: cli.incognito,
-            tag: cli.tag.as_deref(),
-        },
-    )
+    let options = ExecutionOptions {
+        bundles: bundles.as_deref(),
+        verbose,
+        inherit_env: cli.inherit_env,
+        env_allowlist: env_allowlist.as_deref(),
+        env_override: cli.env.as_deref(),
+        raw_argv,
+        invocation_start,
+        stack: stack.as_ref(),
+        incognito: cli.incognito,
+        tag: cli.tag.as_deref(),
+    };
+
+    if cli.shell {
+        return run_shell(&registry, command_name, options);
+    }
+
+    run_command(&registry, command_name, &cli.args, options)
 }
 
 fn load_registry_for_cli(cli: &Cli, verbose: bool) -> Result<LoadedRegistry, i32> {
@@ -1089,6 +1090,150 @@ fn run_command(
         emission = emission.with_error_category(error_category);
     }
     emission.emit_and_return(exit_code)
+}
+
+/// Implements `envoy --shell COMMAND`: resolves COMMAND's environment the
+/// same way `run_command` would, but launches an interactive shell in it
+/// instead of COMMAND itself, for interactive inspection.
+fn run_shell(registry: &CommandRegistry, command_name: &str, options: ExecutionOptions<'_>) -> i32 {
+    let is_raw = is_raw_path(command_name);
+    let emission = || {
+        CommandRunEmission::new(
+            CommandKind::Shell,
+            options.raw_argv,
+            options.invocation_start,
+            options.incognito,
+        )
+        .with_stack(options.stack)
+        .with_bundles(options.bundles)
+        .with_command_name(command_name)
+        .with_tag(options.tag)
+    };
+
+    if !is_raw && registry.get(command_name).is_none() {
+        eprintln!("Error: Command '{command_name}' not found");
+        eprintln!("Run 'envoy --list' to see available commands");
+        return emission()
+            .with_error_category(ErrorCategory::CommandNotFound)
+            .emit_and_return(1);
+    }
+
+    if let Some(env_override) = options.env_override {
+        if registry.get(env_override).is_none() {
+            eprintln!("Error: Environment override command '{env_override}' not found");
+            eprintln!("Run 'envoy --list' to see available commands");
+            return emission()
+                .with_error_category(ErrorCategory::CommandNotFound)
+                .emit_and_return(1);
+        }
+    }
+
+    // Mirrors run_command's raw-path special case: a raw executable path
+    // with no --env override inherits the system env directly rather than
+    // going through prepare_env(), which would otherwise fail (or resolve
+    // an unrelated command's env) for a path that isn't a registered
+    // command at all.
+    let (env_map, command) = if is_raw && options.env_override.is_none() {
+        debug(
+            options.verbose,
+            &format!("Raw executable '{command_name}' with no env override; inheriting system env"),
+        );
+        (
+            env::vars().collect::<HashMap<String, String>>(),
+            CommandDefinition {
+                name: command_name.to_string(),
+                environment: Vec::new(),
+                alias: Some(vec![command_name.to_string()]),
+                bundle: None,
+                envoy_env_dir: None,
+                source_file: None,
+                platform_overrides: Vec::new(),
+            },
+        )
+    } else {
+        match prepare_env(
+            command_name,
+            registry,
+            options.bundles,
+            options.inherit_env,
+            options.env_allowlist,
+            options.env_override,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!("Error: {}", display_envoy_error(&error));
+                return emission()
+                    .with_error_category(ErrorCategory::EnvironmentBuildFailure)
+                    .emit_and_return(1);
+            }
+        }
+    };
+
+    let bundle_id = command.bundle.clone();
+    let shell_executable = resolve_shell_executable(&env_map);
+    let subprocess_argv = vec![shell_executable.clone()];
+
+    if let Err(error) = ProcessExecutor::resolve_executable(
+        Path::new(&shell_executable),
+        env_map.get("PATH").map(String::as_str),
+    ) {
+        eprintln!("Error: {}", display_envoy_error(&error));
+        return emission()
+            .with_command_argv(subprocess_argv)
+            .with_bundle_id(bundle_id)
+            .with_bundle_env(Some(&env_map))
+            .with_error_category(ErrorCategory::ExecutionFailure)
+            .emit_and_return(1);
+    }
+
+    println!("Entering shell inside {command_name}'s resolved environment. Type 'exit' to return.");
+
+    let mut config = WrapperConfig::new(shell_executable);
+    config.env = Some(env_map.clone());
+    config.inherit_env = false;
+    config.capture_output = false;
+    config.stream_output = false;
+    config.log_execution = options.verbose;
+    config.raise_on_error = false;
+
+    let mut wrapper = ApplicationWrapper::new(config);
+    let (exit_code, error_category) = match wrapper.run() {
+        Ok(result) if result.return_code == -2 => (130, None),
+        Ok(result) => (result.return_code.try_into().unwrap_or(1), None),
+        Err(error) => {
+            eprintln!("Error: {}", display_envoy_error(&error));
+            (1, Some(ErrorCategory::ExecutionFailure))
+        }
+    };
+
+    let mut emission = emission()
+        .with_command_argv(subprocess_argv)
+        .with_bundle_id(bundle_id)
+        .with_bundle_env(Some(&env_map));
+    if let Some(error_category) = error_category {
+        emission = emission.with_error_category(error_category);
+    }
+    emission.emit_and_return(exit_code)
+}
+
+/// Resolve which shell executable to launch for `--shell`, preferring the
+/// resolved environment's own `COMSPEC`/`SHELL` value (what a program
+/// launched in that environment would itself see) over the current
+/// process's, then falling back to a platform default.
+fn resolve_shell_executable(env_map: &HashMap<String, String>) -> String {
+    if cfg!(target_os = "windows") {
+        env_map
+            .get("COMSPEC")
+            .cloned()
+            .or_else(|| env::var("COMSPEC").ok())
+            .unwrap_or_else(|| "cmd.exe".to_string())
+    } else {
+        env_map
+            .get("SHELL")
+            .cloned()
+            .or_else(|| env::var("SHELL").ok())
+            .unwrap_or_else(|| "/bin/sh".to_string())
+    }
 }
 
 fn trace_command(
