@@ -31,6 +31,8 @@ en    [OPTIONS] [command] [args ...]
 | `--list-configs` | `-lc` | List all known configurable settings |
 | `--ignore-config` | `-ic` | Bypass user config for this run |
 | `--env ENV_COMMAND` | `-e` | Run command inside a different command's environment |
+| `--tag TAG` | | Attach a free-text tag to this invocation's telemetry record, if enabled. Truncated to 200 characters |
+| `--incognito` | | Disable telemetry for this invocation only |
 | `--shell` | | Drop into an interactive shell inside a command's resolved environment, instead of running it |
 | `--inherit-env` | `-i` | Inherit the full system environment (overrides closed mode) |
 | `--verbose` | `-v` | Enable verbose logging |
@@ -172,9 +174,10 @@ Run a command inside a different command's environment:
 en --env python cmd
 ```
 
-Opens `cmd.exe` with the `python` environment — useful for interactive
-inspection, though `--shell python` below is the more direct way to do
-exactly this.
+Opens `cmd.exe` with the `python` environment (Windows example; on
+Unix-like systems, use `en --env python sh` instead) — useful for
+interactive inspection, though `--shell python` below is the more direct
+way to do exactly this.
 
 ### `--shell`
 

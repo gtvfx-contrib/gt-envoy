@@ -2,6 +2,17 @@ use clap::{CommandFactory, Parser};
 
 const LEGACY_ALIAS_HELP: &str = "Legacy compatibility aliases: -cf, -sc, -gc, -lc, -ic";
 
+/// Maximum length, in Unicode scalar values (not bytes), for a `--tag`
+/// value before [`crate::app`] deterministically truncates it.
+///
+/// Telemetry is best-effort by design and never affects a command's own
+/// exit code (see `CommandRunEmission::emit_and_return`'s `--incognito`
+/// short-circuit) -- an overlong tag is capped rather than rejected, so a
+/// telemetry-metadata mistake can never fail an otherwise-successful
+/// invocation. This also keeps the on-disk/exported JSON payload bounded
+/// and avoids exceeding attribute-value limits some OTLP backends enforce.
+pub(crate) const MAX_TAG_LENGTH: usize = 200;
+
 #[derive(Debug, Parser)]
 #[command(
     name = "envoy",
@@ -80,6 +91,24 @@ pub(crate) struct Cli {
         help = "Run the target command inside a different command's environment."
     )]
     pub env: Option<String>,
+
+    // Help text's "200 characters" must stay in sync with MAX_TAG_LENGTH
+    // above -- clap's `help` needs a `'static str`, so it can't be built
+    // from the const directly without an extra macro dependency.
+    #[arg(
+        long,
+        value_name = "TAG",
+        help = "Attach a free-text tag to this invocation's telemetry record, \
+if telemetry is enabled. Truncated to 200 characters."
+    )]
+    pub tag: Option<String>,
+
+    #[arg(
+        long,
+        help = "Disable telemetry for this invocation only, regardless of the \
+usual env/config-driven opt-in."
+    )]
+    pub incognito: bool,
 
     #[arg(
         long,
@@ -269,10 +298,19 @@ fn option_value_expectation(token: &str) -> Option<ValueExpectation> {
 
 #[cfg(test)]
 mod tests {
-    use super::{canonicalize_legacy_aliases, normalize_argv};
+    use super::{canonicalize_legacy_aliases, normalize_argv, MAX_TAG_LENGTH};
 
     fn strings(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    /// The `--tag` flag's help text hardcodes "200 characters" (clap's
+    /// `help` needs a `'static str`, so it can't reference the const
+    /// directly) -- this pins `MAX_TAG_LENGTH` itself so a future change to
+    /// one is never silently missed in the other.
+    #[test]
+    fn max_tag_length_matches_the_value_documented_in_help_text() {
+        assert_eq!(MAX_TAG_LENGTH, 200);
     }
 
     #[test]
